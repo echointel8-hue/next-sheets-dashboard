@@ -16,6 +16,13 @@
   --brand-2: #0d9488;
   --brand-3: #15803d;
 
+  /* Wider-spread pair (same emerald hue, just a bigger lightness jump than
+     brand/brand-strong) for the single-color bar-chart gradient — the
+     regular pair reads as nearly flat at bar-sized fills, so this one
+     trades subtlety for a gradient that's actually visible. */
+  --brand-bar-from: #34d399;
+  --brand-bar-to: #065f46;
+
   /* Page wash: a barely-there sage tint behind the white cards, instead of
      flat neutral gray — reads as clinical/modern without fighting the
      white card surfaces or the categorical chart colors. */
@@ -56,6 +63,9 @@
     --brand-contrast: #062e21;
     --brand-2: #2dd4bf;
     --brand-3: #4ade80;
+
+    --brand-bar-from: #6ee7b7;
+    --brand-bar-to: #059669;
 
     --page-bg: #07120d;
 

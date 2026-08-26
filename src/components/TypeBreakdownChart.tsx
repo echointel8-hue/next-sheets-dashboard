@@ -39,13 +39,16 @@ export default function TypeBreakdownChart({
           margin={{ top: 4, right: 32, bottom: 4, left: 4 }}
           barCategoryGap={8}
         >
-          {/* Referenced by name below — a subtle left-to-right sheen along the
-              brand hue (never a second hue), for charts where every bar shares
-              one color and a flat fill would otherwise read as plain/dull. */}
+          {/* Referenced by name below — a left-to-right gradient within the
+              brand hue (never a second hue), for charts where every bar
+              shares one color and a flat fill would otherwise read as
+              plain/dull. Uses a wider-spread token pair than --brand/
+              --brand-strong — at bar-sized fills, that pair's ~2-step
+              lightness gap reads as essentially flat. */}
           <defs>
             <linearGradient id="brandBarGradient" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="var(--brand)" />
-              <stop offset="100%" stopColor="var(--brand-strong)" />
+              <stop offset="0%" stopColor="var(--brand-bar-from)" />
+              <stop offset="100%" stopColor="var(--brand-bar-to)" />
             </linearGradient>
           </defs>
           <XAxis type="number" hide />
