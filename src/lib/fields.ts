@@ -153,19 +153,21 @@ export const DISPLAY_COLUMNS: { key: ColumnKey; label: string }[] = [
 const REDACTED_SURNAME = "xxxx";
 
 /**
- * Masks the surname in a "title+firstname surname" string, e.g.
- * "นายสมชาย ใจดี" -> "นายสมชาย xxxx". Thai title prefixes attach directly
- * to the first name with no space (unlike the space before the surname),
- * so splitting on the first space reliably separates the honorific+first
- * name — which alone doesn't identify someone in a hospital directory —
- * from the surname, which does. A value with no space doesn't fit that
- * shape (e.g. a first-name-only entry), so it's left as-is rather than
- * guessed at.
+ * Masks the surname in a "title [+firstname] surname" string, e.g.
+ * "นาย สมชาย ใจดี" -> "นาย สมชาย xxxx" or "นายสมชาย ใจดี" -> "นายสมชาย xxxx".
+ * The surname is always the LAST space-separated token — some sheets have a
+ * space between the title prefix and the first name, some don't, but the
+ * surname is consistently last either way. Splitting on the *last* space
+ * (not the first) keeps everything before it — title, and first name if
+ * present — intact, and only masks that final token. A value with no space
+ * doesn't fit that shape (e.g. a first-name-only entry), so it's left as-is
+ * rather than guessed at.
  */
 export function redactSurname(fullName: string): string {
-  const spaceIndex = fullName.indexOf(" ");
-  if (spaceIndex === -1) return fullName;
-  return `${fullName.slice(0, spaceIndex)} ${REDACTED_SURNAME}`;
+  const trimmed = fullName.trim();
+  const spaceIndex = trimmed.lastIndexOf(" ");
+  if (spaceIndex === -1) return trimmed;
+  return `${trimmed.slice(0, spaceIndex)} ${REDACTED_SURNAME}`;
 }
 
 export function getCellValue(
