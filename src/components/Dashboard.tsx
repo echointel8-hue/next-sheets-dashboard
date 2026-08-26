@@ -192,32 +192,34 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
     return known;
   }, [filteredRows, fields, typeColorMap]);
 
-  // Fixed color per department, same stability rule as typeColorMap: ranked
-  // from the full unfiltered dataset so a department's color never changes
-  // as filters narrow the visible rows.
+  // Single flat color for every department bar, rather than one hue per
+  // department. There can be well over the categorical palette's 8-slot cap
+  // here (hospital departments run ~18) — cycling/reusing hues past 8 makes
+  // adjacent bars indistinguishable, especially for colorblind viewers (see
+  // the dataviz skill's anti-patterns: "cycling hues past 8"). This chart
+  // doesn't need color to carry identity anyway — each bar already has its
+  // own department-name label directly beside it — so every department maps
+  // to the same brand color and gets its own bar, with no "Other" bucket.
   const departmentColorMap = useMemo(() => {
     if (!snapshot || !fields) return new Map<string, string>();
-    const ranked = sortedByCountDesc(countBy(snapshot.rows, fields.department)).map(
-      ([dep]) => dep
-    );
-    return assignCategoryColors(ranked);
+    const map = new Map<string, string>();
+    for (const row of snapshot.rows) {
+      const dep = fieldValue(row, fields.department) || UNSPECIFIED;
+      if (!map.has(dep)) map.set(dep, "var(--brand)");
+    }
+    return map;
   }, [snapshot, fields]);
 
   // Totals by department — recomputed from filteredRows, so they change live
   // as both filters (department, equipment type) narrow the result set.
+  // Every distinct department gets its own bar (see departmentColorMap above
+  // for why this one doesn't need an 8-category cap / "Other" fold).
   const departmentBreakdown = useMemo(() => {
     if (!fields) return [];
-    const counts = countBy(filteredRows, fields.department);
-    const known: { label: string; count: number }[] = [];
-    let otherTotal = 0;
-    for (const [dep, count] of counts) {
-      if (departmentColorMap.has(dep)) known.push({ label: dep, count });
-      else otherTotal += count;
-    }
-    known.sort((a, b) => b.count - a.count);
-    if (otherTotal > 0) known.push({ label: OTHER_BUCKET, count: otherTotal });
-    return known;
-  }, [filteredRows, fields, departmentColorMap]);
+    return sortedByCountDesc(countBy(filteredRows, fields.department)).map(
+      ([label, count]) => ({ label, count })
+    );
+  }, [filteredRows, fields]);
 
   const filteredDepartmentCount = useMemo(() => {
     if (!fields) return 0;
