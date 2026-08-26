@@ -150,12 +150,33 @@ export const DISPLAY_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: "equipmentType", label: "ประเภทครุภัณฑ์" },
 ];
 
+const REDACTED_SURNAME = "xxxx";
+
+/**
+ * Masks the surname in a "title+firstname surname" string, e.g.
+ * "นายสมชาย ใจดี" -> "นายสมชาย xxxx". Thai title prefixes attach directly
+ * to the first name with no space (unlike the space before the surname),
+ * so splitting on the first space reliably separates the honorific+first
+ * name — which alone doesn't identify someone in a hospital directory —
+ * from the surname, which does. A value with no space doesn't fit that
+ * shape (e.g. a first-name-only entry), so it's left as-is rather than
+ * guessed at.
+ */
+export function redactSurname(fullName: string): string {
+  const spaceIndex = fullName.indexOf(" ");
+  if (spaceIndex === -1) return fullName;
+  return `${fullName.slice(0, spaceIndex)} ${REDACTED_SURNAME}`;
+}
+
 export function getCellValue(
   row: EquipmentRow,
   key: ColumnKey,
   fields: FieldMap
 ): string {
-  if (key === "fullName") return getFullName(row, fields);
+  // Redacted here (not in getFullName) so getFullName stays available as
+  // the raw accessor — getCellValue is what's actually wired into the
+  // table/card display, so this is the one place that needs to mask PII.
+  if (key === "fullName") return redactSurname(getFullName(row, fields));
   const header = fields[key];
   return header ? (row[header] ?? "").trim() : "";
 }

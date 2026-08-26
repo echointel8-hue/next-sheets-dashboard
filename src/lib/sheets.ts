@@ -1,5 +1,5 @@
 import { google } from "googleapis";
-import { resolveFields, type EquipmentRow, type FieldMap } from "@/lib/fields";
+import { redactSurname, resolveFields, type EquipmentRow, type FieldMap } from "@/lib/fields";
 
 export type { EquipmentRow, FieldMap };
 
@@ -84,11 +84,28 @@ export async function getEquipmentData(): Promise<SheetSnapshot> {
       return row;
     });
 
+  const fields = resolveFields(headers);
+
+  // Redact the responsible-person surname here, server-side, before this
+  // data ever leaves the server. getCellValue() in fields.ts also masks it
+  // again for display, but that alone still lets the true surname reach the
+  // browser inside the page's RSC payload (visible via view-source or
+  // devtools even though the rendered UI shows "xxxx"). Doing it on the raw
+  // row means the real surname is never sent over the wire at all.
+  const nameHeaderToRedact = fields.fullNameHeader ?? fields.nameHeader;
+  if (nameHeaderToRedact) {
+    for (const row of rows) {
+      if (row[nameHeaderToRedact]) {
+        row[nameHeaderToRedact] = redactSurname(row[nameHeaderToRedact]);
+      }
+    }
+  }
+
   return {
     tab,
     headers,
     rows,
-    fields: resolveFields(headers),
+    fields,
     fetchedAt: new Date().toISOString(),
   };
 }
