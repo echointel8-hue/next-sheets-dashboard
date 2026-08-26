@@ -26,7 +26,7 @@ const PRODUCTION_ONLY_HEADERS = [
       "default-src 'self'",
       "script-src 'self'",
       // Charts/inline color tokens rely on React's inline `style` attribute.
-      "style-src 'self' 'unsafe-inline'",
+      "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
       "img-src 'self' data:",
       "font-src 'self' data:",
       "connect-src 'self'",
