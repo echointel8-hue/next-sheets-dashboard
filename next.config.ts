@@ -19,23 +19,7 @@ const BASE_SECURITY_HEADERS = [
   { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
 ];
 
-const PRODUCTION_ONLY_HEADERS = [
-  {
-    key: "Content-Security-Policy",
-    value: [
-      "default-src 'self'",
-      "script-src 'self'",
-      // Charts/inline color tokens rely on React's inline `style` attribute.
-      "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
-      "img-src 'self' data:",
-      "font-src 'self' data:",
-      "connect-src 'self'",
-      "frame-ancestors 'none'",
-      "base-uri 'self'",
-      "form-action 'self'",
-    ].join("; "),
-  },
-];
+const PRODUCTION_ONLY_HEADERS = [];
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
