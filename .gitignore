@@ -47,3 +47,6 @@ next-env.d.ts
 # inside; these rules close that gap for good.
 *env*.bak*
 _to_delete/
+
+# local safety backups (git bundles), never meant for the repo itself
+.backups/
