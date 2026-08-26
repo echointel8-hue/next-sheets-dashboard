@@ -3,6 +3,40 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Brand — hospital green. Drives buttons, focus rings, header/section
+     accents and the logo ring. Kept separate from the chart categorical
+     palette below: category colors must stay tied to data (equipment
+     type), not to brand, or the chart legend stops being trustworthy. */
+  --brand: #047857;
+  --brand-strong: #065f46;
+  --brand-contrast: #ffffff;
+  /* Secondary brand tones (teal, forest) — used only to give the KPI row's
+     icon badges gentle variety while staying inside the green family. */
+  --brand-2: #0d9488;
+  --brand-3: #15803d;
+
+  /* Page wash: a barely-there sage tint behind the white cards, instead of
+     flat neutral gray — reads as clinical/modern without fighting the
+     white card surfaces or the categorical chart colors. */
+  --page-bg: #f5f9f7;
+
+  /* Chart tokens (dataviz skill palette) — categorical fallback for
+     status values that don't match a known semantic role. */
+  --cat-1: #2a78d6;
+  --cat-2: #eb6834;
+  --cat-3: #1baf7a;
+  --cat-4: #eda100;
+  --cat-5: #e87ba4;
+  --cat-6: #008300;
+  --cat-7: #4a3aa7;
+  --cat-8: #e34948;
+
+  --chart-surface: #ffffff;
+  --chart-text-secondary: #52514e;
+  --chart-text-muted: #898781;
+  --chart-border: rgba(11, 11, 11, 0.1);
+  --chart-grid: #e1e0d9;
 }
 
 @theme inline {
@@ -16,6 +50,29 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    --brand: #10b981;
+    --brand-strong: #34d399;
+    --brand-contrast: #062e21;
+    --brand-2: #2dd4bf;
+    --brand-3: #4ade80;
+
+    --page-bg: #07120d;
+
+    --cat-1: #3987e5;
+    --cat-2: #d95926;
+    --cat-3: #199e70;
+    --cat-4: #c98500;
+    --cat-5: #d55181;
+    --cat-6: #008300;
+    --cat-7: #9085e9;
+    --cat-8: #e66767;
+
+    --chart-surface: #18181b;
+    --chart-text-secondary: #c3c2b7;
+    --chart-text-muted: #898781;
+    --chart-border: rgba(255, 255, 255, 0.1);
+    --chart-grid: #2c2c2a;
   }
 }
 
