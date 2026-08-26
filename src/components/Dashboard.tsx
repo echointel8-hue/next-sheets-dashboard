@@ -53,9 +53,15 @@ function isError(data: LoadResult): data is { error: string } {
 
 function formatTime(iso: string) {
   try {
+    // Pin the timezone explicitly — Vercel's server runs in UTC while
+    // browsers here run in Asia/Bangkok (UTC+7). Without a fixed timeZone,
+    // toLocaleString() uses each runtime's own local zone, so the server-
+    // rendered text and the client's first render disagree by 7 hours,
+    // which React reports as a hydration mismatch (minified error #418).
     return new Date(iso).toLocaleString("th-TH", {
       dateStyle: "medium",
       timeStyle: "short",
+      timeZone: "Asia/Bangkok",
     });
   } catch {
     return iso;
