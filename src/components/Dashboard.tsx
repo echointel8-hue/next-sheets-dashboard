@@ -205,7 +205,10 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
     const map = new Map<string, string>();
     for (const row of snapshot.rows) {
       const dep = fieldValue(row, fields.department) || UNSPECIFIED;
-      if (!map.has(dep)) map.set(dep, "var(--brand)");
+      // A subtle brand-hued gradient (defined once inside TypeBreakdownChart)
+      // rather than a flat fill — still exactly one color family for every
+      // bar, just with a bit of visual life instead of reading as plain.
+      if (!map.has(dep)) map.set(dep, "url(#brandBarGradient)");
     }
     return map;
   }, [snapshot, fields]);
