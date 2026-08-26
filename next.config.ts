@@ -19,7 +19,42 @@ const BASE_SECURITY_HEADERS = [
   { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
 ];
 
-const PRODUCTION_ONLY_HEADERS = [];
+// One Content-Security-Policy header, one entry per directive — a prior
+// hand-edit accidentally listed "script-src" twice and dropped "style-src"
+// entirely, which made the browser blank the whole policy's inline
+// allowances (visible in devtools as "Ignoring duplicate ... 'script-src'"
+// plus every inline style/script call being blocked). Keep this as a single
+// source of truth per directive so that can't happen again.
+//
+// 'unsafe-inline' is required on both directives, not just style-src:
+// - style-src: React's inline `style={{...}}` attribute (used throughout
+//   Dashboard.tsx and the recharts chart) has no nonce/hash alternative —
+//   CSP nonces don't cover the style *attribute*, only <style>/<link> tags.
+// - script-src: Next.js's App Router streams Suspense boundaries (this app
+//   wraps <DashboardData> in <Suspense>) by pushing RSC flight data through
+//   inline <script> tags it injects itself. Without an allowance here those
+//   get blocked too, breaking hydration (seen as "Minified React error
+//   #412"). The strict, nonce-based version of this is documented at
+//   https://nextjs.org/docs/app/guides/content-security-policy but needs a
+//   request-scoped nonce via middleware — 'unsafe-inline' is the simpler,
+//   still-meaningful tradeoff for an internal hospital-LAN tool: it still
+//   blocks loading scripts/styles/fonts/frames from any other origin.
+const PRODUCTION_ONLY_HEADERS = [
+  {
+    key: "Content-Security-Policy",
+    value: [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data:",
+      "font-src 'self' data:",
+      "connect-src 'self'",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join("; "),
+  },
+];
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
