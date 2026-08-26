@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# credential/env backups — the pattern above (.env*) only matches files that
+# start with a literal dot, so a backup copy named without the leading dot
+# (e.g. "env.local.bak.<timestamp>") slips through untracked. One such file
+# was accidentally committed with real Google service-account credentials
+# inside; these rules close that gap for good.
+*env*.bak*
+_to_delete/
