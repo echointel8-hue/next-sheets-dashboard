@@ -144,8 +144,12 @@ export const DISPLAY_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: "timestamp", label: "ประทับเวลา" },
   { key: "department", label: "ข้อมูลกลุ่มงาน / งานที่สังกัด" },
   {
+    // Display-only label — shown as the table/card header. Kept distinct
+    // from the header-matching patterns above (which still match against
+    // the sheet's actual, longer Google Form question text) so this can
+    // read cleanly without touching how the column is resolved.
     key: "fullName",
-    label: "คำนำหน้า+ชื่อ-นามสกุล (ผู้ใช้งานหลัก / ผู้รับผิดชอบครุภัณฑ์)",
+    label: "ชื่อ-นามสกุล ผู้ใช้งาน / ผู้รับผิดชอบครุภัณฑ์",
   },
   { key: "equipmentType", label: "ประเภทครุภัณฑ์" },
 ];
