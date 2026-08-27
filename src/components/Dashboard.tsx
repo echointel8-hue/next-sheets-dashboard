@@ -249,11 +249,11 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
               className="h-11 w-11 shrink-0 rounded-2xl object-cover ring-1 ring-zinc-200 dark:ring-zinc-700"
             />
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+              <h1 className="text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
                 ทะเบียนครุภัณฑ์คอมพิวเตอร์ โรงพยาบาลท่าตะเกียบ
               </h1>
-              <p className="mt-0.5 flex items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400">
-                <Clock size={14} strokeWidth={2} aria-hidden="true" />
+              <p className="mt-0.5 flex items-center gap-1.5 text-base text-zinc-500 dark:text-zinc-400">
+                <Clock size={16} strokeWidth={2} aria-hidden="true" />
                 {snapshot ? (
                   <>
                     อัปเดตล่าสุด{" "}
@@ -270,10 +270,10 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
             type="button"
             onClick={refresh}
             disabled={loading}
-            className="flex h-10 items-center justify-center gap-2 self-start rounded-full bg-[var(--brand)] px-5 text-sm font-medium text-[var(--brand-contrast)] shadow-sm transition-colors hover:bg-[var(--brand-strong)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:opacity-60 sm:self-auto"
+            className="flex h-12 items-center justify-center gap-2 self-start rounded-full bg-[var(--brand)] px-6 text-base font-medium text-[var(--brand-contrast)] shadow-sm transition-colors hover:bg-[var(--brand-strong)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:opacity-60 sm:self-auto"
           >
             <RefreshCw
-              size={16}
+              size={18}
               strokeWidth={2}
               className={`motion-reduce:animate-none ${loading ? "animate-spin" : ""}`}
               aria-hidden="true"
@@ -287,15 +287,15 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
             role="alert"
             className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-900 shadow-sm dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200"
           >
-            <AlertTriangle size={20} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
-            <div className="flex-1 text-sm leading-6">
+            <AlertTriangle size={22} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <div className="flex-1 text-base leading-7">
               <p className="font-medium">เชื่อมต่อ Google Sheets ไม่สำเร็จ</p>
               <p className="mt-1 text-red-800/90 dark:text-red-300/90">{data.error}</p>
               <button
                 type="button"
                 onClick={refresh}
                 disabled={loading}
-                className="mt-3 rounded-full border border-red-300 bg-white px-4 py-1.5 text-xs font-medium text-red-900 transition-colors hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-60 dark:border-red-800 dark:bg-red-950 dark:text-red-200 dark:hover:bg-red-900/60"
+                className="mt-3 rounded-full border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-900 transition-colors hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-60 dark:border-red-800 dark:bg-red-950 dark:text-red-200 dark:hover:bg-red-900/60"
               >
                 {loading ? "กำลังลองใหม่..." : "ลองอีกครั้ง"}
               </button>
@@ -308,8 +308,8 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
             role="status"
             className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200"
           >
-            <AlertTriangle size={18} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
-            <p className="text-sm leading-6">
+            <AlertTriangle size={20} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <p className="text-base leading-7">
               ไม่พบคอลัมน์ต่อไปนี้ในชีต — ชื่อหัวคอลัมน์ในชีตอาจไม่ตรงกับที่คาดไว้:{" "}
               {missingColumns
                 .map((key) => DISPLAY_COLUMNS.find((c) => c.key === key)?.label ?? key)
@@ -319,7 +319,7 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
         )}
 
         {snapshot && snapshot.rows.length === 0 && (
-          <div className={`${CARD} p-8 text-center text-sm text-zinc-500 dark:text-zinc-400`}>
+          <div className={`${CARD} p-8 text-center text-base text-zinc-500 dark:text-zinc-400`}>
             ยังไม่มีข้อมูลในชีต &ldquo;{snapshot.tab}&rdquo;
           </div>
         )}
@@ -330,8 +330,8 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
           >
             {/* Filters */}
             <div className={`${CARD} flex flex-col gap-3 p-4`}>
-              <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-400 dark:text-zinc-500">
-                <Filter size={13} strokeWidth={2} aria-hidden="true" />
+              <div className="flex items-center gap-1.5 text-sm font-medium text-zinc-400 dark:text-zinc-500">
+                <Filter size={15} strokeWidth={2} aria-hidden="true" />
                 ตัวกรองข้อมูล
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -351,14 +351,14 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                   <button
                     type="button"
                     onClick={clearFilters}
-                    className="flex h-9 items-center justify-center gap-1 self-start rounded-lg border border-zinc-200 px-3 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:self-auto"
+                    className="flex h-11 items-center justify-center gap-1 self-start rounded-lg border border-zinc-200 px-3 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:self-auto"
                   >
-                    <X size={14} strokeWidth={2} aria-hidden="true" />
+                    <X size={16} strokeWidth={2} aria-hidden="true" />
                     ล้างตัวกรอง
                   </button>
                 )}
                 <span
-                  className="text-xs text-zinc-400 sm:ml-auto sm:self-center"
+                  className="text-sm text-zinc-400 sm:ml-auto sm:self-center"
                   aria-live="polite"
                 >
                   {filteredRows.length.toLocaleString("th-TH")} / {snapshot.rows.length.toLocaleString("th-TH")} รายการ
@@ -393,8 +393,8 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                 what's plotted here immediately. */}
             {departmentBreakdown.length > 0 && (
               <figure className={`${CARD} p-5`}>
-                <figcaption className="mb-4 flex items-center gap-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  <BarChart3 size={16} strokeWidth={2} className="text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                <figcaption className="mb-4 flex items-center gap-2 text-base font-semibold text-zinc-700 dark:text-zinc-300">
+                  <BarChart3 size={18} strokeWidth={2} className="text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
                   ผลรวมแยกตามกลุ่มงาน / งานที่สังกัด
                 </figcaption>
                 <TypeBreakdownChart data={departmentBreakdown} colorMap={departmentColorMap} />
@@ -404,8 +404,8 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
             {/* Totals by equipment type */}
             {typeBreakdown.length > 0 && (
               <figure className={`${CARD} p-5`}>
-                <figcaption className="mb-4 flex items-center gap-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  <BarChart3 size={16} strokeWidth={2} className="text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                <figcaption className="mb-4 flex items-center gap-2 text-base font-semibold text-zinc-700 dark:text-zinc-300">
+                  <BarChart3 size={18} strokeWidth={2} className="text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
                   ผลรวมแยกตามประเภทครุภัณฑ์
                 </figcaption>
                 <TypeBreakdownChart data={typeBreakdown} colorMap={typeColorMap} />
@@ -415,8 +415,8 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
             {/* Records */}
             <div className={CARD}>
               <div className="flex items-center gap-2 border-b border-emerald-900/10 px-4 py-3.5 dark:border-emerald-400/10 sm:px-5">
-                <ListChecks size={16} strokeWidth={2} className="text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
-                <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">รายการทั้งหมด</h2>
+                <ListChecks size={18} strokeWidth={2} className="text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                <h2 className="text-base font-semibold text-zinc-700 dark:text-zinc-300">รายการทั้งหมด</h2>
               </div>
 
               {/* Mobile: card list (avoids forcing a 5-column table into a narrow viewport) */}
@@ -434,15 +434,15 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                         </span>
                         {typeValue && (
                           <span
-                            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium text-zinc-700 dark:text-zinc-200"
+                            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm font-medium text-zinc-700 dark:text-zinc-200"
                             style={typeBadgeStyle(color)}
                           >
-                            <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} aria-hidden="true" />
+                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} aria-hidden="true" />
                             {typeValue}
                           </span>
                         )}
                       </div>
-                      <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-sm text-zinc-500 dark:text-zinc-400">
                         <dt className="font-medium">ประทับเวลา</dt>
                         <dd>{getCellValue(row, "timestamp", fields) || "—"}</dd>
                         <dt className="font-medium">กลุ่มงาน/สังกัด</dt>
@@ -452,18 +452,18 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                   );
                 })}
                 {filteredRows.length === 0 && (
-                  <li className="px-4 py-8 text-center text-sm text-zinc-400">ไม่พบรายการที่ตรงกับตัวกรอง</li>
+                  <li className="px-4 py-8 text-center text-base text-zinc-400">ไม่พบรายการที่ตรงกับตัวกรอง</li>
                 )}
               </ul>
 
               {/* Desktop: full table */}
               <div className="hidden max-w-full overflow-x-auto sm:block">
-                <table className="w-full text-left text-sm">
+                <table className="w-full text-left text-base">
                   <caption className="sr-only">
                     ตารางรายการครุภัณฑ์ {filteredRows.length.toLocaleString("th-TH")} รายการ
                   </caption>
                   <thead>
-                    <tr className="border-b border-emerald-900/15 text-xs uppercase tracking-wide text-zinc-400 dark:border-emerald-400/15">
+                    <tr className="border-b border-emerald-900/15 text-sm uppercase tracking-wide text-zinc-400 dark:border-emerald-400/15">
                       {DISPLAY_COLUMNS.map((col) => (
                         <th key={col.key} scope="col" className="whitespace-nowrap px-4 py-3 font-medium">
                           {col.label}
@@ -484,11 +484,11 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                             return (
                               <td key={col.key} className="whitespace-nowrap px-4 py-2.5">
                                 <span
-                                  className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium text-zinc-700 dark:text-zinc-200"
+                                  className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm font-medium text-zinc-700 dark:text-zinc-200"
                                   style={typeBadgeStyle(color)}
                                 >
                                   <span
-                                    className="h-1.5 w-1.5 rounded-full"
+                                    className="h-2 w-2 rounded-full"
                                     style={{ backgroundColor: color }}
                                     aria-hidden="true"
                                   />
@@ -542,15 +542,15 @@ function StatTile({
   return (
     <div className={`${CARD} flex items-center gap-3 p-4`}>
       <span
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full"
         style={{ backgroundColor: `color-mix(in srgb, ${color} 15%, transparent)` }}
         aria-hidden="true"
       >
-        <Icon size={18} strokeWidth={2} style={{ color }} />
+        <Icon size={20} strokeWidth={2} style={{ color }} />
       </span>
       <div className="min-w-0">
-        <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">{label}</p>
-        <p className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">{value}</p>
+        <p className="truncate text-sm text-zinc-500 dark:text-zinc-400">{label}</p>
+        <p className="text-2xl font-bold text-zinc-950 dark:text-zinc-50">{value}</p>
       </div>
     </div>
   );
@@ -568,12 +568,12 @@ function FilterSelect({
   options: { value: string; count: number }[];
 }) {
   return (
-    <label className="flex flex-1 flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400 sm:max-w-xs">
+    <label className="flex flex-1 flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-xs">
       {label}
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-9 rounded-lg border border-zinc-200 bg-white px-2.5 text-sm text-zinc-900 transition-colors hover:border-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:border-zinc-600"
+        className="h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 transition-colors hover:border-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:border-zinc-600"
       >
         <option value="all">ทั้งหมด</option>
         {options.map((opt) => (

@@ -1,6 +1,19 @@
 @import "tailwindcss";
 
 :root {
+  /* Base font size, in %, so it scales relative to the visitor's own
+     browser/OS default rather than overriding it outright (some visitors —
+     including older users — already raise their browser's default size for
+     accessibility, and a fixed px value here would ignore that instead of
+     building on it). Tailwind's text-size, spacing and gap utilities are
+     rem-based, so raising the root size here grows body text, labels,
+     padding and gaps together, proportionally, across the whole page at
+     once. Chart text inside the SVG (Recharts) and icon glyphs use literal
+     px props instead of rem, so those are sized up separately where
+     they're defined (TypeBreakdownChart.tsx and the lucide-react size
+     props below). */
+  font-size: 118.75%;
+
   --background: #ffffff;
   --foreground: #171717;
 
