@@ -248,20 +248,37 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
               priority
               className="h-11 w-11 shrink-0 rounded-2xl object-cover ring-1 ring-zinc-200 dark:ring-zinc-700"
             />
-            <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+            <div className="min-w-0">
+              {/* Sized down on narrow screens and up from there — at the
+                  desktop-only size this used to carry on mobile too, a
+                  logo-width column left too little room for this long a
+                  title, forcing 4+ cramped wrapped lines. leading-tight
+                  keeps a 2-line wrap (still expected on a phone, for a
+                  name this long) looking deliberate instead of cramped. */}
+              <h1 className="text-xl font-bold leading-tight tracking-tight text-zinc-950 dark:text-zinc-50 sm:text-2xl md:text-3xl">
                 ทะเบียนครุภัณฑ์คอมพิวเตอร์ โรงพยาบาลท่าตะเกียบ
               </h1>
-              <p className="mt-0.5 flex items-center gap-1.5 text-base text-zinc-500 dark:text-zinc-400">
-                <Clock size={16} strokeWidth={2} aria-hidden="true" />
+              {/* Each date/time and tab-name chunk is its own no-wrap unit
+                  inside a wrapping flex row, so a narrow screen wraps
+                  *between* phrases (a clean two-line result) instead of
+                  splitting a phrase mid-word wherever it happens to run
+                  out of width. */}
+              <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm text-zinc-500 dark:text-zinc-400 sm:text-base">
                 {snapshot ? (
                   <>
-                    อัปเดตล่าสุด{" "}
-                    <time dateTime={snapshot.fetchedAt}>{formatTime(snapshot.fetchedAt)}</time> · แท็บ &ldquo;
-                    {snapshot.tab}&rdquo;
+                    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                      <Clock size={16} strokeWidth={2} aria-hidden="true" />
+                      อัปเดตล่าสุด <time dateTime={snapshot.fetchedAt}>{formatTime(snapshot.fetchedAt)}</time>
+                    </span>
+                    <span className="whitespace-nowrap">
+                      · แท็บ &ldquo;{snapshot.tab}&rdquo;
+                    </span>
                   </>
                 ) : (
-                  "ยังไม่มีข้อมูล"
+                  <span className="inline-flex items-center gap-1.5">
+                    <Clock size={16} strokeWidth={2} aria-hidden="true" />
+                    ยังไม่มีข้อมูล
+                  </span>
                 )}
               </p>
             </div>
@@ -426,22 +443,27 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                   const color = typeValue ? typeColorMap.get(typeValue) ?? OTHER_COLOR : OTHER_COLOR;
                   return (
                     <li key={i} className="flex flex-col gap-2 p-4">
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                          {getCellValue(row, "fullName", fields) || (
-                            <span className="text-zinc-300 dark:text-zinc-600">—</span>
-                          )}
-                        </span>
-                        {typeValue && (
-                          <span
-                            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm font-medium text-zinc-700 dark:text-zinc-200"
-                            style={typeBadgeStyle(color)}
-                          >
-                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} aria-hidden="true" />
-                            {typeValue}
-                          </span>
+                      {/* Name and the equipment-type badge stack (rather
+                          than sharing one row) because a real equipment
+                          type label ("ชุดคอมพิวเตอร์ตั้งโต๊ะ (Desktop PC)")
+                          is long enough that fitting both side by side on
+                          a phone width squeezed the name down to wrapping
+                          one or two characters per line, while the
+                          shrink-0 badge overflowed past the card edge. */}
+                      <span className="break-words font-medium text-zinc-900 dark:text-zinc-100">
+                        {getCellValue(row, "fullName", fields) || (
+                          <span className="text-zinc-300 dark:text-zinc-600">—</span>
                         )}
-                      </div>
+                      </span>
+                      {typeValue && (
+                        <span
+                          className="inline-flex max-w-full items-center gap-1.5 self-start rounded-full border px-2.5 py-1 text-sm font-medium text-zinc-700 dark:text-zinc-200"
+                          style={typeBadgeStyle(color)}
+                        >
+                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} aria-hidden="true" />
+                          <span className="break-words">{typeValue}</span>
+                        </span>
+                      )}
                       <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-sm text-zinc-500 dark:text-zinc-400">
                         <dt className="font-medium">ประทับเวลา</dt>
                         <dd>{getCellValue(row, "timestamp", fields) || "—"}</dd>

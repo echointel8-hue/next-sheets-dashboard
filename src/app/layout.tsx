@@ -1,15 +1,27 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Noto_Sans_Thai } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Inter covers the Latin glyphs (numbers, "Desktop PC"-style labels) with
+// the crisp, modern grotesque look common to polished dashboard UIs; Noto
+// Sans Thai is Google's own purpose-built Thai UI typeface — properly
+// designed Thai letterforms instead of the plain system-fallback look Thai
+// text got when the body font was hard-coded to Arial. Listed together in
+// body's font-family below, the browser picks per-glyph: Inter renders
+// anything it has (Latin/numerals), Noto Sans Thai covers the rest — no
+// visible seam between scripts. Both are open-licensed Google Fonts, not
+// anything lifted from a particular product's own (usually proprietary)
+// typeface.
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const notoSansThai = Noto_Sans_Thai({
+  variable: "--font-noto-thai",
+  subsets: ["thai", "latin"],
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -28,7 +40,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="th"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${inter.variable} ${notoSansThai.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         {/* Skip link: hidden until keyboard-focused, lets keyboard/screen-reader
