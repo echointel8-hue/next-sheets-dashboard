@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type CSSProperties } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
   AlertTriangle,
@@ -11,6 +12,7 @@ import {
   Clock,
   Filter,
   ListChecks,
+  LogIn,
   Package,
   RefreshCw,
   X,
@@ -19,6 +21,7 @@ import type { SheetSnapshot } from "@/lib/sheets";
 import {
   DISPLAY_COLUMNS,
   getCellValue,
+  isHidden,
   unresolvedColumns,
   type EquipmentRow,
   type FieldMap,
@@ -142,39 +145,60 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
     [fields]
   );
 
+  // Equipment that's been "จำหน่าย" (disposed) or "ลบ" (deleted, bootstrap
+  // superadmin only) through /manage stays in the sheet as a permanent
+  // record (soft delete — see fields.ts isHidden) but isn't part of the
+  // *current* registry this public dashboard shows or counts.
+  const activeRecords = useMemo(
+    () => (snapshot ? snapshot.rows.filter((r) => !isHidden(r.data, snapshot.fields)) : []),
+    [snapshot]
+  );
+
+  // rawRows strips the row-number pairing back down to plain EquipmentRow[]
+  // for the aggregate helpers below, which don't care which physical row a
+  // value came from.
+  const rawRows = useMemo(() => activeRecords.map((r) => r.data), [activeRecords]);
+
   const departmentOptions = useMemo(
-    () => (snapshot ? uniqueOptions(snapshot.rows, fields?.department ?? null) : []),
-    [snapshot, fields]
+    () => (snapshot ? uniqueOptions(rawRows, fields?.department ?? null) : []),
+    [snapshot, rawRows, fields]
   );
   const equipmentTypeOptions = useMemo(
-    () => (snapshot ? uniqueOptions(snapshot.rows, fields?.equipmentType ?? null) : []),
-    [snapshot, fields]
+    () => (snapshot ? uniqueOptions(rawRows, fields?.equipmentType ?? null) : []),
+    [snapshot, rawRows, fields]
   );
 
   // Fixed color per equipment type, computed once from the full unfiltered
   // dataset so colors stay stable as filters narrow the results.
   const typeColorMap = useMemo(() => {
     if (!snapshot || !fields) return new Map<string, string>();
-    const ranked = sortedByCountDesc(countBy(snapshot.rows, fields.equipmentType)).map(
+    const ranked = sortedByCountDesc(countBy(rawRows, fields.equipmentType)).map(
       ([type]) => type
     );
     return assignCategoryColors(ranked);
-  }, [snapshot, fields]);
+  }, [snapshot, fields, rawRows]);
 
-  const filteredRows = useMemo(() => {
+  const filteredRecords = useMemo(() => {
     if (!snapshot || !fields) return [];
-    return snapshot.rows.filter((row) => {
+    return activeRecords.filter((record) => {
       if (department !== "all") {
-        const v = fieldValue(row, fields.department) || UNSPECIFIED;
+        const v = fieldValue(record.data, fields.department) || UNSPECIFIED;
         if (v !== department) return false;
       }
       if (equipmentType !== "all") {
-        const v = fieldValue(row, fields.equipmentType) || UNSPECIFIED;
+        const v = fieldValue(record.data, fields.equipmentType) || UNSPECIFIED;
         if (v !== equipmentType) return false;
       }
       return true;
     });
-  }, [snapshot, fields, department, equipmentType]);
+  }, [snapshot, fields, department, equipmentType, activeRecords]);
+
+  // Kept alongside filteredRecords rather than rewriting every consumer —
+  // the aggregate helpers below (typeBreakdown, departmentBreakdown, ...)
+  // were written for plain EquipmentRow[] and don't need a row number, so
+  // only the two render loops that add the edit button use filteredRecords
+  // directly.
+  const filteredRows = useMemo(() => filteredRecords.map((r) => r.data), [filteredRecords]);
 
   // Totals by equipment type — recomputed from filteredRows, so they change
   // live as the filters above narrow the result set.
@@ -203,7 +227,7 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
   const departmentColorMap = useMemo(() => {
     if (!snapshot || !fields) return new Map<string, string>();
     const map = new Map<string, string>();
-    for (const row of snapshot.rows) {
+    for (const row of rawRows) {
       const dep = fieldValue(row, fields.department) || UNSPECIFIED;
       // A subtle brand-hued gradient (defined once inside TypeBreakdownChart)
       // rather than a flat fill — still exactly one color family for every
@@ -211,7 +235,7 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
       if (!map.has(dep)) map.set(dep, "url(#brandBarGradient)");
     }
     return map;
-  }, [snapshot, fields]);
+  }, [snapshot, fields, rawRows]);
 
   // Totals by department — recomputed from filteredRows, so they change live
   // as both filters (department, equipment type) narrow the result set.
@@ -238,6 +262,15 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
       className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 sm:px-8 lg:px-12"
     >
       <div className="flex w-full max-w-6xl flex-col gap-6">
+        <div className="flex justify-end">
+          <Link
+            href="/login"
+            className="inline-flex items-center gap-1.5 text-sm text-zinc-400 transition-colors hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+          >
+            <LogIn size={14} strokeWidth={2} aria-hidden="true" />
+            เข้าสู่ระบบจัดการ
+          </Link>
+        </div>
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <Image
@@ -378,7 +411,7 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                   className="text-sm text-zinc-400 sm:ml-auto sm:self-center"
                   aria-live="polite"
                 >
-                  {filteredRows.length.toLocaleString("th-TH")} / {snapshot.rows.length.toLocaleString("th-TH")} รายการ
+                  {filteredRows.length.toLocaleString("th-TH")} / {activeRecords.length.toLocaleString("th-TH")} รายการ
                 </span>
               </div>
             </div>
@@ -438,11 +471,12 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
 
               {/* Mobile: card list (avoids forcing a 5-column table into a narrow viewport) */}
               <ul className="divide-y divide-zinc-100 dark:divide-zinc-800/60 sm:hidden">
-                {filteredRows.map((row, i) => {
+                {filteredRecords.map((record) => {
+                  const row = record.data;
                   const typeValue = getCellValue(row, "equipmentType", fields);
                   const color = typeValue ? typeColorMap.get(typeValue) ?? OTHER_COLOR : OTHER_COLOR;
                   return (
-                    <li key={i} className="flex flex-col gap-2 p-4">
+                    <li key={record.rowNumber} className="flex flex-col gap-2 p-4">
                       {/* Name and the equipment-type badge stack (rather
                           than sharing one row) because a real equipment
                           type label ("ชุดคอมพิวเตอร์ตั้งโต๊ะ (Desktop PC)")
@@ -473,7 +507,7 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                     </li>
                   );
                 })}
-                {filteredRows.length === 0 && (
+                {filteredRecords.length === 0 && (
                   <li className="px-4 py-8 text-center text-base text-zinc-400">ไม่พบรายการที่ตรงกับตัวกรอง</li>
                 )}
               </ul>
@@ -494,45 +528,48 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredRows.map((row, i) => (
-                      <tr
-                        key={i}
-                        className="border-b border-zinc-100 transition-colors last:border-0 hover:bg-emerald-50/70 dark:border-zinc-800/60 dark:hover:bg-emerald-900/10"
-                      >
-                        {DISPLAY_COLUMNS.map((col) => {
-                          const value = getCellValue(row, col.key, fields);
-                          if (col.key === "equipmentType" && value) {
-                            const color = typeColorMap.get(value) ?? OTHER_COLOR;
-                            return (
-                              <td key={col.key} className="whitespace-nowrap px-4 py-2.5">
-                                <span
-                                  className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm font-medium text-zinc-700 dark:text-zinc-200"
-                                  style={typeBadgeStyle(color)}
-                                >
+                    {filteredRecords.map((record) => {
+                      const row = record.data;
+                      return (
+                        <tr
+                          key={record.rowNumber}
+                          className="border-b border-zinc-100 transition-colors last:border-0 hover:bg-emerald-50/70 dark:border-zinc-800/60 dark:hover:bg-emerald-900/10"
+                        >
+                          {DISPLAY_COLUMNS.map((col) => {
+                            const value = getCellValue(row, col.key, fields);
+                            if (col.key === "equipmentType" && value) {
+                              const color = typeColorMap.get(value) ?? OTHER_COLOR;
+                              return (
+                                <td key={col.key} className="whitespace-nowrap px-4 py-2.5">
                                   <span
-                                    className="h-2 w-2 rounded-full"
-                                    style={{ backgroundColor: color }}
-                                    aria-hidden="true"
-                                  />
-                                  {value}
-                                </span>
+                                    className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm font-medium text-zinc-700 dark:text-zinc-200"
+                                    style={typeBadgeStyle(color)}
+                                  >
+                                    <span
+                                      className="h-2 w-2 rounded-full"
+                                      style={{ backgroundColor: color }}
+                                      aria-hidden="true"
+                                    />
+                                    {value}
+                                  </span>
+                                </td>
+                              );
+                            }
+                            return (
+                              <td
+                                key={col.key}
+                                className={`whitespace-nowrap px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${
+                                  col.key === "fullName" ? "font-medium text-zinc-900 dark:text-zinc-100" : ""
+                                }`}
+                              >
+                                {value || <span className="text-zinc-300 dark:text-zinc-600">—</span>}
                               </td>
                             );
-                          }
-                          return (
-                            <td
-                              key={col.key}
-                              className={`whitespace-nowrap px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${
-                                col.key === "fullName" ? "font-medium text-zinc-900 dark:text-zinc-100" : ""
-                              }`}
-                            >
-                              {value || <span className="text-zinc-300 dark:text-zinc-600">—</span>}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                    {filteredRows.length === 0 && (
+                          })}
+                        </tr>
+                      );
+                    })}
+                    {filteredRecords.length === 0 && (
                       <tr>
                         <td colSpan={DISPLAY_COLUMNS.length} className="px-4 py-8 text-center text-zinc-400">
                           ไม่พบรายการที่ตรงกับตัวกรอง

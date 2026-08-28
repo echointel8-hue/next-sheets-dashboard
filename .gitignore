@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...except the example template — placeholders only, never real values,
+# safe (and useful) to commit so the required vars are documented in git.
+!.env.local.example
 
 # vercel
 .vercel
