@@ -11,6 +11,7 @@ import {
   visibleFormHeaders,
   type FieldMap,
 } from "@/lib/fields";
+import MultiSelectField from "@/components/MultiSelectField";
 
 const INPUT_CLASS =
   "h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:disabled:bg-zinc-800/60 dark:disabled:text-zinc-500";
@@ -69,7 +70,10 @@ export default function EquipmentFormModal({
     const set = new Set<string>();
     for (const header of headers) {
       const cfg = findSelectFieldConfig(header);
-      if (!cfg?.allowOther) continue;
+      // Multi-select fields track their own "อื่นๆ" state internally
+      // (MultiSelectField) — this Set is only consulted by the
+      // single-select branch below.
+      if (!cfg?.allowOther || cfg.multiple) continue;
       const v = (initialValues[header] ?? "").trim();
       if (v && !cfg.options.includes(v)) set.add(header);
     }
@@ -240,6 +244,24 @@ export default function EquipmentFormModal({
               // (ระบุเอง)" (see SelectFieldConfig.allowOther), which swaps in
               // a free-text box for cases the fixed list doesn't cover.
               const selectConfig = findSelectFieldConfig(header);
+              if (selectConfig?.multiple) {
+                // "วัตถุประสงค์หลักในการใช้งานคอมพิวเตอร์" — the one select
+                // field whose real-world answer can genuinely be more than
+                // one value, so it gets the checkbox multi-select instead
+                // of the native <select> every other fixed-choice field
+                // below uses. See MultiSelectField for the "อื่นๆ" handling.
+                return (
+                  <MultiSelectField
+                    key={header}
+                    label={header}
+                    options={selectConfig.options}
+                    allowOther={selectConfig.allowOther}
+                    value={currentValue}
+                    onChange={(next) => setValues((prev) => ({ ...prev, [header]: next }))}
+                    disabled={saving || readOnly}
+                  />
+                );
+              }
               if (selectConfig) {
                 const isCustom = selectConfig.allowOther && customHeaders.has(header);
                 const selectValue = isCustom

@@ -29,6 +29,7 @@ import {
   type FieldMap,
 } from "@/lib/fields";
 import { assignCategoryColors, OTHER_COLOR } from "@/lib/category-colors";
+import MultiSelect from "@/components/MultiSelect";
 
 // Code-split the chart (recharts is a sizeable dependency) so it only loads
 // once it's actually needed, instead of inflating the dashboard's initial JS.
@@ -157,8 +158,13 @@ function typeBadgeStyle(color: string): CSSProperties {
 export default function Dashboard({ initial }: { initial: LoadResult }) {
   const [data, setData] = useState<LoadResult>(initial);
   const [loading, setLoading] = useState(false);
-  const [department, setDepartment] = useState("all");
-  const [equipmentType, setEquipmentType] = useState("all");
+  // Empty array = "all" (no filter on that dimension) — each filter is a
+  // multi-select now, so someone can combine totals across several
+  // departments and/or several equipment types at once (e.g. Notebook + AIO
+  // counts for กลุ่มงานบริหารทั่วไป + งานแผนงานและยุทธศาสตร์ together),
+  // rather than only ever narrowing to one value per dimension.
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [equipmentTypes, setEquipmentTypes] = useState<string[]>([]);
 
   async function refresh() {
     setLoading(true);
@@ -179,11 +185,11 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
 
   const snapshot = !isError(data) ? data : null;
   const fields: FieldMap | null = snapshot?.fields ?? null;
-  const hasActiveFilters = department !== "all" || equipmentType !== "all";
+  const hasActiveFilters = departments.length > 0 || equipmentTypes.length > 0;
 
   function clearFilters() {
-    setDepartment("all");
-    setEquipmentType("all");
+    setDepartments([]);
+    setEquipmentTypes([]);
   }
 
   const missingColumns = useMemo(
@@ -227,17 +233,17 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
   const filteredRecords = useMemo(() => {
     if (!snapshot || !fields) return [];
     return activeRecords.filter((record) => {
-      if (department !== "all") {
+      if (departments.length > 0) {
         const v = fieldValue(record.data, fields.department) || UNSPECIFIED;
-        if (v !== department) return false;
+        if (!departments.includes(v)) return false;
       }
-      if (equipmentType !== "all") {
+      if (equipmentTypes.length > 0) {
         const v = fieldValue(record.data, fields.equipmentType) || UNSPECIFIED;
-        if (v !== equipmentType) return false;
+        if (!equipmentTypes.includes(v)) return false;
       }
       return true;
     });
-  }, [snapshot, fields, department, equipmentType, activeRecords]);
+  }, [snapshot, fields, departments, equipmentTypes, activeRecords]);
 
   // Kept alongside filteredRecords rather than rewriting every consumer —
   // the aggregate helpers below (typeBreakdown, departmentBreakdown, ...)
@@ -438,17 +444,19 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                   there's genuinely not enough room; wide desktop keeps
                   everything on one line as before. */}
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-                <FilterSelect
+                <MultiSelect
                   label="กลุ่มงาน / งานที่สังกัด"
-                  value={department}
-                  onChange={setDepartment}
                   options={departmentOptions}
+                  selected={departments}
+                  onChange={setDepartments}
+                  className="sm:max-w-xs sm:flex-1"
                 />
-                <FilterSelect
+                <MultiSelect
                   label="ประเภทครุภัณฑ์"
-                  value={equipmentType}
-                  onChange={setEquipmentType}
                   options={equipmentTypeOptions}
+                  selected={equipmentTypes}
+                  onChange={setEquipmentTypes}
+                  className="sm:max-w-xs sm:flex-1"
                 />
                 {hasActiveFilters && (
                   <button
@@ -727,35 +735,5 @@ function StatTile({
         <p className="text-2xl font-bold text-zinc-950 dark:text-zinc-50">{value}</p>
       </div>
     </div>
-  );
-}
-
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; count: number }[];
-}) {
-  return (
-    <label className="flex flex-1 flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-xs">
-      {label}
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 transition-colors hover:border-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:border-zinc-600"
-      >
-        <option value="all">ทั้งหมด</option>
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.value} ({opt.count.toLocaleString("th-TH")})
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }

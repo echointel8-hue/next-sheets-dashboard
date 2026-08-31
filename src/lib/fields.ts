@@ -334,6 +334,15 @@ export interface SelectFieldConfig {
    * new value (a legacy value not in the list is still preserved as an
    * extra option rather than silently dropped — see EquipmentFormModal). */
   allowOther: boolean;
+  /** True only for a question whose real-world answer can genuinely be
+   * more than one value at once (e.g. "วัตถุประสงค์หลักในการใช้งาน
+   * คอมพิวเตอร์" — one person can have several true reasons). Everything
+   * else here (คำนำหน้า, กลุ่มงาน, ประเภทเครื่องพิมพ์) describes exactly one
+   * real-world fact, so those stay single-select even though this flag
+   * exists. A multi field's cell holds a comma-joined list — see
+   * splitMultiValue/joinMultiValue — the same shape a Google Form checkbox
+   * question already writes into a sheet. */
+  multiple?: boolean;
 }
 
 export const SELECT_FIELD_CONFIGS: SelectFieldConfig[] = [
@@ -343,6 +352,7 @@ export const SELECT_FIELD_CONFIGS: SelectFieldConfig[] = [
     header: "วัตถุประสงค์หลักในการใช้งานคอมพิวเตอร์ของคุณคืออะไร?",
     options: COMPUTER_USAGE_OPTIONS,
     allowOther: true,
+    multiple: true,
   },
   { header: "ประเภทเครื่องพิมพ์", options: PRINTER_TYPE_OPTIONS, allowOther: true },
 ];
@@ -352,6 +362,53 @@ export const SELECT_FIELD_CONFIGS: SelectFieldConfig[] = [
 export function findSelectFieldConfig(header: string): SelectFieldConfig | null {
   const trimmed = header.trim();
   return SELECT_FIELD_CONFIGS.find((c) => c.header.trim() === trimmed) ?? null;
+}
+
+/** Splits a multi-value cell ("A, B, C") into its tokens — trims and drops
+ * empties so a trailing/stray comma or double space never yields a blank
+ * "option". See SelectFieldConfig.multiple.
+ *
+ * `knownOptions`, when given, is matched against the raw value *before*
+ * falling back to a plain comma-split. This matters because a fixed
+ * option's own label can itself contain literal commas — every one of
+ * COMPUTER_USAGE_OPTIONS does, e.g. "...ประชุมออนไลน์ (Word, PPT, Zoom)" —
+ * so a naive `.split(",")` would shred a single selected option into
+ * fragments that never match `options` again, silently losing the
+ * selection on the very next render. Known options are extracted as whole
+ * substrings first (longest first, so one option's text can't be
+ * mis-matched as a fragment sitting inside a longer sibling option);
+ * whatever text is left over after removing every match is then
+ * comma-split as before, to still catch legacy free-text values that
+ * predate the fixed option list or a custom "อื่นๆ" entry. */
+export function splitMultiValue(value: string, knownOptions: string[] = []): string[] {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (knownOptions.length === 0) {
+    return trimmed.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  let remaining = trimmed;
+  const found: string[] = [];
+  for (const opt of [...knownOptions].sort((a, b) => b.length - a.length)) {
+    if (!remaining.includes(opt)) continue;
+    found.push(opt);
+    remaining = remaining.split(opt).join(" ");
+  }
+  const customTokens = remaining
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // Report matches in the option list's own order (stable and readable)
+  // rather than the longest-first scan order used to find them, then
+  // whatever custom/legacy text was left over.
+  const orderedFound = knownOptions.filter((o) => found.includes(o));
+  return [...orderedFound, ...customTokens];
+}
+
+/** Inverse of splitMultiValue — the exact "A, B, C" shape a Google Form
+ * checkbox question writes into a sheet cell, so a multi-select field here
+ * round-trips through the same format the real form already uses. */
+export function joinMultiValue(values: string[]): string {
+  return values.join(", ");
 }
 
 function headerIn(header: string, candidates: string[]): boolean {

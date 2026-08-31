@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArrowLeft,
+  Filter,
   LogOut,
   Package,
   PackageX,
@@ -14,6 +15,7 @@ import {
   RotateCcw,
   Trash2,
   Users,
+  X,
 } from "lucide-react";
 import {
   STATUS_DISPOSED,
@@ -24,6 +26,7 @@ import {
 } from "@/lib/fields";
 import type { Role } from "@/lib/auth";
 import EquipmentFormModal, { type EquipmentFormResult } from "@/components/EquipmentFormModal";
+import MultiSelect from "@/components/MultiSelect";
 
 export interface ManageRecord {
   rowNumber: number;
@@ -107,7 +110,12 @@ export default function ManageDashboard({
 }) {
   const router = useRouter();
   const [data, setData] = useState<ManageLoadResult>(initial);
-  const [departmentFilter, setDepartmentFilter] = useState("all");
+  // Empty array = "all" (no filter on that dimension) — multi-select, same
+  // as the public dashboard's filters, so an account can combine totals
+  // across several departments and/or equipment types at once rather than
+  // only ever narrowing to one value per dimension.
+  const [departmentFilter, setDepartmentFilter] = useState<string[]>([]);
+  const [equipmentTypeFilter, setEquipmentTypeFilter] = useState<string[]>([]);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [disposingRow, setDisposingRow] = useState<number | null>(null);
   const [restoringRow, setRestoringRow] = useState<number | null>(null);
@@ -127,14 +135,40 @@ export default function ManageDashboard({
       const v = cell(r.values, fields.department);
       if (v) set.add(v);
     }
-    return [...set].sort((a, b) => a.localeCompare(b, "th"));
+    return [...set].sort((a, b) => a.localeCompare(b, "th")).map((value) => ({ value }));
   }, [rows, fields]);
+
+  const equipmentTypeOptions = useMemo(() => {
+    if (!fields) return [];
+    const set = new Set<string>();
+    for (const r of rows) {
+      const v = cell(r.values, fields.equipmentType);
+      if (v) set.add(v);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "th")).map((value) => ({ value }));
+  }, [rows, fields]);
+
+  const hasActiveFilters = departmentFilter.length > 0 || equipmentTypeFilter.length > 0;
+
+  function clearFilters() {
+    setDepartmentFilter([]);
+    setEquipmentTypeFilter([]);
+  }
 
   const visibleRows = useMemo(() => {
     if (!fields) return [];
-    if (departmentFilter === "all") return rows;
-    return rows.filter((r) => cell(r.values, fields.department) === departmentFilter);
-  }, [rows, fields, departmentFilter]);
+    return rows.filter((r) => {
+      if (departmentFilter.length > 0) {
+        const v = cell(r.values, fields.department);
+        if (!departmentFilter.includes(v)) return false;
+      }
+      if (equipmentTypeFilter.length > 0) {
+        const v = cell(r.values, fields.equipmentType);
+        if (!equipmentTypeFilter.includes(v)) return false;
+      }
+      return true;
+    });
+  }, [rows, fields, departmentFilter, equipmentTypeFilter]);
 
   async function logout() {
     try {
@@ -373,38 +407,60 @@ export default function ManageDashboard({
 
         {!isError(data) && (
           <>
-            <div className={`${CARD} flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between`}>
-              {isSuperadmin ? (
-                <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-xs sm:flex-1">
-                  กรองตามกลุ่มงาน
-                  <select
-                    value={departmentFilter}
-                    onChange={(e) => setDepartmentFilter(e.target.value)}
-                    className="h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+            {/* Filters — shown for every role, not just superadmin: an
+                admin's rows are already scoped server-side to their own
+                department (see /api/manage/records GET), but they can still
+                narrow by equipment type and should see the same "N / M
+                รายการ" count superadmin gets, not a plain sentence. */}
+            <div className={`${CARD} flex flex-col gap-3 p-4`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 text-sm font-medium text-zinc-400 dark:text-zinc-500">
+                  <Filter size={15} strokeWidth={2} aria-hidden="true" />
+                  ตัวกรองข้อมูล
+                </div>
+                {isSuperadmin && (
+                  <button
+                    type="button"
+                    onClick={openAdd}
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full bg-[var(--brand)] px-4 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)]"
                   >
-                    <option value="all">ทั้งหมด</option>
-                    {departmentOptions.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <span className="text-sm text-zinc-400">
-                  {visibleRows.length.toLocaleString("th-TH")} รายการในกลุ่มงานของคุณ
+                    <Plus size={14} strokeWidth={2} aria-hidden="true" />
+                    เพิ่มครุภัณฑ์ใหม่
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+                {isSuperadmin && (
+                  <MultiSelect
+                    label="กลุ่มงาน"
+                    options={departmentOptions}
+                    selected={departmentFilter}
+                    onChange={setDepartmentFilter}
+                    className="sm:max-w-xs sm:flex-1"
+                  />
+                )}
+                <MultiSelect
+                  label="ประเภทครุภัณฑ์"
+                  options={equipmentTypeOptions}
+                  selected={equipmentTypeFilter}
+                  onChange={setEquipmentTypeFilter}
+                  className="sm:max-w-xs sm:flex-1"
+                />
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="flex h-11 items-center justify-center gap-1 self-start rounded-lg border border-zinc-200 px-3 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:self-auto"
+                  >
+                    <X size={16} strokeWidth={2} aria-hidden="true" />
+                    ล้างตัวกรอง
+                  </button>
+                )}
+                <span className="text-sm text-zinc-400 sm:ml-auto sm:self-center" aria-live="polite">
+                  {visibleRows.length.toLocaleString("th-TH")} / {rows.length.toLocaleString("th-TH")} รายการ
+                  {!isSuperadmin && "ในกลุ่มงานของคุณ"}
                 </span>
-              )}
-              {isSuperadmin && (
-                <button
-                  type="button"
-                  onClick={openAdd}
-                  className="inline-flex h-11 items-center justify-center gap-2 self-start rounded-full bg-[var(--brand)] px-5 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] sm:self-auto"
-                >
-                  <Plus size={16} strokeWidth={2} aria-hidden="true" />
-                  เพิ่มครุภัณฑ์ใหม่
-                </button>
-              )}
+              </div>
             </div>
 
             {/* Phones / narrow tablets: one card per record, stacked — a table
