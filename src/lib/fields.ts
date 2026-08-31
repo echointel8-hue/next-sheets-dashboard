@@ -493,6 +493,13 @@ export function getCellValue(
   return header ? (row[header] ?? "").trim() : "";
 }
 
+/** เลขครุภัณฑ์ (assetNumber), shown stacked above the name in the public
+ * dashboard's fullName cell — not its own DISPLAY_COLUMNS column, so a
+ * sheet without this header just shows the name alone. */
+export function getAssetNumber(row: EquipmentRow, fields: FieldMap): string {
+  return fields.assetNumber ? (row[fields.assetNumber] ?? "").trim() : "";
+}
+
 /** Which display columns couldn't be matched to a header in the sheet. */
 export function unresolvedColumns(fields: FieldMap): ColumnKey[] {
   const missing: ColumnKey[] = [];

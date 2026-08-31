@@ -20,9 +20,11 @@ import {
 import type { SheetSnapshot } from "@/lib/sheets";
 import {
   DISPLAY_COLUMNS,
+  getAssetNumber,
   getCellValue,
   isHidden,
   unresolvedColumns,
+  type ColumnKey,
   type EquipmentRow,
   type FieldMap,
 } from "@/lib/fields";
@@ -70,6 +72,50 @@ function formatTime(iso: string) {
     return iso;
   }
 }
+
+const THAI_MONTHS_SHORT = [
+  "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+  "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
+];
+
+/**
+ * Reformats the row's raw "ประทับเวลา" text — Google Sheets' own
+ * D/M/YYYY[, H:MM:SS] Gregorian text, appended automatically by Google
+ * Forms — into a short Thai date: day, abbreviated Thai month, Buddhist
+ * year (e.g. "31/7/2026, 10:39:17" -> "31 ก.ค. 2569"). Parsed with a plain
+ * regex on the literal text rather than `new Date(...)`: the raw string
+ * carries no timezone marker, so handing it to Date() would have the
+ * server (UTC) and the browser (Asia/Bangkok) parse the same text as
+ * different moments — the same hydration-mismatch class of bug that
+ * formatTime() above pins a timeZone to avoid — so this sidesteps it
+ * entirely by never constructing a Date. Text that doesn't match the
+ * expected D/M/YYYY shape is shown as-is rather than guessed at.
+ */
+function formatDateOnly(raw: string): string {
+  const match = raw.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (!match) return raw;
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  if (month < 1 || month > 12) return raw;
+  return `${day} ${THAI_MONTHS_SHORT[month - 1]} ${year + 543}`;
+}
+
+// Column widths for the desktop table (table-fixed, so these are load-
+// bearing — without them the browser sizes columns from unwrapped content
+// and long-text columns force a horizontal scrollbar). Percentages sum to
+// 100; department gets the largest share since its values run longest,
+// followed by the name column (which also carries the stacked asset-number
+// line). timestamp stays short enough for one line; equipmentType wraps
+// too now (a long type label no longer fits nowrap at laptop widths).
+// position isn't rendered (not in DISPLAY_COLUMNS).
+const COLUMN_WIDTH: Record<ColumnKey, string> = {
+  timestamp: "w-[13%]",
+  department: "w-[32%]",
+  fullName: "w-[28%]",
+  equipmentType: "w-[27%]",
+  position: "w-0",
+};
 
 function fieldValue(row: EquipmentRow, header: string | null): string {
   if (!header) return "";
@@ -384,7 +430,14 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                 <Filter size={15} strokeWidth={2} aria-hidden="true" />
                 ตัวกรองข้อมูล
               </div>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              {/* sm:flex-wrap: at tablet-ish widths (~768px) the two
+                  sm:max-w-xs selects plus the clear button and the count
+                  text don't all fit on one row — without wrapping, the row
+                  overflowed past the viewport and forced the whole page to
+                  scroll horizontally. Wrapping only ever kicks in when
+                  there's genuinely not enough room; wide desktop keeps
+                  everything on one line as before. */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
                 <FilterSelect
                   label="กลุ่มงาน / งานที่สังกัด"
                   value={department}
@@ -475,8 +528,20 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                   const row = record.data;
                   const typeValue = getCellValue(row, "equipmentType", fields);
                   const color = typeValue ? typeColorMap.get(typeValue) ?? OTHER_COLOR : OTHER_COLOR;
+                  const idValue = getAssetNumber(row, fields);
+                  const rawTimestamp = getCellValue(row, "timestamp", fields);
                   return (
                     <li key={record.rowNumber} className="flex flex-col gap-2 p-4">
+                      {/* Asset number (when the sheet has that column)
+                          reads above the name — it identifies *this item*
+                          before the name identifies *who's* responsible
+                          for it. Same stacked treatment as the desktop
+                          table's fullName cell below. */}
+                      {idValue && (
+                        <span className="text-sm text-zinc-400 dark:text-zinc-500">
+                          เลขครุภัณฑ์ {idValue}
+                        </span>
+                      )}
                       {/* Name and the equipment-type badge stack (rather
                           than sharing one row) because a real equipment
                           type label ("ชุดคอมพิวเตอร์ตั้งโต๊ะ (Desktop PC)")
@@ -499,8 +564,8 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                         </span>
                       )}
                       <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-sm text-zinc-500 dark:text-zinc-400">
-                        <dt className="font-medium">ประทับเวลา</dt>
-                        <dd>{getCellValue(row, "timestamp", fields) || "—"}</dd>
+                        <dt className="font-medium">วันที่</dt>
+                        <dd>{rawTimestamp ? formatDateOnly(rawTimestamp) : "—"}</dd>
                         <dt className="font-medium">กลุ่มงาน/สังกัด</dt>
                         <dd>{getCellValue(row, "department", fields) || "—"}</dd>
                       </dl>
@@ -512,16 +577,27 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                 )}
               </ul>
 
-              {/* Desktop: full table */}
-              <div className="hidden max-w-full overflow-x-auto sm:block">
-                <table className="w-full text-left text-base">
+              {/* No overflow-x-auto wrapper: table-fixed + explicit per-
+                  column widths below (COLUMN_WIDTH) size every column to
+                  fit the card's own width, with long text wrapping onto
+                  extra lines instead of forcing a horizontal scrollbar —
+                  department, the name column, and the type badge all wrap;
+                  only the date column stays a strict single line. */}
+              <div className="hidden max-w-full sm:block">
+                <table className="w-full table-fixed text-left text-base">
                   <caption className="sr-only">
                     ตารางรายการครุภัณฑ์ {filteredRows.length.toLocaleString("th-TH")} รายการ
                   </caption>
                   <thead>
                     <tr className="border-b border-emerald-900/15 text-sm uppercase tracking-wide text-zinc-400 dark:border-emerald-400/15">
                       {DISPLAY_COLUMNS.map((col) => (
-                        <th key={col.key} scope="col" className="whitespace-nowrap px-4 py-3 font-medium">
+                        <th
+                          key={col.key}
+                          scope="col"
+                          className={`px-4 py-3 font-medium ${COLUMN_WIDTH[col.key]} ${
+                            col.key === "timestamp" ? "whitespace-nowrap" : ""
+                          }`}
+                        >
                           {col.label}
                         </th>
                       ))}
@@ -530,6 +606,7 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                   <tbody>
                     {filteredRecords.map((record) => {
                       const row = record.data;
+                      const idValue = getAssetNumber(row, fields);
                       return (
                         <tr
                           key={record.rowNumber}
@@ -537,31 +614,69 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
                         >
                           {DISPLAY_COLUMNS.map((col) => {
                             const value = getCellValue(row, col.key, fields);
+
                             if (col.key === "equipmentType" && value) {
                               const color = typeColorMap.get(value) ?? OTHER_COLOR;
                               return (
-                                <td key={col.key} className="whitespace-nowrap px-4 py-2.5">
+                                <td key={col.key} className={`px-4 py-2.5 align-top ${COLUMN_WIDTH[col.key]}`}>
+                                  {/* No whitespace-nowrap here — a long type
+                                      label ("เครื่องคอมพิวเตอร์โน้ตบุ๊ก
+                                      (Notebook)") needs to wrap onto a 2nd
+                                      line inside the pill at narrower
+                                      desktop widths, or its unbroken text
+                                      overflows past the column and forces
+                                      the table (and page) to scroll
+                                      horizontally — exactly what this
+                                      table-fixed layout is meant to avoid. */}
                                   <span
-                                    className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm font-medium text-zinc-700 dark:text-zinc-200"
+                                    className="inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm font-medium text-zinc-700 dark:text-zinc-200"
                                     style={typeBadgeStyle(color)}
                                   >
                                     <span
-                                      className="h-2 w-2 rounded-full"
+                                      className="h-2 w-2 shrink-0 rounded-full"
                                       style={{ backgroundColor: color }}
                                       aria-hidden="true"
                                     />
-                                    {value}
+                                    <span className="break-words">{value}</span>
                                   </span>
                                 </td>
                               );
                             }
+
+                            if (col.key === "fullName") {
+                              // Asset number (muted, small) stacked above
+                              // the name — same pairing as the mobile card
+                              // list, kept in one column rather than a
+                              // separate one so the table doesn't grow a
+                              // 5th column competing for width.
+                              return (
+                                <td key={col.key} className={`px-4 py-2.5 align-top ${COLUMN_WIDTH[col.key]}`}>
+                                  <div className="flex min-w-0 flex-col gap-0.5">
+                                    {idValue && (
+                                      <span className="whitespace-nowrap text-sm text-zinc-400 dark:text-zinc-500">
+                                        เลขครุภัณฑ์ {idValue}
+                                      </span>
+                                    )}
+                                    <span className="break-words font-medium text-zinc-900 dark:text-zinc-100">
+                                      {value || <span className="text-zinc-300 dark:text-zinc-600">—</span>}
+                                    </span>
+                                  </div>
+                                </td>
+                              );
+                            }
+
+                            if (col.key === "timestamp") {
+                              return (
+                                <td key={col.key} className={`whitespace-nowrap px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${COLUMN_WIDTH[col.key]}`}>
+                                  {value ? formatDateOnly(value) : <span className="text-zinc-300 dark:text-zinc-600">—</span>}
+                                </td>
+                              );
+                            }
+
+                            // department — the long one, so it wraps rather
+                            // than forcing the column (and the table) wider.
                             return (
-                              <td
-                                key={col.key}
-                                className={`whitespace-nowrap px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${
-                                  col.key === "fullName" ? "font-medium text-zinc-900 dark:text-zinc-100" : ""
-                                }`}
-                              >
+                              <td key={col.key} className={`break-words px-4 py-2.5 text-zinc-700 dark:text-zinc-300 ${COLUMN_WIDTH[col.key]}`}>
                                 {value || <span className="text-zinc-300 dark:text-zinc-600">—</span>}
                               </td>
                             );
