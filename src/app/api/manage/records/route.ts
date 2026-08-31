@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog, appendEquipmentRow, getEquipmentDataUnredacted } from "@/lib/sheets";
-import { STATUS_ACTIVE, isDeleted } from "@/lib/fields";
+import { STATUS_ACTIVE, findDuplicateAssetNumberRow, isDeleted } from "@/lib/fields";
 import { rowSnapshotHash } from "@/lib/recordHash";
 
 // Always live — reveals unredacted data behind an auth check and accepts
@@ -101,6 +101,19 @@ export async function POST(request: NextRequest) {
     }
     if (snapshot.fields.status) {
       values[snapshot.fields.status] = STATUS_ACTIVE;
+    }
+
+    if (snapshot.fields.assetNumber) {
+      const candidate = values[snapshot.fields.assetNumber] ?? "";
+      const duplicateRow = findDuplicateAssetNumberRow(snapshot.rows, snapshot.fields, candidate);
+      if (duplicateRow !== null) {
+        return NextResponse.json(
+          {
+            error: `เลขครุภัณฑ์ "${candidate.trim()}" นี้มีอยู่ในระบบแล้ว (แถวที่ ${duplicateRow}) กรุณาตรวจสอบและระบุเลขครุภัณฑ์ใหม่`,
+          },
+          { status: 409 }
+        );
+      }
     }
 
     const { rowNumber } = await appendEquipmentRow(values);

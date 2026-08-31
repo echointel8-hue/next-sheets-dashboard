@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog, getEquipmentDataUnredacted, updateEquipmentRow } from "@/lib/sheets";
-import { isDeleted } from "@/lib/fields";
+import { findDuplicateAssetNumberRow, isDeleted } from "@/lib/fields";
 import { rowSnapshotHash } from "@/lib/recordHash";
 
 export const dynamic = "force-dynamic";
@@ -90,6 +90,19 @@ export async function PATCH(
     // (or into) their own scope via this endpoint.
     if (session.role === "admin" && snapshot.fields.department) {
       nextValues[snapshot.fields.department] = session.department;
+    }
+
+    if (snapshot.fields.assetNumber) {
+      const candidate = nextValues[snapshot.fields.assetNumber] ?? "";
+      const duplicateRow = findDuplicateAssetNumberRow(snapshot.rows, snapshot.fields, candidate, rowNumber);
+      if (duplicateRow !== null) {
+        return NextResponse.json(
+          {
+            error: `เลขครุภัณฑ์ "${candidate.trim()}" นี้มีอยู่ในระบบแล้ว (แถวที่ ${duplicateRow}) กรุณาตรวจสอบและระบุเลขครุภัณฑ์ใหม่`,
+          },
+          { status: 409 }
+        );
+      }
     }
 
     await updateEquipmentRow(rowNumber, snapshot.headers, nextValues);

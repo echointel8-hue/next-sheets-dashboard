@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Loader2, Save, X } from "lucide-react";
 import {
@@ -37,6 +37,7 @@ export default function EquipmentFormModal({
   initialValues,
   snapshotHash,
   readOnlyHeaders = [],
+  existingRows,
   onClose,
   onSaved,
 }: {
@@ -54,6 +55,15 @@ export default function EquipmentFormModal({
    * submitted; disabling it here just avoids the confusing "I typed
    * something else and it didn't stick" experience. */
   readOnlyHeaders?: string[];
+  /** The rows currently loaded in the /manage table — used to flag a
+   * duplicate เลขครุภัณฑ์ (asset number) as soon as someone types it,
+   * before they ever hit บันทึก. This is only a same-tab convenience: the
+   * server re-checks against the live sheet on submit regardless (another
+   * admin could add the same number in the meantime), and that check is
+   * what actually blocks the save — see the POST/PATCH routes. Omitted
+   * entirely, the field just skips the live hint and relies on that
+   * server check alone. */
+  existingRows?: { rowNumber: number; values: Record<string, string> }[];
   onClose: () => void;
   onSaved: (result: EquipmentFormResult) => void;
 }) {
@@ -86,6 +96,19 @@ export default function EquipmentFormModal({
   // a submit round-trip.
   const equipmentTypeValue = fields.equipmentType ? values[fields.equipmentType] ?? "" : "";
   const visibleHeaders = visibleFormHeaders(headers, fields, equipmentTypeValue);
+
+  // Live เลขครุภัณฑ์ duplicate hint (see existingRows above) — recomputed
+  // from the *live* values on every keystroke, same as equipmentTypeValue.
+  const assetNumberHeader = fields.assetNumber;
+  const assetNumberValue = assetNumberHeader ? (values[assetNumberHeader] ?? "").trim() : "";
+  const duplicateAssetRowNumber = useMemo(() => {
+    if (!assetNumberHeader || !assetNumberValue || !existingRows) return null;
+    for (const row of existingRows) {
+      if (row.rowNumber === rowNumber) continue; // editing this same row isn't a conflict with itself
+      if ((row.values[assetNumberHeader] ?? "").trim() === assetNumberValue) return row.rowNumber;
+    }
+    return null;
+  }, [assetNumberHeader, assetNumberValue, existingRows, rowNumber]);
 
   function isFieldReadOnly(header: string): boolean {
     if (fields.timestamp && header.trim() === fields.timestamp.trim()) return true;
@@ -136,6 +159,12 @@ export default function EquipmentFormModal({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (duplicateAssetRowNumber) {
+      setError(
+        `เลขครุภัณฑ์ "${assetNumberValue}" นี้มีอยู่ในระบบแล้ว (แถวที่ ${duplicateAssetRowNumber}) กรุณาตรวจสอบและระบุเลขครุภัณฑ์ใหม่`
+      );
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch(
@@ -320,6 +349,42 @@ export default function EquipmentFormModal({
                 );
               }
 
+              // เลขครุภัณฑ์โรงพยาบาล / เลขพัสดุ — a plain text field, but one
+              // that's supposed to identify exactly one physical item, so a
+              // duplicate is flagged as soon as it matches another loaded
+              // row (see existingRows/duplicateAssetRowNumber above). This
+              // is only a same-tab hint; the server re-checks against the
+              // live sheet on submit and is what actually blocks the save.
+              const isAssetNumberField = Boolean(
+                fields.assetNumber && header.trim() === fields.assetNumber.trim()
+              );
+              if (isAssetNumberField) {
+                return (
+                  <label key={header} className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+                    {header}
+                    <input
+                      ref={i === firstEditableIndex ? (el) => { firstInputRef.current = el; } : undefined}
+                      type="text"
+                      value={currentValue}
+                      onChange={(e) => setValues((prev) => ({ ...prev, [header]: e.target.value }))}
+                      disabled={saving || readOnly}
+                      aria-invalid={Boolean(duplicateAssetRowNumber)}
+                      className={`${INPUT_CLASS} ${
+                        duplicateAssetRowNumber
+                          ? "border-red-400 focus-visible:outline-red-500 dark:border-red-500"
+                          : ""
+                      }`}
+                    />
+                    {duplicateAssetRowNumber && (
+                      <p className="flex items-start gap-1.5 text-xs text-red-600 dark:text-red-400">
+                        <AlertTriangle size={13} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+                        เลขครุภัณฑ์นี้มีอยู่ในระบบแล้ว (แถวที่ {duplicateAssetRowNumber}) กรุณาตรวจสอบและระบุเลขครุภัณฑ์ใหม่
+                      </p>
+                    )}
+                  </label>
+                );
+              }
+
               // วันที่จัดซื้อ — a native date input gives a calendar picker
               // for free. A row's existing value only ever shows up here if
               // it's already exactly "YYYY-MM-DD" (what this picker itself
@@ -373,7 +438,7 @@ export default function EquipmentFormModal({
               </button>
               <button
                 type="submit"
-                disabled={saving}
+                disabled={saving || Boolean(duplicateAssetRowNumber)}
                 className="flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--brand)] px-5 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-60"
               >
                 {saving ? (

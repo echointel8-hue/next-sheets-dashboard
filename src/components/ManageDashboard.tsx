@@ -655,6 +655,7 @@ export default function ManageDashboard({
           initialValues={modal.initialValues}
           snapshotHash={modal.snapshotHash}
           readOnlyHeaders={modal.readOnlyHeaders}
+          existingRows={rows}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
         />

@@ -557,6 +557,41 @@ export function getAssetNumber(row: EquipmentRow, fields: FieldMap): string {
   return fields.assetNumber ? (row[fields.assetNumber] ?? "").trim() : "";
 }
 
+/**
+ * Finds another row already using `candidate` as its เลขครุภัณฑ์, so
+ * add/edit can reject a duplicate asset number instead of silently letting
+ * two rows share one — the whole point of the number is to identify a
+ * single physical item. Returns that row's rowNumber, or null when
+ * `candidate` is blank, the sheet has no assetNumber column, or nothing
+ * else uses it.
+ *
+ * A soft-deleted row (STATUS_DELETED — entered by mistake, hidden from
+ * /manage entirely) never counts: it's treated as if it never existed, so
+ * its number is free to reuse. A disposed row (STATUS_DISPOSED) still
+ * counts — that number was assigned to a real, once-existing item and
+ * reusing it on a different item would corrupt the asset trail, so it
+ * stays reserved.
+ *
+ * Generic over T so this doesn't need to import EquipmentRecord from
+ * lib/sheets (which itself imports from here) — any {rowNumber, data}
+ * pairing works, which is what both API routes already have on hand.
+ */
+export function findDuplicateAssetNumberRow<T extends { rowNumber: number; data: EquipmentRow }>(
+  rows: T[],
+  fields: FieldMap,
+  candidate: string,
+  excludeRowNumber?: number
+): number | null {
+  const target = candidate.trim();
+  if (!target || !fields.assetNumber) return null;
+  for (const row of rows) {
+    if (row.rowNumber === excludeRowNumber) continue;
+    if (isDeleted(row.data, fields)) continue;
+    if (getAssetNumber(row.data, fields) === target) return row.rowNumber;
+  }
+  return null;
+}
+
 /** Which display columns couldn't be matched to a header in the sheet. */
 export function unresolvedColumns(fields: FieldMap): ColumnKey[] {
   const missing: ColumnKey[] = [];
