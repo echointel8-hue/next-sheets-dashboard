@@ -14,6 +14,35 @@ function fieldValue(row: Record<string, string>, header: string | null): string 
 }
 
 /**
+ * Renders a new row's "ประทับเวลา" in the exact same raw shape Google
+ * Forms itself writes into the sheet — D/M/YYYY, H:MM:SS, Gregorian year,
+ * 24-hour clock, no leading zeros on the date (e.g. "27/7/2026, 11:20:58")
+ * — so a row added here parses identically to one that came in through
+ * the real form. Using `toLocaleString("th-TH", {dateStyle, timeStyle})`
+ * here previously wrote an already-Thai-formatted string instead (e.g.
+ * "31 ส.ค. 2569 13:32"), which the public dashboard's date-only formatter
+ * doesn't recognize as a timestamp to reformat, so it fell back to
+ * showing the raw value untouched — time included. Built from
+ * Intl.DateTimeFormat parts (not a manually offset Date) so it's immune
+ * to DST/offset arithmetic bugs and always reflects Asia/Bangkok wall-clock
+ * time regardless of the server's own timezone.
+ */
+function formatSheetTimestamp(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Bangkok",
+    day: "numeric",
+    month: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("day")}/${get("month")}/${get("year")}, ${get("hour")}:${get("minute")}:${get("second")}`;
+}
+
+/**
  * Lists equipment rows scoped by role: superadmin sees every row, admin
  * sees only rows whose department column matches their own department.
  * proxy.ts already blocks unauthenticated requests to /api/manage/*, but
@@ -93,11 +122,7 @@ export async function POST(request: NextRequest) {
       values[header] = submitted[header] ?? "";
     }
     if (snapshot.fields.timestamp && !values[snapshot.fields.timestamp]) {
-      values[snapshot.fields.timestamp] = new Date().toLocaleString("th-TH", {
-        dateStyle: "medium",
-        timeStyle: "short",
-        timeZone: "Asia/Bangkok",
-      });
+      values[snapshot.fields.timestamp] = formatSheetTimestamp(new Date());
     }
     if (snapshot.fields.status) {
       values[snapshot.fields.status] = STATUS_ACTIVE;

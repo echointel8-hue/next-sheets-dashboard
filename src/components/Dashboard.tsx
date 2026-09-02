@@ -89,17 +89,29 @@ const THAI_MONTHS_SHORT = [
  * server (UTC) and the browser (Asia/Bangkok) parse the same text as
  * different moments — the same hydration-mismatch class of bug that
  * formatTime() above pins a timeZone to avoid — so this sidesteps it
- * entirely by never constructing a Date. Text that doesn't match the
- * expected D/M/YYYY shape is shown as-is rather than guessed at.
+ * entirely by never constructing a Date.
+ *
+ * A row added through /manage writes its own timestamp server-side (see
+ * formatSheetTimestamp in the records API route) in this same raw shape,
+ * so the regex above is the common case either way. A row written before
+ * that route matched this shape — or any other text that doesn't — still
+ * shouldn't show a time-of-day, so this falls back to stripping a
+ * trailing "H:MM" or "H:MM:SS" from whatever text there is, keeping the
+ * date-only promise regardless of exactly how the cell was written. Only
+ * if neither step finds a recognizable shape is the raw text shown as-is.
  */
 function formatDateOnly(raw: string): string {
-  const match = raw.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (!match) return raw;
-  const day = Number(match[1]);
-  const month = Number(match[2]);
-  const year = Number(match[3]);
-  if (month < 1 || month > 12) return raw;
-  return `${day} ${THAI_MONTHS_SHORT[month - 1]} ${year + 543}`;
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (match) {
+    const day = Number(match[1]);
+    const month = Number(match[2]);
+    const year = Number(match[3]);
+    if (month >= 1 && month <= 12) {
+      return `${day} ${THAI_MONTHS_SHORT[month - 1]} ${year + 543}`;
+    }
+  }
+  return trimmed.replace(/,?\s*\d{1,2}:\d{2}(:\d{2})?\s*$/, "");
 }
 
 // Column widths for the desktop table (table-fixed, so these are load-
