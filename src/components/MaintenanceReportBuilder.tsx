@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, Loader2, Printer as PrinterIcon, Save, X } from "lucide-react";
+import { ArrowLeft, Check, Loader2, Printer as PrinterIcon, Save, Settings, X } from "lucide-react";
 import type { ReportSettings } from "@/lib/sheets";
 
 /** One selectable equipment item — already flattened/redaction-free by
@@ -92,6 +92,11 @@ export default function MaintenanceReportBuilder({
   const [rowSaveStatus, setRowSaveStatus] = useState<Record<number, SaveStatus>>({});
   const [rowSaveError, setRowSaveError] = useState<Record<number, string>>({});
   const [savingAll, setSavingAll] = useState(false);
+  // Collapsed by default — this used to be a separate settings toggle on
+  // /manage/it, moved here (and hidden behind a button, same UX pattern) so
+  // there's a single place to edit the report template text, right next to
+  // where it's actually used.
+  const [showSettings, setShowSettings] = useState(false);
 
   // Form header / signature text — editable right here (pre-filled from the
   // saved ReportSettings) so a one-off change (a substitute signee, say)
@@ -310,6 +315,14 @@ export default function MaintenanceReportBuilder({
               </Link>
               <button
                 type="button"
+                onClick={() => setShowSettings((v) => !v)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                <Settings size={16} strokeWidth={2} aria-hidden="true" />
+                ตั้งค่าแบบฟอร์มรายงาน
+              </button>
+              <button
+                type="button"
                 onClick={() => window.print()}
                 disabled={selectedRows.length === 0}
                 className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-50"
@@ -357,51 +370,53 @@ export default function MaintenanceReportBuilder({
             </div>
           </div>
 
-          <div className={`${CARD} flex flex-col gap-3 p-4`}>
-            <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              ข้อความหัวแบบฟอร์ม / ผู้รับทราบ (แก้ไขเฉพาะรายงานนี้ หรือกด &quot;บันทึกเป็นค่าเริ่มต้น&quot; เพื่อใช้ในรายงานครั้งถัดไปด้วย)
-            </p>
-            {settingsError && (
-              <div
-                role="alert"
-                className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200"
-              >
-                {settingsError}
+          {showSettings && (
+            <div className={`${CARD} flex flex-col gap-3 p-4`}>
+              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                ข้อความหัวแบบฟอร์ม / ผู้รับทราบ (แก้ไขเฉพาะรายงานนี้ หรือกด &quot;บันทึกเป็นค่าเริ่มต้น&quot; เพื่อใช้ในรายงานครั้งถัดไปด้วย)
+              </p>
+              {settingsError && (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200"
+                >
+                  {settingsError}
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {SETTINGS_FIELDS.map(({ key, label }) => (
+                  <label key={key} className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                    {label}
+                    <input
+                      type="text"
+                      value={formSettings[key]}
+                      onChange={(e) => {
+                        setFormSettings((prev) => ({ ...prev, [key]: e.target.value }));
+                        setSettingsSaved(false);
+                      }}
+                      className={INPUT_CLASS}
+                    />
+                  </label>
+                ))}
               </div>
-            )}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {SETTINGS_FIELDS.map(({ key, label }) => (
-                <label key={key} className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-                  {label}
-                  <input
-                    type="text"
-                    value={formSettings[key]}
-                    onChange={(e) => {
-                      setFormSettings((prev) => ({ ...prev, [key]: e.target.value }));
-                      setSettingsSaved(false);
-                    }}
-                    className={INPUT_CLASS}
-                  />
-                </label>
-              ))}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={saveSettingsAsDefault}
+                  disabled={settingsSaving}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  {settingsSaving ? (
+                    <Loader2 size={14} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Save size={14} strokeWidth={2} aria-hidden="true" />
+                  )}
+                  บันทึกเป็นค่าเริ่มต้น
+                </button>
+                {settingsSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400">บันทึกแล้ว</span>}
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={saveSettingsAsDefault}
-                disabled={settingsSaving}
-                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                {settingsSaving ? (
-                  <Loader2 size={14} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-                ) : (
-                  <Save size={14} strokeWidth={2} aria-hidden="true" />
-                )}
-                บันทึกเป็นค่าเริ่มต้น
-              </button>
-              {settingsSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400">บันทึกแล้ว</span>}
-            </div>
-          </div>
+          )}
 
           <div className={`${CARD} flex flex-col gap-3 p-4`}>
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">

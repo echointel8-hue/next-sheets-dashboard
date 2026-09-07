@@ -4,10 +4,8 @@ import { SESSION_COOKIE, canAccessItDashboard, verifySessionToken } from "@/lib/
 import {
   getEquipmentDataUnredacted,
   getMaintenanceLog,
-  getReportSettings,
   getSpecStandards,
   type MaintenanceLogEntry,
-  type ReportSettings,
   type SpecStandards,
 } from "@/lib/sheets";
 import { isDeleted } from "@/lib/fields";
@@ -35,7 +33,6 @@ export default async function ManageItPage() {
   }
 
   let initial: ITDashboardData | { error: string };
-  let settings: ReportSettings | null = null;
   let maintenanceLog: MaintenanceLogEntry[] = [];
   let specStandards: SpecStandards | null = null;
   try {
@@ -52,26 +49,26 @@ export default async function ManageItPage() {
         snapshotHash: rowSnapshotHash(snapshot.headers, r.data),
       })),
     };
-    settings = await getReportSettings();
   } catch (err) {
     initial = { error: err instanceof Error ? err.message : String(err) };
   }
 
-  // Both tolerate a missing sheet tab on their own (empty history / default
-  // thresholds) — this try/catch only guards an unexpected network/auth
-  // failure from also breaking the rest of the page.
+  // Report-template text (org name/form title/acknowledger) is fetched by
+  // /manage/it/report itself now, not here — see that page. Both of these
+  // tolerate a missing sheet tab on their own (empty history / default
+  // thresholds); this try/catch only guards an unexpected network/auth
+  // failure from also breaking the rest of this page.
   try {
     maintenanceLog = await getMaintenanceLog();
     specStandards = await getSpecStandards();
   } catch {
-    // Fall back to empty history + defaults, same rationale as settings above.
+    // Fall back to empty history + defaults, same rationale as above.
   }
 
   return (
     <ITDashboard
       session={{ username: session.username, isBootstrap: session.isBootstrap }}
       initial={initial}
-      initialSettings={settings}
       initialMaintenanceLog={maintenanceLog}
       initialSpecStandards={specStandards}
     />

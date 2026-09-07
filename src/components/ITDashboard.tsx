@@ -18,7 +18,6 @@ import {
   Plus,
   Printer,
   Save,
-  Settings,
   Trash2,
   Wrench,
   X,
@@ -37,7 +36,7 @@ import {
   type FieldMap,
   type SoftwareEntry,
 } from "@/lib/fields";
-import type { ReportSettings, SpecStandards } from "@/lib/sheets";
+import type { SpecStandards } from "@/lib/sheets";
 import { getLatestMaintenanceLogByAsset, type MaintenanceLogEntry } from "@/lib/maintenanceLog";
 import { DEFAULT_SPEC_STANDARDS, evaluateRowSpec } from "@/lib/specEvaluation";
 import MultiSelect from "@/components/MultiSelect";
@@ -85,13 +84,11 @@ interface SpecColumn {
 export default function ITDashboard({
   session,
   initial,
-  initialSettings,
   initialMaintenanceLog,
   initialSpecStandards,
 }: {
   session: { username: string; isBootstrap: boolean };
   initial: ITLoadResult;
-  initialSettings: ReportSettings | null;
   initialMaintenanceLog: MaintenanceLogEntry[];
   initialSpecStandards: SpecStandards | null;
 }) {
@@ -100,7 +97,6 @@ export default function ITDashboard({
   const [departmentFilter, setDepartmentFilter] = useState<string[]>([]);
   const [equipmentTypeFilter, setEquipmentTypeFilter] = useState<string[]>([]);
   const [search, setSearch] = useState("");
-  const [showSettings, setShowSettings] = useState(false);
   const [showSpecSettings, setShowSpecSettings] = useState(false);
   const [maintenanceLog, setMaintenanceLog] = useState<MaintenanceLogEntry[]>(initialMaintenanceLog);
   const [specStandards, setSpecStandards] = useState<SpecStandards>(initialSpecStandards ?? DEFAULT_SPEC_STANDARDS);
@@ -325,24 +321,19 @@ export default function ITDashboard({
                   <Filter size={15} strokeWidth={2} aria-hidden="true" />
                   ตัวกรองข้อมูล
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowSpecSettings((v) => !v)}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                  >
-                    <Cpu size={14} strokeWidth={2} aria-hidden="true" />
-                    ตั้งค่ามาตรฐานสเปก
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowSettings((v) => !v)}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                  >
-                    <Settings size={14} strokeWidth={2} aria-hidden="true" />
-                    ตั้งค่าแบบฟอร์มรายงาน
-                  </button>
-                </div>
+                {/* Report-template text settings (org name/form title/
+                    acknowledger) live on /manage/it/report itself now — that
+                    page already edits and can print with those values in
+                    the same place, so a separate entry point here would
+                    just be a second, easy-to-miss place to look for it. */}
+                <button
+                  type="button"
+                  onClick={() => setShowSpecSettings((v) => !v)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  <Cpu size={14} strokeWidth={2} aria-hidden="true" />
+                  ตั้งค่ามาตรฐานสเปก
+                </button>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
                 <MultiSelect
@@ -384,10 +375,6 @@ export default function ITDashboard({
                 </span>
               </div>
             </div>
-
-            {showSettings && (
-              <ReportSettingsPanel initialSettings={initialSettings} onClose={() => setShowSettings(false)} />
-            )}
 
             {showSpecSettings && (
               <SpecStandardsPanel
@@ -664,118 +651,6 @@ function SpecTable({
             )}
           </tbody>
         </table>
-      </div>
-    </div>
-  );
-}
-
-const SETTINGS_FIELD_LABELS: { key: keyof ReportSettings; label: string }[] = [
-  { key: "orgName", label: "ชื่อหน่วยงาน" },
-  { key: "maintenanceFormTitle", label: "ชื่อแบบฟอร์ม" },
-  { key: "fiscalYearLabel", label: "ปีงบประมาณ (ข้อความแสดงผล)" },
-  { key: "acknowledgerName", label: "ชื่อผู้รับทราบ" },
-  { key: "acknowledgerPosition", label: "ตำแหน่งผู้รับทราบ" },
-  { key: "acknowledgerDepartment", label: "สังกัดผู้รับทราบ (แสดงใต้ตำแหน่ง)" },
-];
-
-/** Editable text pieces for the printed maintenance-report template — see
- * lib/sheets.ts getReportSettings/updateReportSettings and the ReportSettings
- * sheet tab. Reachable by "it" and the bootstrap superadmin only, same as
- * the rest of this page (the API route enforces this independently). */
-function ReportSettingsPanel({
-  initialSettings,
-  onClose,
-}: {
-  initialSettings: ReportSettings | null;
-  onClose: () => void;
-}) {
-  const [values, setValues] = useState<Partial<ReportSettings>>(initialSettings ?? {});
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  function setField(key: keyof ReportSettings, value: string) {
-    setValues((prev) => ({ ...prev, [key]: value }));
-    setSaved(false);
-  }
-
-  async function save() {
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      const res = await fetch("/api/manage/it/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error ?? "บันทึกไม่สำเร็จ");
-        return;
-      }
-      setValues(json.settings);
-      setSaved(true);
-    } catch {
-      setError("บันทึกไม่สำเร็จ กรุณาลองใหม่");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className={`${CARD} flex flex-col gap-3 p-4`}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-          <Settings size={15} strokeWidth={2} aria-hidden="true" />
-          ตั้งค่าข้อความในแบบฟอร์มรายงาน
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-full p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
-          aria-label="ปิด"
-        >
-          <X size={16} strokeWidth={2} aria-hidden="true" />
-        </button>
-      </div>
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">
-        ข้อความเหล่านี้จะแสดงในหัวแบบฟอร์มและช่องผู้รับทราบของ &quot;แบบฟอร์มการบำรุงรักษาเชิงป้องกัน&quot; ที่ออกจากหน้านี้ — ส่วนที่ 2
-        (ผลการบำรุงรักษา) และการลงนามอื่นๆ เว้นว่างให้กรอกด้วยลายมือหลังพิมพ์เสมอ
-      </p>
-      {error && (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
-          {error}
-        </div>
-      )}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {SETTINGS_FIELD_LABELS.map(({ key, label }) => (
-          <label key={key} className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-            {label}
-            <input
-              type="text"
-              value={values[key] ?? ""}
-              onChange={(e) => setField(key, e.target.value)}
-              className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-            />
-          </label>
-        ))}
-      </div>
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving}
-          className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-60"
-        >
-          {saving ? (
-            <Loader2 size={15} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-          ) : (
-            <Save size={15} strokeWidth={2} aria-hidden="true" />
-          )}
-          บันทึก
-        </button>
-        {saved && <span className="text-sm text-emerald-600 dark:text-emerald-400">บันทึกแล้ว</span>}
       </div>
     </div>
   );

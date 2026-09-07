@@ -6,12 +6,14 @@ import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArrowLeft,
+  Cpu,
   Filter,
   LogOut,
   Package,
   PackageX,
   Pencil,
   Plus,
+  Printer,
   RotateCcw,
   Trash2,
   Users,
@@ -20,6 +22,7 @@ import {
 } from "lucide-react";
 import {
   STATUS_DISPOSED,
+  classifyEquipmentType,
   getBrandModel,
   getFullName,
   type EquipmentRow,
@@ -170,6 +173,28 @@ export default function ManageDashboard({
       return true;
     });
   }, [rows, fields, departmentFilter, equipmentTypeFilter]);
+
+  // Same 4 stat tiles as the IT dashboard (/manage/it) — counted from
+  // visibleRows so they track whatever กลุ่มงาน/ประเภทครุภัณฑ์ filter is
+  // active, same as the "N / M รายการ" count next to the filters below.
+  const pcCount = useMemo(
+    () =>
+      fields
+        ? visibleRows.filter((r) => classifyEquipmentType(cell(r.values, fields.equipmentType)) === "pc").length
+        : 0,
+    [visibleRows, fields]
+  );
+  const printerCount = useMemo(
+    () =>
+      fields
+        ? visibleRows.filter((r) => classifyEquipmentType(cell(r.values, fields.equipmentType)) === "printer").length
+        : 0,
+    [visibleRows, fields]
+  );
+  const disposedCount = useMemo(
+    () => (fields ? visibleRows.filter((r) => cell(r.values, fields.status) === STATUS_DISPOSED).length : 0),
+    [visibleRows, fields]
+  );
 
   async function logout() {
     try {
@@ -423,6 +448,47 @@ export default function ManageDashboard({
 
         {!isError(data) && (
           <>
+            {/* Stat tiles — same 4 as the IT dashboard (/manage/it), so the
+                two screens read consistently. */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className={`${CARD} flex flex-col gap-1 p-4`}>
+                <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-400 dark:text-zinc-500">
+                  <Package size={14} strokeWidth={2} aria-hidden="true" />
+                  ครุภัณฑ์ทั้งหมด
+                </div>
+                <span className="text-2xl font-bold text-zinc-950 dark:text-zinc-50">
+                  {visibleRows.length.toLocaleString("th-TH")}
+                </span>
+              </div>
+              <div className={`${CARD} flex flex-col gap-1 p-4`}>
+                <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-400 dark:text-zinc-500">
+                  <Cpu size={14} strokeWidth={2} aria-hidden="true" />
+                  คอมพิวเตอร์ / โน้ตบุ๊ก
+                </div>
+                <span className="text-2xl font-bold text-zinc-950 dark:text-zinc-50">
+                  {pcCount.toLocaleString("th-TH")}
+                </span>
+              </div>
+              <div className={`${CARD} flex flex-col gap-1 p-4`}>
+                <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-400 dark:text-zinc-500">
+                  <Printer size={14} strokeWidth={2} aria-hidden="true" />
+                  เครื่องพิมพ์
+                </div>
+                <span className="text-2xl font-bold text-zinc-950 dark:text-zinc-50">
+                  {printerCount.toLocaleString("th-TH")}
+                </span>
+              </div>
+              <div className={`${CARD} flex flex-col gap-1 p-4`}>
+                <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-400 dark:text-zinc-500">
+                  <PackageX size={14} strokeWidth={2} aria-hidden="true" />
+                  จำหน่ายแล้ว
+                </div>
+                <span className="text-2xl font-bold text-zinc-950 dark:text-zinc-50">
+                  {disposedCount.toLocaleString("th-TH")}
+                </span>
+              </div>
+            </div>
+
             {/* Filters — shown for every role, not just superadmin: an
                 admin's rows are already scoped server-side to their own
                 department (see /api/manage/records GET), but they can still
