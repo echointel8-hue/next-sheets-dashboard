@@ -51,6 +51,9 @@ interface SelectedRow {
    * at different sizes — see the "รายการครุภัณฑ์" column below. */
   equipmentType: string;
   brandModel: string;
+  /** Shown above location in the printed "สถานที่ตั้ง" column so it reads
+   * as "กลุ่มงาน — ที่ตั้ง" without needing its own table column. */
+  department: string;
   location: string;
   responsiblePerson: string;
   canSaveResponsiblePerson: boolean;
@@ -225,6 +228,7 @@ export default function MaintenanceReportBuilder({
           description: [it.equipmentType, it.brandModel].filter(Boolean).join(" — "),
           equipmentType: it.equipmentType,
           brandModel: it.brandModel,
+          department: it.department,
           location,
           responsiblePerson,
           canSaveResponsiblePerson: it.canSaveResponsiblePerson,
@@ -875,7 +879,12 @@ export default function MaintenanceReportBuilder({
                         <div className="text-[8.5px] leading-snug text-zinc-500">{row.brandModel}</div>
                       )}
                     </td>
-                    <td className="border border-zinc-400 px-1 py-1 align-top">{row.location || "—"}</td>
+                    <td className="border border-zinc-400 px-1 py-1 align-top">
+                      {row.department && (
+                        <div className="text-[8.5px] leading-snug text-zinc-500">{row.department}</div>
+                      )}
+                      <div>{row.location || "—"}</div>
+                    </td>
                     <td className="border border-zinc-400 px-1 py-1 align-top">{row.responsiblePerson || "—"}</td>
                     <td className="border border-zinc-400 px-1 py-1 align-top text-[9px] leading-snug">
                       <div className="flex flex-col gap-0.5">
