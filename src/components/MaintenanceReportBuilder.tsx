@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   Check,
   Loader2,
+  MapPin,
   Printer as PrinterIcon,
   RectangleHorizontal,
   RectangleVertical,
@@ -111,6 +112,11 @@ export default function MaintenanceReportBuilder({
   // there's a single place to edit the report template text, right next to
   // where it's actually used.
   const [showSettings, setShowSettings] = useState(false);
+  // Also collapsed behind a button, same reasoning — the location/
+  // responsible-person override editor used to sit inline on the page at
+  // all times once anything was selected, which pushed the actual printable
+  // form preview further and further down the page.
+  const [showAdjustModal, setShowAdjustModal] = useState(false);
   // Chrome (and most other browsers) hide their own print-dialog "Layout"
   // (portrait/landscape) control once a page declares @page { size: ... } —
   // which this page always does, to keep the printed A4 size/margins
@@ -341,42 +347,25 @@ export default function MaintenanceReportBuilder({
                 <Settings size={16} strokeWidth={2} aria-hidden="true" />
                 ตั้งค่าแบบฟอร์มรายงาน
               </button>
-              {/* Chrome hides its own print-dialog orientation control once
-                  @page size is set (see the `orientation` state comment
-                  above), so this toggle is what actually switches it —
-                  landscape is handy for this table's 7 columns. */}
-              <div
-                role="group"
-                aria-label="แนวกระดาษ"
-                className="inline-flex items-center rounded-full border border-zinc-200 p-0.5 dark:border-zinc-700"
+              <button
+                type="button"
+                onClick={() => setShowAdjustModal(true)}
+                disabled={selectedRows.length === 0}
+                title={
+                  selectedRows.length === 0
+                    ? "เลือกครุภัณฑ์อย่างน้อย 1 รายการก่อน"
+                    : undefined
+                }
+                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
               >
-                <button
-                  type="button"
-                  onClick={() => setOrientation("portrait")}
-                  aria-pressed={orientation === "portrait"}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
-                    orientation === "portrait"
-                      ? "bg-[var(--brand)] text-[var(--brand-contrast)]"
-                      : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                  }`}
-                >
-                  <RectangleVertical size={16} strokeWidth={2} aria-hidden="true" />
-                  แนวตั้ง
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOrientation("landscape")}
-                  aria-pressed={orientation === "landscape"}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
-                    orientation === "landscape"
-                      ? "bg-[var(--brand)] text-[var(--brand-contrast)]"
-                      : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                  }`}
-                >
-                  <RectangleHorizontal size={16} strokeWidth={2} aria-hidden="true" />
-                  แนวนอน
-                </button>
-              </div>
+                <MapPin size={16} strokeWidth={2} aria-hidden="true" />
+                แก้ไขสถานที่ตั้ง / ผู้รับผิดชอบ
+                {dirtyRowCount > 0 && (
+                  <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-xs font-semibold text-white">
+                    {dirtyRowCount}
+                  </span>
+                )}
+              </button>
               <button
                 type="button"
                 onClick={() => window.print()}
@@ -479,6 +468,48 @@ export default function MaintenanceReportBuilder({
                         />
                       </label>
                     ))}
+                  </div>
+
+                  <div className="mt-1 flex flex-col gap-1.5 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                    <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                      แนวกระดาษที่พิมพ์ (ตารางกว้างหลายคอลัมน์ — เลือกแนวนอนถ้าพอดีกว่า)
+                    </span>
+                    {/* Chrome hides its own print-dialog "Layout" control
+                        once the page's @page CSS sets a size, so this is
+                        what actually switches orientation — see the
+                        `orientation` state comment above. */}
+                    <div
+                      role="group"
+                      aria-label="แนวกระดาษ"
+                      className="inline-flex w-fit items-center rounded-full border border-zinc-200 p-0.5 dark:border-zinc-700"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setOrientation("portrait")}
+                        aria-pressed={orientation === "portrait"}
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                          orientation === "portrait"
+                            ? "bg-[var(--brand)] text-[var(--brand-contrast)]"
+                            : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        }`}
+                      >
+                        <RectangleVertical size={16} strokeWidth={2} aria-hidden="true" />
+                        แนวตั้ง
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOrientation("landscape")}
+                        aria-pressed={orientation === "landscape"}
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                          orientation === "landscape"
+                            ? "bg-[var(--brand)] text-[var(--brand-contrast)]"
+                            : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        }`}
+                      >
+                        <RectangleHorizontal size={16} strokeWidth={2} aria-hidden="true" />
+                        แนวนอน
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -601,89 +632,113 @@ export default function MaintenanceReportBuilder({
             </div>
           </div>
 
-          {selectedRows.length > 0 && (
-            <div className={`${CARD} flex flex-col gap-3 p-4`}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  ปรับ &quot;สถานที่ตั้ง&quot; / &quot;ผู้รับผิดชอบครุภัณฑ์&quot; ก่อนพิมพ์ (ถ้าข้อมูลในระบบไม่ตรงกับปัจจุบัน)
-                </p>
-                <button
-                  type="button"
-                  onClick={saveAllChanged}
-                  disabled={dirtyRowCount === 0 || savingAll}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-xs font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-50"
-                >
-                  {savingAll ? (
-                    <Loader2 size={13} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-                  ) : (
-                    <Save size={13} strokeWidth={2} aria-hidden="true" />
-                  )}
-                  บันทึกข้อมูลที่แก้ไขลงระบบ{dirtyRowCount > 0 ? ` (${dirtyRowCount})` : ""}
-                </button>
-              </div>
-              <p className="text-xs text-zinc-400">
-                การแก้ไขที่นี่ใช้กับรายงานฉบับนี้ทันที — กด &quot;บันทึกข้อมูลที่แก้ไขลงระบบ&quot; เพิ่มถ้าต้องการแก้ไขข้อมูลจริงในฐานข้อมูลด้วย
-                (จะบันทึกลง log การแก้ไขเหมือนการแก้ไขทั่วไป)
-              </p>
-              <div className="flex flex-col gap-2">
-                {selectedRows.map((row) => {
-                  const status = rowSaveStatus[row.rowNumber] ?? "idle";
-                  return (
-                    <div
-                      key={row.rowNumber}
-                      className="grid grid-cols-1 gap-2 border-b border-zinc-50 pb-2 last:border-0 sm:grid-cols-[1fr_1fr_1fr_auto] dark:border-zinc-800/60"
-                    >
-                      <span className="self-center text-xs text-zinc-500 dark:text-zinc-400">
-                        {row.assetNumber || "—"} · {row.description || "—"}
-                      </span>
-                      <input
-                        type="text"
-                        value={row.location}
-                        onChange={(e) => updateOverride(row.rowNumber, "location", e.target.value)}
-                        placeholder="สถานที่ตั้ง"
-                        className={INPUT_CLASS}
-                      />
-                      <input
-                        type="text"
-                        value={row.responsiblePerson}
-                        onChange={(e) => updateOverride(row.rowNumber, "responsiblePerson", e.target.value)}
-                        placeholder="ผู้รับผิดชอบครุภัณฑ์"
-                        title={
-                          row.canSaveResponsiblePerson
-                            ? undefined
-                            : "ชีตนี้แยกคอลัมน์คำนำหน้า/ชื่อ-นามสกุล — แก้ไขได้เฉพาะรายงานนี้ บันทึกลงระบบไม่ได้"
-                        }
-                        className={INPUT_CLASS}
-                      />
-                      <div className="flex items-center gap-1.5 self-center text-xs">
-                        {status === "saving" && (
-                          <Loader2 size={14} strokeWidth={2} className="animate-spin text-zinc-400" aria-hidden="true" />
-                        )}
-                        {status === "saved" && (
-                          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                            <Check size={14} strokeWidth={2} aria-hidden="true" />
-                            บันทึกแล้ว
+          {showAdjustModal && selectedRows.length > 0 && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+              onClick={() => setShowAdjustModal(false)}
+              role="presentation"
+            >
+              <div
+                className={`${CARD} flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between gap-3 border-b border-emerald-900/10 px-4 py-3 dark:border-emerald-400/10">
+                  <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                    <MapPin size={15} strokeWidth={2} aria-hidden="true" />
+                    แก้ไข &quot;สถานที่ตั้ง&quot; / &quot;ผู้รับผิดชอบครุภัณฑ์&quot; ก่อนพิมพ์
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdjustModal(false)}
+                    className="rounded-full p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+                    aria-label="ปิด"
+                  >
+                    <X size={16} strokeWidth={2} aria-hidden="true" />
+                  </button>
+                </div>
+
+                <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                    ใช้เมื่อข้อมูลในระบบไม่ตรงกับปัจจุบัน — แก้ไขที่นี่ใช้กับรายงานฉบับนี้ทันที กด &quot;บันทึกข้อมูลที่แก้ไขลงระบบ&quot;
+                    ด้านล่างเพิ่ม ถ้าต้องการแก้ไขข้อมูลจริงในฐานข้อมูลด้วย (จะบันทึกลง log การแก้ไขเหมือนการแก้ไขทั่วไป)
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {selectedRows.map((row) => {
+                      const status = rowSaveStatus[row.rowNumber] ?? "idle";
+                      return (
+                        <div
+                          key={row.rowNumber}
+                          className="grid grid-cols-1 gap-2 border-b border-zinc-50 pb-2 last:border-0 sm:grid-cols-[1fr_1fr_1fr_auto] dark:border-zinc-800/60"
+                        >
+                          <span className="self-center text-xs text-zinc-500 dark:text-zinc-400">
+                            {row.assetNumber || "—"} · {row.description || "—"}
                           </span>
-                        )}
-                        {status === "error" && (
-                          <span className="text-red-600 dark:text-red-400" title={rowSaveError[row.rowNumber]}>
-                            บันทึกไม่สำเร็จ
-                          </span>
-                        )}
-                        {hasSavableChange(row) && status !== "saving" && (
-                          <button
-                            type="button"
-                            onClick={() => saveRow(row)}
-                            className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2 py-1 font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                          >
-                            <Save size={12} strokeWidth={2} aria-hidden="true" />
-                            บันทึก
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                          <input
+                            type="text"
+                            value={row.location}
+                            onChange={(e) => updateOverride(row.rowNumber, "location", e.target.value)}
+                            placeholder="สถานที่ตั้ง"
+                            className={INPUT_CLASS}
+                          />
+                          <input
+                            type="text"
+                            value={row.responsiblePerson}
+                            onChange={(e) => updateOverride(row.rowNumber, "responsiblePerson", e.target.value)}
+                            placeholder="ผู้รับผิดชอบครุภัณฑ์"
+                            title={
+                              row.canSaveResponsiblePerson
+                                ? undefined
+                                : "ชีตนี้แยกคอลัมน์คำนำหน้า/ชื่อ-นามสกุล — แก้ไขได้เฉพาะรายงานนี้ บันทึกลงระบบไม่ได้"
+                            }
+                            className={INPUT_CLASS}
+                          />
+                          <div className="flex items-center gap-1.5 self-center text-xs">
+                            {status === "saving" && (
+                              <Loader2 size={14} strokeWidth={2} className="animate-spin text-zinc-400" aria-hidden="true" />
+                            )}
+                            {status === "saved" && (
+                              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                                <Check size={14} strokeWidth={2} aria-hidden="true" />
+                                บันทึกแล้ว
+                              </span>
+                            )}
+                            {status === "error" && (
+                              <span className="text-red-600 dark:text-red-400" title={rowSaveError[row.rowNumber]}>
+                                บันทึกไม่สำเร็จ
+                              </span>
+                            )}
+                            {hasSavableChange(row) && status !== "saving" && (
+                              <button
+                                type="button"
+                                onClick={() => saveRow(row)}
+                                className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2 py-1 font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                              >
+                                <Save size={12} strokeWidth={2} aria-hidden="true" />
+                                บันทึก
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 border-t border-emerald-900/10 px-4 py-3 dark:border-emerald-400/10">
+                  <button
+                    type="button"
+                    onClick={saveAllChanged}
+                    disabled={dirtyRowCount === 0 || savingAll}
+                    className="inline-flex items-center gap-2 rounded-full bg-[var(--brand)] px-5 py-2.5 text-sm font-semibold text-[var(--brand-contrast)] shadow-sm transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-60"
+                  >
+                    {savingAll ? (
+                      <Loader2 size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Save size={16} strokeWidth={2} aria-hidden="true" />
+                    )}
+                    บันทึกข้อมูลที่แก้ไขลงระบบ{dirtyRowCount > 0 ? ` (${dirtyRowCount})` : ""}
+                  </button>
+                </div>
               </div>
             </div>
           )}
