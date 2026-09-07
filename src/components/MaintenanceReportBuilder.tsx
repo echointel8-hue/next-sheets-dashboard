@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Check, Loader2, Printer as PrinterIcon, Save, Settings, X } from "lucide-react";
 import type { ReportSettings } from "@/lib/sheets";
+import MultiSelect from "@/components/MultiSelect";
 
 /** One selectable equipment item — already flattened/redaction-free by
  * manage/it/report/page.tsx from the raw sheet row, so this component never
@@ -78,8 +79,11 @@ export default function MaintenanceReportBuilder({
   settings: ReportSettings;
 }) {
   const [items, setItems] = useState(initialItems);
-  const [departmentFilter, setDepartmentFilter] = useState("");
-  const [equipmentTypeFilter, setEquipmentTypeFilter] = useState("");
+  // Multi-select — an empty array means "no filter on that dimension", same
+  // convention as the department/equipment-type filters on /manage and
+  // /manage/it (see MultiSelect).
+  const [departmentFilter, setDepartmentFilter] = useState<string[]>([]);
+  const [equipmentTypeFilter, setEquipmentTypeFilter] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [selectedRowNumbers, setSelectedRowNumbers] = useState<number[]>([]);
   const [formDepartment, setFormDepartment] = useState("");
@@ -111,20 +115,20 @@ export default function MaintenanceReportBuilder({
   const departmentOptions = useMemo(() => {
     const set = new Set<string>();
     for (const it of items) if (it.department) set.add(it.department);
-    return [...set].sort((a, b) => a.localeCompare(b, "th"));
+    return [...set].sort((a, b) => a.localeCompare(b, "th")).map((value) => ({ value }));
   }, [items]);
 
   const equipmentTypeOptions = useMemo(() => {
     const set = new Set<string>();
     for (const it of items) if (it.equipmentType) set.add(it.equipmentType);
-    return [...set].sort((a, b) => a.localeCompare(b, "th"));
+    return [...set].sort((a, b) => a.localeCompare(b, "th")).map((value) => ({ value }));
   }, [items]);
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items.filter((it) => {
-      if (departmentFilter && it.department !== departmentFilter) return false;
-      if (equipmentTypeFilter && it.equipmentType !== equipmentTypeFilter) return false;
+      if (departmentFilter.length > 0 && !departmentFilter.includes(it.department)) return false;
+      if (equipmentTypeFilter.length > 0 && !equipmentTypeFilter.includes(it.equipmentType)) return false;
       if (q) {
         const hay = `${it.assetNumber} ${it.brandModel} ${it.equipmentType} ${it.installLocation} ${it.responsiblePerson}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -371,85 +375,102 @@ export default function MaintenanceReportBuilder({
           </div>
 
           {showSettings && (
-            <div className={`${CARD} flex flex-col gap-3 p-4`}>
-              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                ข้อความหัวแบบฟอร์ม / ผู้รับทราบ (แก้ไขเฉพาะรายงานนี้ หรือกด &quot;บันทึกเป็นค่าเริ่มต้น&quot; เพื่อใช้ในรายงานครั้งถัดไปด้วย)
-              </p>
-              {settingsError && (
-                <div
-                  role="alert"
-                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200"
-                >
-                  {settingsError}
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+              onClick={() => setShowSettings(false)}
+              role="presentation"
+            >
+              <div
+                className={`${CARD} flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between gap-3 border-b border-emerald-900/10 px-4 py-3 dark:border-emerald-400/10">
+                  <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                    <Settings size={15} strokeWidth={2} aria-hidden="true" />
+                    ตั้งค่าแบบฟอร์มรายงาน
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowSettings(false)}
+                    className="rounded-full p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+                    aria-label="ปิด"
+                  >
+                    <X size={16} strokeWidth={2} aria-hidden="true" />
+                  </button>
                 </div>
-              )}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {SETTINGS_FIELDS.map(({ key, label }) => (
-                  <label key={key} className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-                    {label}
-                    <input
-                      type="text"
-                      value={formSettings[key]}
-                      onChange={(e) => {
-                        setFormSettings((prev) => ({ ...prev, [key]: e.target.value }));
-                        setSettingsSaved(false);
-                      }}
-                      className={INPUT_CLASS}
-                    />
-                  </label>
-                ))}
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={saveSettingsAsDefault}
-                  disabled={settingsSaving}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                  {settingsSaving ? (
-                    <Loader2 size={14} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-                  ) : (
-                    <Save size={14} strokeWidth={2} aria-hidden="true" />
+
+                <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                    ข้อความหัวแบบฟอร์ม / ผู้รับทราบ — แก้ไขที่นี่จะใช้กับรายงานฉบับนี้ทันที กด &quot;บันทึกเป็นค่าเริ่มต้น&quot;
+                    ด้านล่างเพิ่ม ถ้าต้องการให้ใช้ในรายงานครั้งถัดไปด้วย
+                  </p>
+                  {settingsError && (
+                    <div
+                      role="alert"
+                      className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200"
+                    >
+                      {settingsError}
+                    </div>
                   )}
-                  บันทึกเป็นค่าเริ่มต้น
-                </button>
-                {settingsSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400">บันทึกแล้ว</span>}
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {SETTINGS_FIELDS.map(({ key, label }) => (
+                      <label key={key} className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                        {label}
+                        <input
+                          type="text"
+                          value={formSettings[key]}
+                          onChange={(e) => {
+                            setFormSettings((prev) => ({ ...prev, [key]: e.target.value }));
+                            setSettingsSaved(false);
+                          }}
+                          className={INPUT_CLASS}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 border-t border-emerald-900/10 px-4 py-3 dark:border-emerald-400/10">
+                  <button
+                    type="button"
+                    onClick={saveSettingsAsDefault}
+                    disabled={settingsSaving}
+                    className="inline-flex items-center gap-2 rounded-full bg-[var(--brand)] px-5 py-2.5 text-sm font-semibold text-[var(--brand-contrast)] shadow-sm transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-60"
+                  >
+                    {settingsSaving ? (
+                      <Loader2 size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Save size={16} strokeWidth={2} aria-hidden="true" />
+                    )}
+                    บันทึกเป็นค่าเริ่มต้น
+                  </button>
+                  {settingsSaved && (
+                    <span className="inline-flex items-center gap-1 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                      <Check size={15} strokeWidth={2} aria-hidden="true" />
+                      บันทึกแล้ว
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           )}
 
           <div className={`${CARD} flex flex-col gap-3 p-4`}>
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-              <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-xs sm:flex-1">
-                กรองตามกลุ่มงาน
-                <select
-                  value={departmentFilter}
-                  onChange={(e) => setDepartmentFilter(e.target.value)}
-                  className={INPUT_CLASS}
-                >
-                  <option value="">ทั้งหมด</option>
-                  {departmentOptions.map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-xs sm:flex-1">
-                กรองตามประเภทครุภัณฑ์
-                <select
-                  value={equipmentTypeFilter}
-                  onChange={(e) => setEquipmentTypeFilter(e.target.value)}
-                  className={INPUT_CLASS}
-                >
-                  <option value="">ทั้งหมด</option>
-                  {equipmentTypeOptions.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <MultiSelect
+                label="กรองตามกลุ่มงาน"
+                options={departmentOptions}
+                selected={departmentFilter}
+                onChange={setDepartmentFilter}
+                className="sm:max-w-xs sm:flex-1"
+              />
+              <MultiSelect
+                label="กรองตามประเภทครุภัณฑ์"
+                options={equipmentTypeOptions}
+                selected={equipmentTypeFilter}
+                onChange={setEquipmentTypeFilter}
+                className="sm:max-w-xs sm:flex-1"
+              />
               <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-xs sm:flex-1">
                 ค้นหา
                 <input
