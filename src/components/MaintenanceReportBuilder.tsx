@@ -2,7 +2,17 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, Loader2, Printer as PrinterIcon, Save, Settings, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  Loader2,
+  Printer as PrinterIcon,
+  RectangleHorizontal,
+  RectangleVertical,
+  Save,
+  Settings,
+  X,
+} from "lucide-react";
 import type { ReportSettings } from "@/lib/sheets";
 import MultiSelect from "@/components/MultiSelect";
 
@@ -101,6 +111,12 @@ export default function MaintenanceReportBuilder({
   // there's a single place to edit the report template text, right next to
   // where it's actually used.
   const [showSettings, setShowSettings] = useState(false);
+  // Chrome (and most other browsers) hide their own print-dialog "Layout"
+  // (portrait/landscape) control once a page declares @page { size: ... } —
+  // which this page always does, to keep the printed A4 size/margins
+  // consistent regardless of a printer's own defaults. So orientation has
+  // to be a control of our own instead, feeding the same @page rule below.
+  const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
 
   // Form header / signature text — editable right here (pre-filled from the
   // saved ReportSettings) so a one-off change (a substitute signee, say)
@@ -325,6 +341,42 @@ export default function MaintenanceReportBuilder({
                 <Settings size={16} strokeWidth={2} aria-hidden="true" />
                 ตั้งค่าแบบฟอร์มรายงาน
               </button>
+              {/* Chrome hides its own print-dialog orientation control once
+                  @page size is set (see the `orientation` state comment
+                  above), so this toggle is what actually switches it —
+                  landscape is handy for this table's 7 columns. */}
+              <div
+                role="group"
+                aria-label="แนวกระดาษ"
+                className="inline-flex items-center rounded-full border border-zinc-200 p-0.5 dark:border-zinc-700"
+              >
+                <button
+                  type="button"
+                  onClick={() => setOrientation("portrait")}
+                  aria-pressed={orientation === "portrait"}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                    orientation === "portrait"
+                      ? "bg-[var(--brand)] text-[var(--brand-contrast)]"
+                      : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  }`}
+                >
+                  <RectangleVertical size={16} strokeWidth={2} aria-hidden="true" />
+                  แนวตั้ง
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOrientation("landscape")}
+                  aria-pressed={orientation === "landscape"}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                    orientation === "landscape"
+                      ? "bg-[var(--brand)] text-[var(--brand-contrast)]"
+                      : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  }`}
+                >
+                  <RectangleHorizontal size={16} strokeWidth={2} aria-hidden="true" />
+                  แนวนอน
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={() => window.print()}
@@ -669,8 +721,8 @@ export default function MaintenanceReportBuilder({
                     <td className="border border-zinc-400 px-1.5 py-1">{row.description || "—"}</td>
                     <td className="border border-zinc-400 px-1.5 py-1">{row.location || "—"}</td>
                     <td className="border border-zinc-400 px-1.5 py-1">{row.responsiblePerson || "—"}</td>
-                    <td className="border border-zinc-400 px-1.5 py-1 whitespace-nowrap">{displayDate || "—"}</td>
-                    <td className="border border-zinc-400 px-1.5 py-1 whitespace-nowrap">{timeRangeLabel || "—"}</td>
+                    <td className="border border-zinc-400 px-1.5 py-1 whitespace-nowrap">{displayDate}</td>
+                    <td className="border border-zinc-400 px-1.5 py-1 whitespace-nowrap">{timeRangeLabel}</td>
                   </tr>
                 ))}
                 {selectedRows.length === 0 && (
@@ -724,7 +776,7 @@ export default function MaintenanceReportBuilder({
 
       <style>{`
         @media print {
-          @page { size: A4; margin: 14mm; }
+          @page { size: A4 ${orientation}; margin: 14mm; }
           html, body { background: #fff !important; }
           .no-print { display: none !important; }
           .print-area, .print-area * { color: #000 !important; border-color: #52525b !important; }
