@@ -43,6 +43,12 @@ interface SelectedRow {
   rowNumber: number;
   assetNumber: string;
   description: string;
+  /** ประเภทครุภัณฑ์ and ยี่ห้อ/รุ่น kept separate (description above stays
+   * the single-line "type — brand/model" form for compact UI like the
+   * adjust-modal row label) so the printed table can put them on two lines
+   * at different sizes — see the "รายการครุภัณฑ์" column below. */
+  equipmentType: string;
+  brandModel: string;
   location: string;
   responsiblePerson: string;
   canSaveResponsiblePerson: boolean;
@@ -206,6 +212,8 @@ export default function MaintenanceReportBuilder({
           rowNumber: it.rowNumber,
           assetNumber: it.assetNumber,
           description: [it.equipmentType, it.brandModel].filter(Boolean).join(" — "),
+          equipmentType: it.equipmentType,
+          brandModel: it.brandModel,
           location,
           responsiblePerson,
           canSaveResponsiblePerson: it.canSaveResponsiblePerson,
@@ -756,28 +764,53 @@ export default function MaintenanceReportBuilder({
 
           <div className="mt-5">
             <p className="mb-2 text-sm font-semibold">ส่วนที่ 1 ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา</p>
-            <table className="w-full border-collapse text-xs">
+            <table className="w-full border-collapse text-[10px] leading-snug">
+              <colgroup>
+                <col className="w-[4%]" />
+                <col className="w-[13%]" />
+                <col className="w-[20%]" />
+                <col className="w-[14%]" />
+                <col className="w-[14%]" />
+                <col className="w-[10%]" />
+                <col className="w-[25%]" />
+              </colgroup>
               <thead>
                 <tr>
-                  <th className="border border-zinc-400 px-1.5 py-1 font-medium">ลำดับ</th>
-                  <th className="border border-zinc-400 px-1.5 py-1 font-medium">หมายเลขครุภัณฑ์</th>
-                  <th className="border border-zinc-400 px-1.5 py-1 font-medium">รายการครุภัณฑ์</th>
-                  <th className="border border-zinc-400 px-1.5 py-1 font-medium">สถานที่ตั้ง</th>
-                  <th className="border border-zinc-400 px-1.5 py-1 font-medium">ผู้รับผิดชอบครุภัณฑ์</th>
-                  <th className="border border-zinc-400 px-1.5 py-1 font-medium">วันที่</th>
-                  <th className="border border-zinc-400 px-1.5 py-1 font-medium">ช่วงเวลา</th>
+                  <th className="border border-zinc-400 px-1 py-1 font-medium">ลำดับ</th>
+                  <th className="border border-zinc-400 px-1 py-1 font-medium">หมายเลขครุภัณฑ์</th>
+                  <th className="border border-zinc-400 px-1 py-1 font-medium">รายการครุภัณฑ์</th>
+                  <th className="border border-zinc-400 px-1 py-1 font-medium">สถานที่ตั้ง</th>
+                  <th className="border border-zinc-400 px-1 py-1 font-medium">ผู้รับผิดชอบครุภัณฑ์</th>
+                  <th className="border border-zinc-400 px-1 py-1 font-medium">สถานะการดำเนินการ</th>
+                  <th className="border border-zinc-400 px-1 py-1 font-medium">ผลการพิจารณาโดย IT</th>
                 </tr>
               </thead>
               <tbody>
                 {selectedRows.map((row, i) => (
                   <tr key={row.rowNumber}>
-                    <td className="border border-zinc-400 px-1.5 py-1 text-center">{i + 1}</td>
-                    <td className="border border-zinc-400 px-1.5 py-1">{row.assetNumber || "—"}</td>
-                    <td className="border border-zinc-400 px-1.5 py-1">{row.description || "—"}</td>
-                    <td className="border border-zinc-400 px-1.5 py-1">{row.location || "—"}</td>
-                    <td className="border border-zinc-400 px-1.5 py-1">{row.responsiblePerson || "—"}</td>
-                    <td className="border border-zinc-400 px-1.5 py-1 whitespace-nowrap">{displayDate}</td>
-                    <td className="border border-zinc-400 px-1.5 py-1 whitespace-nowrap">{timeRangeLabel}</td>
+                    <td className="border border-zinc-400 px-1 py-1 text-center align-top">{i + 1}</td>
+                    <td className="border border-zinc-400 px-1 py-1 align-top whitespace-nowrap text-[9px]">
+                      {row.assetNumber || "—"}
+                    </td>
+                    <td className="border border-zinc-400 px-1 py-1 align-top">
+                      <div className="font-medium">{row.equipmentType || "—"}</div>
+                      {row.brandModel && (
+                        <div className="text-[8.5px] leading-snug text-zinc-500">{row.brandModel}</div>
+                      )}
+                    </td>
+                    <td className="border border-zinc-400 px-1 py-1 align-top">{row.location || "—"}</td>
+                    <td className="border border-zinc-400 px-1 py-1 align-top">{row.responsiblePerson || "—"}</td>
+                    <td className="border border-zinc-400 px-1 py-1 align-top whitespace-nowrap text-center text-[9px]">
+                      ☐ บำรุงรักษา
+                    </td>
+                    <td className="border border-zinc-400 px-1 py-1 align-top">
+                      <div className="flex flex-col gap-0.5 whitespace-nowrap text-[9px]">
+                        <span>☐ ปกติ</span>
+                        <span>☐ ส่งซ่อม</span>
+                        <span>☐ เปลี่ยนอะไหล่</span>
+                        <span>☐ อื่นๆ ระบุ .....................</span>
+                      </div>
+                    </td>
                   </tr>
                 ))}
                 {selectedRows.length === 0 && (
@@ -795,7 +828,8 @@ export default function MaintenanceReportBuilder({
             <p className="mb-2 text-sm font-semibold">ส่วนที่ 2 ผลการบำรุงรักษา</p>
             <div className="flex flex-col gap-3 text-sm">
               <div className="flex flex-wrap gap-x-8 gap-y-2">
-                <span>วันที่ดำเนินการ .............................................</span>
+                <span>วันที่ดำเนินการ {displayDate || "............................................."}</span>
+                <span>ช่วงเวลา {timeRangeLabel || "....................."}</span>
                 <span>ผู้ดำเนินการ .............................................</span>
               </div>
               <div>
@@ -805,10 +839,6 @@ export default function MaintenanceReportBuilder({
                   <span className="block border-b border-zinc-400">&nbsp;</span>
                 </div>
               </div>
-              <p>
-                สถานะการดำเนินการ&nbsp;&nbsp;☐ ปกติ&nbsp;&nbsp;&nbsp;☐ ต้องซ่อม&nbsp;&nbsp;&nbsp;☐ เปลี่ยนอะไหล่&nbsp;&nbsp;&nbsp;☐
-                อื่นๆ ระบุ ....................................................
-              </p>
             </div>
           </div>
 
