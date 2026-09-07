@@ -782,7 +782,7 @@ export default function MaintenanceReportBuilder({
                   <th className="border border-zinc-400 px-1 py-1 font-medium">สถานที่ตั้ง</th>
                   <th className="border border-zinc-400 px-1 py-1 font-medium">ผู้รับผิดชอบครุภัณฑ์</th>
                   <th className="border border-zinc-400 px-1 py-1 font-medium">สถานะการดำเนินการ</th>
-                  <th className="border border-zinc-400 px-1 py-1 font-medium">ผลการพิจารณาโดย IT</th>
+                  <th className="border border-zinc-400 px-1 py-1 font-medium">ผลการตรวจสอบโดย IT</th>
                 </tr>
               </thead>
               <tbody>
@@ -804,11 +804,11 @@ export default function MaintenanceReportBuilder({
                       ☐ บำรุงรักษา
                     </td>
                     <td className="border border-zinc-400 px-1 py-1 align-top">
-                      <div className="flex flex-col gap-0.5 whitespace-nowrap text-[9px]">
+                      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 whitespace-nowrap text-[9px]">
                         <span>☐ ปกติ</span>
                         <span>☐ ส่งซ่อม</span>
                         <span>☐ เปลี่ยนอะไหล่</span>
-                        <span>☐ อื่นๆ ระบุ .....................</span>
+                        <span className="col-span-2">☐ อื่นๆ ระบุ .....................</span>
                       </div>
                     </td>
                   </tr>
@@ -824,21 +824,11 @@ export default function MaintenanceReportBuilder({
             </table>
           </div>
 
-          <div className="mt-6">
-            <p className="mb-2 text-sm font-semibold">ส่วนที่ 2 ผลการบำรุงรักษา</p>
-            <div className="flex flex-col gap-3 text-sm">
-              <div className="flex flex-wrap gap-x-8 gap-y-2">
-                <span>วันที่ดำเนินการ {displayDate || "............................................."}</span>
-                <span>ช่วงเวลา {timeRangeLabel || "....................."}</span>
-                <span>ผู้ดำเนินการ .............................................</span>
-              </div>
-              <div>
-                <p>ผลการตรวจเช็ค</p>
-                <div className="mt-1 flex flex-col gap-3">
-                  <span className="block border-b border-zinc-400">&nbsp;</span>
-                  <span className="block border-b border-zinc-400">&nbsp;</span>
-                </div>
-              </div>
+          <div className="mt-6 text-sm">
+            <div className="flex flex-wrap gap-x-8 gap-y-2">
+              <span>วันที่ดำเนินการ {displayDate || "............................................."}</span>
+              <span>ช่วงเวลา {timeRangeLabel || "....................."}</span>
+              <span>ผู้ดำเนินการ .............................................</span>
             </div>
           </div>
 
