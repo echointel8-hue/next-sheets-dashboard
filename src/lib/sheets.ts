@@ -446,6 +446,14 @@ export interface ReportSettings {
   acknowledgerName: string;
   acknowledgerPosition: string;
   acknowledgerDepartment: string;
+  /** Checklist items shown under the "การดำเนินการ" column of a printed
+   * maintenance report — editable by the hospital instead of hard-coded,
+   * since this list is expected to grow (today just "บำรุงรักษา", later
+   * maybe "อัพเดทโปรแกรม Hosxp 3 เป็นเวอร์ชัน ...."). Stored as a JSON
+   * array in the Value cell — see the special-cased handling in
+   * getReportSettings/updateReportSettings below, since every other
+   * setting here is a plain string. */
+  actionOptions: string[];
 }
 
 // Matches the attached example form exactly, so a hospital that never
@@ -457,6 +465,7 @@ export const DEFAULT_REPORT_SETTINGS: ReportSettings = {
   acknowledgerName: "นางขนัญธร เสียงล้ำ",
   acknowledgerPosition: "เจ้าพนักงานเวชสถิติชำนาญงาน",
   acknowledgerDepartment: "กลุ่มงานประกันสุขภาพและกลุ่มงานสุขภาพดิจิทัล",
+  actionOptions: ["บำรุงรักษา"],
 };
 
 // Fixed key order — also what updateReportSettings writes back, so the
@@ -495,10 +504,23 @@ export async function getReportSettings(): Promise<ReportSettings> {
     if (key) stored.set(key, (row[1] ?? "").toString());
   }
 
-  const result = { ...DEFAULT_REPORT_SETTINGS };
+  const result: ReportSettings = { ...DEFAULT_REPORT_SETTINGS, actionOptions: [...DEFAULT_REPORT_SETTINGS.actionOptions] };
   for (const key of REPORT_SETTINGS_KEYS) {
     const v = stored.get(key);
-    if (v !== undefined && v.trim() !== "") result[key] = v;
+    if (v === undefined || v.trim() === "") continue;
+    if (key === "actionOptions") {
+      // JSON array, not plain text — see the interface comment above.
+      try {
+        const parsed: unknown = JSON.parse(v);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((x) => typeof x === "string")) {
+          result.actionOptions = parsed as string[];
+        }
+      } catch {
+        // Malformed cell (hand-edited?) — keep the default rather than crash.
+      }
+      continue;
+    }
+    result[key] = v;
   }
   return result;
 }
@@ -522,7 +544,9 @@ export async function updateReportSettings(updates: Partial<ReportSettings>): Pr
       range: `${tab}!A2:B${1 + REPORT_SETTINGS_KEYS.length}`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
-        values: REPORT_SETTINGS_KEYS.map((key) => [key, merged[key]]),
+        values: REPORT_SETTINGS_KEYS.map((key) =>
+          key === "actionOptions" ? [key, JSON.stringify(merged.actionOptions)] : [key, merged[key]]
+        ),
       },
     });
   } catch (err: unknown) {

@@ -7,11 +7,13 @@ import {
   Check,
   Loader2,
   MapPin,
+  Plus,
   Printer as PrinterIcon,
   RectangleHorizontal,
   RectangleVertical,
   Save,
   Settings,
+  Trash2,
   X,
 } from "lucide-react";
 import type { ReportSettings } from "@/lib/sheets";
@@ -75,6 +77,15 @@ function formatThaiDate(iso: string): string {
   const [y, m, d] = parts;
   if (!y || !m || !d) return iso;
   return `${d} ${THAI_MONTHS_SHORT[m - 1] ?? ""} ${y + 543}`;
+}
+
+/** Drops blank entries (left behind mid-edit, e.g. a newly-added row the
+ * person hasn't typed into yet) and guarantees at least one item survives,
+ * so the printed table's "การดำเนินการ" column is never empty. Used both
+ * before saving to the sheet and when rendering the print preview. */
+function cleanActionOptions(list: string[]): string[] {
+  const filtered = list.map((s) => s.trim()).filter(Boolean);
+  return filtered.length > 0 ? filtered : ["บำรุงรักษา"];
 }
 
 const SETTINGS_FIELDS: { key: keyof ReportSettings; label: string }[] = [
@@ -295,15 +306,40 @@ export default function MaintenanceReportBuilder({
     }
   }
 
+  // CRUD for the "การดำเนินการ" checklist — see the SETTINGS_FIELDS-adjacent
+  // section in the settings modal below. Blank rows are allowed while
+  // editing (so a freshly-added row isn't yanked away before anyone can
+  // type into it); cleanActionOptions strips them out at save/print time.
+  function updateActionOption(index: number, value: string) {
+    setFormSettings((prev) => ({
+      ...prev,
+      actionOptions: prev.actionOptions.map((v, i) => (i === index ? value : v)),
+    }));
+    setSettingsSaved(false);
+  }
+
+  function addActionOption() {
+    setFormSettings((prev) => ({ ...prev, actionOptions: [...prev.actionOptions, ""] }));
+    setSettingsSaved(false);
+  }
+
+  function removeActionOption(index: number) {
+    setFormSettings((prev) =>
+      prev.actionOptions.length <= 1 ? prev : { ...prev, actionOptions: prev.actionOptions.filter((_, i) => i !== index) }
+    );
+    setSettingsSaved(false);
+  }
+
   async function saveSettingsAsDefault() {
     setSettingsSaving(true);
     setSettingsError(null);
     setSettingsSaved(false);
     try {
+      const payload: ReportSettings = { ...formSettings, actionOptions: cleanActionOptions(formSettings.actionOptions) };
       const res = await fetch("/api/manage/it/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formSettings),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -321,6 +357,9 @@ export default function MaintenanceReportBuilder({
 
   const displayDate = visitDate ? formatThaiDate(visitDate) : "";
   const timeRangeLabel = timeFrom && timeTo ? `${timeFrom} - ${timeTo}` : timeFrom || timeTo || "";
+  // Blank rows mid-edit in the settings modal never leak into the printed
+  // table — see cleanActionOptions.
+  const printActionOptions = cleanActionOptions(formSettings.actionOptions);
 
   return (
     <main className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 print:block print:bg-white print:px-0 print:py-0 sm:px-6 lg:px-10">
@@ -476,6 +515,44 @@ export default function MaintenanceReportBuilder({
                         />
                       </label>
                     ))}
+                  </div>
+
+                  <div className="mt-1 flex flex-col gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                    <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                      รายการในช่อง &quot;การดำเนินการ&quot; ของตาราง (แต่ละรายการแสดงเป็นช่องติ๊กในรายงานที่พิมพ์ —
+                      เพิ่ม/แก้ไข/ลบได้)
+                    </span>
+                    <div className="flex flex-col gap-2">
+                      {formSettings.actionOptions.map((opt, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={opt}
+                            onChange={(e) => updateActionOption(idx, e.target.value)}
+                            placeholder="เช่น อัพเดทโปรแกรม Hosxp 3 เป็นเวอร์ชัน ...."
+                            className={`${INPUT_CLASS} flex-1`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeActionOption(idx)}
+                            disabled={formSettings.actionOptions.length <= 1}
+                            title={formSettings.actionOptions.length <= 1 ? "ต้องมีอย่างน้อย 1 รายการ" : "ลบรายการนี้"}
+                            aria-label="ลบรายการนี้"
+                            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-zinc-200 disabled:hover:bg-transparent disabled:hover:text-zinc-500 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-red-900/50 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+                          >
+                            <Trash2 size={16} strokeWidth={2} aria-hidden="true" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addActionOption}
+                      className="inline-flex w-fit items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      <Plus size={14} strokeWidth={2} aria-hidden="true" />
+                      เพิ่มรายการ
+                    </button>
                   </div>
 
                   <div className="mt-1 flex flex-col gap-1.5 border-t border-zinc-100 pt-3 dark:border-zinc-800">
@@ -763,7 +840,7 @@ export default function MaintenanceReportBuilder({
           </div>
 
           <div className="mt-5">
-            <p className="mb-2 text-sm font-semibold">ส่วนที่ 1 ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา</p>
+            <p className="mb-2 text-sm font-semibold">ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา</p>
             <table className="w-full border-collapse text-[10px] leading-snug">
               <colgroup>
                 <col className="w-[4%]" />
@@ -771,8 +848,8 @@ export default function MaintenanceReportBuilder({
                 <col className="w-[20%]" />
                 <col className="w-[14%]" />
                 <col className="w-[14%]" />
-                <col className="w-[10%]" />
-                <col className="w-[25%]" />
+                <col className="w-[14%]" />
+                <col className="w-[21%]" />
               </colgroup>
               <thead>
                 <tr>
@@ -781,7 +858,7 @@ export default function MaintenanceReportBuilder({
                   <th className="border border-zinc-400 px-1 py-1 font-medium">รายการครุภัณฑ์</th>
                   <th className="border border-zinc-400 px-1 py-1 font-medium">สถานที่ตั้ง</th>
                   <th className="border border-zinc-400 px-1 py-1 font-medium">ผู้รับผิดชอบครุภัณฑ์</th>
-                  <th className="border border-zinc-400 px-1 py-1 font-medium">สถานะการดำเนินการ</th>
+                  <th className="border border-zinc-400 px-1 py-1 font-medium">การดำเนินการ</th>
                   <th className="border border-zinc-400 px-1 py-1 font-medium">ผลการตรวจสอบโดย IT</th>
                 </tr>
               </thead>
@@ -800,15 +877,19 @@ export default function MaintenanceReportBuilder({
                     </td>
                     <td className="border border-zinc-400 px-1 py-1 align-top">{row.location || "—"}</td>
                     <td className="border border-zinc-400 px-1 py-1 align-top">{row.responsiblePerson || "—"}</td>
-                    <td className="border border-zinc-400 px-1 py-1 align-top whitespace-nowrap text-center text-[9px]">
-                      ☐ บำรุงรักษา
+                    <td className="border border-zinc-400 px-1 py-1 align-top text-[9px] leading-snug">
+                      <div className="flex flex-col gap-0.5">
+                        {printActionOptions.map((label) => (
+                          <span key={label}>☐ {label}</span>
+                        ))}
+                      </div>
                     </td>
                     <td className="border border-zinc-400 px-1 py-1 align-top">
-                      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 whitespace-nowrap text-[9px]">
+                      <div className="grid grid-cols-2 gap-x-1 gap-y-0.5 whitespace-nowrap text-[9px]">
                         <span>☐ ปกติ</span>
                         <span>☐ ส่งซ่อม</span>
                         <span>☐ เปลี่ยนอะไหล่</span>
-                        <span className="col-span-2">☐ อื่นๆ ระบุ .....................</span>
+                        <span>☐ อื่นๆ ระบุ .....................</span>
                       </div>
                     </td>
                   </tr>

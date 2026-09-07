@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
 function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
-  const allowedKeys: (keyof ReportSettings)[] = [
+  const stringKeys: Exclude<keyof ReportSettings, "actionOptions">[] = [
     "orgName",
     "maintenanceFormTitle",
     "fiscalYearLabel",
@@ -48,10 +48,16 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
     "acknowledgerDepartment",
   ];
   const out: Partial<ReportSettings> = {};
-  for (const key of allowedKeys) {
+  for (const key of stringKeys) {
     if (b[key] === undefined) continue;
     if (typeof b[key] !== "string") return null;
     out[key] = (b[key] as string).trim();
+  }
+  if (b.actionOptions !== undefined) {
+    if (!Array.isArray(b.actionOptions) || !b.actionOptions.every((x) => typeof x === "string")) return null;
+    const cleaned = (b.actionOptions as string[]).map((s) => s.trim()).filter(Boolean);
+    if (cleaned.length === 0) return null;
+    out.actionOptions = cleaned;
   }
   return out;
 }
