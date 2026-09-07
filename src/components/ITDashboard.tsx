@@ -7,15 +7,20 @@ import {
   AlertTriangle,
   ArrowLeft,
   Building2,
+  ClipboardList,
   Cpu,
   FileText,
   Filter,
+  History,
   Loader2,
   LogOut,
   Package,
+  Plus,
   Printer,
   Save,
   Settings,
+  Trash2,
+  Wrench,
   X,
 } from "lucide-react";
 import {
@@ -26,10 +31,15 @@ import {
   getAssetNumber,
   getBrandModel,
   getFullName,
+  joinSoftwareEntries,
+  splitSoftwareEntries,
   type EquipmentRow,
   type FieldMap,
+  type SoftwareEntry,
 } from "@/lib/fields";
-import type { ReportSettings } from "@/lib/sheets";
+import type { ReportSettings, SpecStandards } from "@/lib/sheets";
+import { getLatestMaintenanceLogByAsset, type MaintenanceLogEntry } from "@/lib/maintenanceLog";
+import { DEFAULT_SPEC_STANDARDS, evaluateRowSpec } from "@/lib/specEvaluation";
 import MultiSelect from "@/components/MultiSelect";
 
 export interface ITRecord {
@@ -76,10 +86,14 @@ export default function ITDashboard({
   session,
   initial,
   initialSettings,
+  initialMaintenanceLog,
+  initialSpecStandards,
 }: {
   session: { username: string; isBootstrap: boolean };
   initial: ITLoadResult;
   initialSettings: ReportSettings | null;
+  initialMaintenanceLog: MaintenanceLogEntry[];
+  initialSpecStandards: SpecStandards | null;
 }) {
   const router = useRouter();
   const [data] = useState<ITLoadResult>(initial);
@@ -87,6 +101,23 @@ export default function ITDashboard({
   const [equipmentTypeFilter, setEquipmentTypeFilter] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [showSpecSettings, setShowSpecSettings] = useState(false);
+  const [maintenanceLog, setMaintenanceLog] = useState<MaintenanceLogEntry[]>(initialMaintenanceLog);
+  const [specStandards, setSpecStandards] = useState<SpecStandards>(initialSpecStandards ?? DEFAULT_SPEC_STANDARDS);
+  const [statusModalAsset, setStatusModalAsset] = useState<{ assetNumber: string; label: string } | null>(null);
+
+  const latestMaintenanceByAsset = useMemo(
+    () => getLatestMaintenanceLogByAsset(maintenanceLog),
+    [maintenanceLog]
+  );
+
+  /** Merges a fresh batch of entries for one asset (the API's response
+   * after a successful POST already returns every entry for that asset, not
+   * just the new one) into the full log — replace-then-concat rather than
+   * append, so a retried/duplicate save can never double-count. */
+  function mergeMaintenanceEntries(assetNumber: string, freshEntriesForAsset: MaintenanceLogEntry[]) {
+    setMaintenanceLog((prev) => [...prev.filter((e) => e.assetNumber !== assetNumber), ...freshEntriesForAsset]);
+  }
 
   const rows = useMemo(() => (!isError(data) ? data.rows : []), [data]);
   const headers = useMemo(() => (!isError(data) ? data.headers : []), [data]);
@@ -294,14 +325,24 @@ export default function ITDashboard({
                   <Filter size={15} strokeWidth={2} aria-hidden="true" />
                   ตัวกรองข้อมูล
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowSettings((v) => !v)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                  <Settings size={14} strokeWidth={2} aria-hidden="true" />
-                  ตั้งค่าแบบฟอร์มรายงาน
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowSpecSettings((v) => !v)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    <Cpu size={14} strokeWidth={2} aria-hidden="true" />
+                    ตั้งค่ามาตรฐานสเปก
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowSettings((v) => !v)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    <Settings size={14} strokeWidth={2} aria-hidden="true" />
+                    ตั้งค่าแบบฟอร์มรายงาน
+                  </button>
+                </div>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
                 <MultiSelect
@@ -348,25 +389,132 @@ export default function ITDashboard({
               <ReportSettingsPanel initialSettings={initialSettings} onClose={() => setShowSettings(false)} />
             )}
 
+            {showSpecSettings && (
+              <SpecStandardsPanel
+                initialStandards={specStandards}
+                onClose={() => setShowSpecSettings(false)}
+                onSaved={setSpecStandards}
+              />
+            )}
+
             <SpecTable
               title="คอมพิวเตอร์ / โน้ตบุ๊ก / All-in-One"
               icon={<Cpu size={16} strokeWidth={2} aria-hidden="true" />}
               rows={pcRows}
+              headers={headers}
               fields={fields}
               specColumns={pcSpecColumns}
+              latestMaintenanceByAsset={latestMaintenanceByAsset}
+              specStandards={specStandards}
+              showSpecStatus
+              onUpdateStatus={(assetNumber, label) => setStatusModalAsset({ assetNumber, label })}
             />
 
             <SpecTable
               title="เครื่องพิมพ์"
               icon={<Printer size={16} strokeWidth={2} aria-hidden="true" />}
               rows={printerRows}
+              headers={headers}
               fields={fields}
               specColumns={printerSpecColumns}
+              latestMaintenanceByAsset={latestMaintenanceByAsset}
+              specStandards={specStandards}
+              showSpecStatus={false}
+              onUpdateStatus={(assetNumber, label) => setStatusModalAsset({ assetNumber, label })}
             />
           </>
         )}
       </div>
+
+      {statusModalAsset && (
+        <MaintenanceStatusModal
+          assetNumber={statusModalAsset.assetNumber}
+          label={statusModalAsset.label}
+          entries={maintenanceLog
+            .filter((e) => e.assetNumber === statusModalAsset.assetNumber)
+            .sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1))}
+          onClose={() => setStatusModalAsset(null)}
+          onSaved={(fresh) => mergeMaintenanceEntries(statusModalAsset.assetNumber, fresh)}
+        />
+      )}
     </main>
+  );
+}
+
+/** สถานะสเปก badge — combines IT's own per-visit judgment call
+ * (manualSpecStatus, from the latest MaintenanceLog entry for this asset)
+ * with the automatic evaluateRowSpec() comparison against SpecStandards.
+ * Per the hospital's answer ("เอาทั้งคู่ ... เลือกใช้ได้ทั้งสองแบบ"), neither
+ * replaces the other: a manual call is shown when IT has made one (it's
+ * their direct judgment of the specific machine), the automatic evaluation
+ * is always shown too — as the badge itself when there's no manual call, or
+ * folded into the tooltip alongside it otherwise — since a manual "ปกติ"
+ * doesn't erase what the automatic check actually found. */
+function SpecStatusBadge({
+  row,
+  headers,
+  standards,
+  manualStatus,
+}: {
+  row: EquipmentRow;
+  headers: string[];
+  standards: SpecStandards;
+  manualStatus: MaintenanceLogEntry["manualSpecStatus"] | undefined;
+}) {
+  const auto = useMemo(() => evaluateRowSpec(row, headers, standards), [row, headers, standards]);
+  const autoTitle = auto.unknown
+    ? "ระบบประเมินอัตโนมัติ: ข้อมูลสเปกในระบบไม่ครบ ไม่สามารถประเมินได้"
+    : auto.belowStandard
+      ? `ระบบประเมินอัตโนมัติ: ${auto.reasons.join(" / ")}`
+      : "ระบบประเมินอัตโนมัติ: ผ่านมาตรฐาน";
+
+  if (manualStatus === "ต่ำกว่ามาตรฐาน") {
+    return (
+      <span
+        title={`ประเมินเอง: ต่ำกว่ามาตรฐาน · ${autoTitle}`}
+        className="inline-flex items-center rounded-full border border-red-300 bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
+      >
+        ต่ำกว่ามาตรฐาน (ประเมินเอง)
+      </span>
+    );
+  }
+  if (manualStatus === "ปกติ") {
+    return (
+      <span
+        title={`ประเมินเอง: ปกติ · ${autoTitle}`}
+        className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+      >
+        ปกติ (ประเมินเอง)
+      </span>
+    );
+  }
+  if (auto.unknown) {
+    return (
+      <span
+        title={autoTitle}
+        className="inline-flex items-center rounded-full border border-zinc-300 bg-zinc-50 px-2 py-0.5 text-[11px] font-medium text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400"
+      >
+        ไม่ทราบ
+      </span>
+    );
+  }
+  if (auto.belowStandard) {
+    return (
+      <span
+        title={autoTitle}
+        className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300"
+      >
+        ต่ำกว่ามาตรฐาน (ระบบประเมิน)
+      </span>
+    );
+  }
+  return (
+    <span
+      title={autoTitle}
+      className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+    >
+      ผ่านมาตรฐาน
+    </span>
   );
 }
 
@@ -374,15 +522,26 @@ function SpecTable({
   title,
   icon,
   rows,
+  headers,
   fields,
   specColumns,
+  latestMaintenanceByAsset,
+  specStandards,
+  showSpecStatus,
+  onUpdateStatus,
 }: {
   title: string;
   icon: React.ReactNode;
   rows: ITRecord[];
+  headers: string[];
   fields: FieldMap | null;
   specColumns: SpecColumn[];
+  latestMaintenanceByAsset: Map<string, MaintenanceLogEntry>;
+  specStandards: SpecStandards;
+  showSpecStatus: boolean;
+  onUpdateStatus: (assetNumber: string, label: string) => void;
 }) {
+  const columnCount = 6 + specColumns.length + 2 + (showSpecStatus ? 1 : 0) + 1;
   return (
     <div className={CARD}>
       <div className="flex items-center gap-2 border-b border-emerald-900/10 px-4 py-3 text-sm font-semibold text-zinc-800 dark:border-emerald-400/10 dark:text-zinc-100">
@@ -407,24 +566,33 @@ function SpecTable({
               <th scope="col" className="px-2 py-2 font-medium sm:px-3">สถานที่ / จุดติดตั้ง</th>
               <th scope="col" className="px-2 py-2 font-medium sm:px-3">ผู้ใช้งาน</th>
               <th scope="col" className="px-2 py-2 font-medium sm:px-3">สถานะ</th>
+              <th scope="col" className="px-2 py-2 font-medium sm:px-3">ซอฟต์แวร์ล่าสุด</th>
+              <th scope="col" className="px-2 py-2 font-medium sm:px-3">เป่าฝุ่นล่าสุด</th>
+              {showSpecStatus && <th scope="col" className="px-2 py-2 font-medium sm:px-3">สถานะสเปก</th>}
+              <th scope="col" className="px-2 py-2 font-medium sm:px-3">
+                <span className="sr-only">อัปเดตสถานะ</span>
+              </th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => {
               const disposed = fields ? cell(r.values, fields.status) === STATUS_DISPOSED : false;
+              const assetNumber = fields ? getAssetNumber(r.values, fields) : "";
+              const latest = assetNumber ? latestMaintenanceByAsset.get(assetNumber) : undefined;
+              const brandModel = fields ? getBrandModel(r.values, fields) : "";
               return (
                 <tr
                   key={r.rowNumber}
                   className="border-b border-zinc-100 transition-colors last:border-0 hover:bg-emerald-50/70 dark:border-zinc-800/60 dark:hover:bg-emerald-900/10"
                 >
                   <td className="break-words px-2 py-2 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-3">
-                    {(fields && getAssetNumber(r.values, fields)) || "—"}
+                    {assetNumber || "—"}
                   </td>
                   <td className="break-words px-2 py-2 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-3">
                     {(fields && cell(r.values, fields.department)) || "—"}
                   </td>
                   <td className="break-words px-2 py-2 align-top leading-snug font-medium text-zinc-900 dark:text-zinc-100 sm:px-3">
-                    {(fields && getBrandModel(r.values, fields)) || "—"}
+                    {brandModel || "—"}
                   </td>
                   {specColumns.map((c) => (
                     <td
@@ -451,12 +619,44 @@ function SpecTable({
                       </span>
                     )}
                   </td>
+                  <td className="break-words px-2 py-2 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-3">
+                    {latest?.software || "—"}
+                  </td>
+                  <td className="break-words px-2 py-2 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-3">
+                    {latest?.maintenanceDate || "—"}
+                  </td>
+                  {showSpecStatus && (
+                    <td className="px-2 py-2 align-top sm:px-3">
+                      {fields ? (
+                        <SpecStatusBadge
+                          row={r.values}
+                          headers={headers}
+                          standards={specStandards}
+                          manualStatus={latest?.manualSpecStatus}
+                        />
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  )}
+                  <td className="px-2 py-2 align-top sm:px-3">
+                    <button
+                      type="button"
+                      disabled={!assetNumber}
+                      onClick={() => onUpdateStatus(assetNumber, brandModel || assetNumber)}
+                      title={assetNumber ? "อัปเดตสถานะการบำรุงรักษา" : "ไม่มีเลขครุภัณฑ์ — อัปเดตสถานะไม่ได้"}
+                      className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      <Wrench size={12} strokeWidth={2} aria-hidden="true" />
+                      อัปเดตสถานะ
+                    </button>
+                  </td>
                 </tr>
               );
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5 + specColumns.length} className="px-4 py-10 text-center text-zinc-400">
+                <td colSpan={columnCount} className="px-4 py-10 text-center text-zinc-400">
                   <Package size={22} strokeWidth={2} className="mx-auto mb-2 opacity-60" aria-hidden="true" />
                   ไม่มีรายการ
                 </td>
@@ -576,6 +776,395 @@ function ReportSettingsPanel({
           บันทึก
         </button>
         {saved && <span className="text-sm text-emerald-600 dark:text-emerald-400">บันทึกแล้ว</span>}
+      </div>
+    </div>
+  );
+}
+
+const RAM_TYPE_CHOICES = ["DDR2", "DDR3", "DDR4", "DDR5"];
+
+/** Editable thresholds for the automatic "สเปกต่ำกว่ามาตรฐานปัจจุบัน"
+ * evaluation (lib/specEvaluation.ts) — see lib/sheets.ts
+ * getSpecStandards/updateSpecStandards and the SpecStandards sheet tab.
+ * Reachable by "it" and the bootstrap superadmin only, same as the rest of
+ * this page (the API route enforces this independently). This is the
+ * "automatic" half of the hospital's two-track answer on below-standard
+ * detection — see SpecStatusBadge for how it combines with the manual
+ * per-visit call from the update-status modal below. */
+function SpecStandardsPanel({
+  initialStandards,
+  onClose,
+  onSaved,
+}: {
+  initialStandards: SpecStandards;
+  onClose: () => void;
+  onSaved: (standards: SpecStandards) => void;
+}) {
+  const [values, setValues] = useState<SpecStandards>(initialStandards);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  function setField<K extends keyof SpecStandards>(key: K, value: SpecStandards[K]) {
+    setValues((prev) => ({ ...prev, [key]: value }));
+    setSaved(false);
+  }
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const res = await fetch("/api/manage/it/spec-standards", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(values),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error ?? "บันทึกไม่สำเร็จ");
+        return;
+      }
+      setValues(json.standards);
+      onSaved(json.standards);
+      setSaved(true);
+    } catch {
+      setError("บันทึกไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className={`${CARD} flex flex-col gap-3 p-4`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+          <Cpu size={15} strokeWidth={2} aria-hidden="true" />
+          ตั้งค่ามาตรฐานสเปกขั้นต่ำ (ระบบประเมินอัตโนมัติ)
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-full p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+          aria-label="ปิด"
+        >
+          <X size={16} strokeWidth={2} aria-hidden="true" />
+        </button>
+      </div>
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        ใช้เปรียบเทียบกับข้อมูลสเปก RAM/หน่วยจัดเก็บที่บันทึกไว้ในระบบของแต่ละเครื่อง — เป็นการประเมินแบบอัตโนมัติ
+        คู่ขนานไปกับการประเมินด้วยตนเองต่อครั้งที่ปุ่ม &quot;อัปเดตสถานะ&quot; ของแต่ละเครื่อง
+      </p>
+      {error && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+          {error}
+        </div>
+      )}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+          RAM ขั้นต่ำ (GB)
+          <input
+            type="number"
+            min={0}
+            value={values.minRamCapacityGb}
+            onChange={(e) => setField("minRamCapacityGb", e.target.value)}
+            className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+          ประเภท RAM ขั้นต่ำ
+          <select
+            value={values.minRamType}
+            onChange={(e) => setField("minRamType", e.target.value)}
+            className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+          >
+            {RAM_TYPE_CHOICES.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-2 text-sm text-zinc-500 dark:text-zinc-400 sm:justify-end sm:pb-2.5">
+          <span className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={values.requireSsd === "true"}
+              onChange={(e) => setField("requireSsd", e.target.checked ? "true" : "false")}
+              className="h-4 w-4 rounded border-zinc-300"
+            />
+            ต้องเป็น SSD/NVMe
+          </span>
+        </label>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-60"
+        >
+          {saving ? (
+            <Loader2 size={15} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Save size={15} strokeWidth={2} aria-hidden="true" />
+          )}
+          บันทึก
+        </button>
+        {saved && <span className="text-sm text-emerald-600 dark:text-emerald-400">บันทึกแล้ว</span>}
+      </div>
+    </div>
+  );
+}
+
+function todayIsoDate(): string {
+  const now = new Date();
+  const offset = now.getTimezoneOffset();
+  return new Date(now.getTime() - offset * 60000).toISOString().slice(0, 10);
+}
+
+/** Per-machine "อัปเดตสถานะ" modal — shows the full logged history for one
+ * เลขครุภัณฑ์ (newest first) plus a form to append a new visit: a dynamic
+ * list of software/version rows (see splitSoftwareEntries/joinSoftwareEntries
+ * in fields.ts — deliberately free-form, not fixed HOSxP-3/4 fields), a
+ * cleaning/maintenance date (defaults to today), IT's own manual spec
+ * judgment for this visit, and a free-text note. Every visit is appended as
+ * a new row (see lib/sheets.ts MaintenanceLog section) — nothing here ever
+ * overwrites an earlier entry, so the full history stays intact. */
+function MaintenanceStatusModal({
+  assetNumber,
+  label,
+  entries,
+  onClose,
+  onSaved,
+}: {
+  assetNumber: string;
+  label: string;
+  /** This asset's history, newest first. */
+  entries: MaintenanceLogEntry[];
+  onClose: () => void;
+  onSaved: (freshEntriesForAsset: MaintenanceLogEntry[]) => void;
+}) {
+  // Pre-fill from the latest logged visit's software list (if any) rather
+  // than always starting blank — the common case here is "bump one existing
+  // entry's version" (e.g. HOSxP 3 -> 3.2.6), not retyping the whole list
+  // from scratch every visit.
+  const [softwareRows, setSoftwareRows] = useState<SoftwareEntry[]>(() => {
+    const latest = entries[0]?.software ? splitSoftwareEntries(entries[0].software) : [];
+    return latest.length > 0 ? latest : [{ name: "", version: "" }];
+  });
+  const [maintenanceDate, setMaintenanceDate] = useState(todayIsoDate);
+  const [manualSpecStatus, setManualSpecStatus] = useState<MaintenanceLogEntry["manualSpecStatus"]>("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function updateSoftwareRow(index: number, patch: Partial<SoftwareEntry>) {
+    setSoftwareRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  }
+
+  function addSoftwareRow() {
+    setSoftwareRows((prev) => [...prev, { name: "", version: "" }]);
+  }
+
+  function removeSoftwareRow(index: number) {
+    setSoftwareRows((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
+  }
+
+  async function save() {
+    setError(null);
+    const software = joinSoftwareEntries(softwareRows);
+    if (!software && !maintenanceDate && !manualSpecStatus && !notes.trim()) {
+      setError("กรุณากรอกข้อมูลอย่างน้อยหนึ่งอย่างก่อนบันทึก");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/manage/it/maintenance-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assetNumber, software, maintenanceDate, manualSpecStatus, notes: notes.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error ?? "บันทึกไม่สำเร็จ");
+        return;
+      }
+      onSaved(json.entries as MaintenanceLogEntry[]);
+      setSoftwareRows([{ name: "", version: "" }]);
+      setManualSpecStatus("");
+      setNotes("");
+    } catch {
+      setError("บันทึกไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className={`${CARD} flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-emerald-900/10 px-4 py-3 dark:border-emerald-400/10">
+          <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+            <Wrench size={15} strokeWidth={2} aria-hidden="true" />
+            อัปเดตสถานะการบำรุงรักษา — {label} ({assetNumber})
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+            aria-label="ปิด"
+          >
+            <X size={16} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+              <Plus size={13} strokeWidth={2} aria-hidden="true" />
+              บันทึกการเข้าดำเนินการครั้งใหม่
+            </div>
+
+            {error && (
+              <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+                {error}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2">
+              <span className="text-sm text-zinc-500 dark:text-zinc-400">ซอฟต์แวร์ที่ติดตั้ง/อัปเดต</span>
+              {softwareRows.map((row, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={row.name}
+                    onChange={(e) => updateSoftwareRow(i, { name: e.target.value })}
+                    placeholder="ชื่อซอฟต์แวร์ เช่น HOSxP 3"
+                    className="h-10 flex-1 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                  />
+                  <input
+                    type="text"
+                    value={row.version}
+                    onChange={(e) => updateSoftwareRow(i, { version: e.target.value })}
+                    placeholder="เวอร์ชัน เช่น 3.2.6"
+                    className="h-10 w-32 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeSoftwareRow(i)}
+                    disabled={softwareRows.length <= 1}
+                    aria-label="ลบแถวนี้"
+                    className="rounded-full p-2 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-zinc-800"
+                  >
+                    <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={addSoftwareRow}
+                className="inline-flex w-fit items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                <Plus size={13} strokeWidth={2} aria-hidden="true" />
+                เพิ่มซอฟต์แวร์
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                วันที่ดำเนินการ / เป่าฝุ่น
+                <input
+                  type="date"
+                  value={maintenanceDate}
+                  onChange={(e) => setMaintenanceDate(e.target.value)}
+                  className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                ประเมินสเปกด้วยตนเอง (ครั้งนี้)
+                <select
+                  value={manualSpecStatus}
+                  onChange={(e) => setManualSpecStatus(e.target.value as MaintenanceLogEntry["manualSpecStatus"])}
+                  className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                >
+                  <option value="">— ไม่ประเมิน —</option>
+                  <option value="ปกติ">ปกติ</option>
+                  <option value="ต่ำกว่ามาตรฐาน">ต่ำกว่ามาตรฐาน</option>
+                </select>
+              </label>
+            </div>
+
+            <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+              หมายเหตุ
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={2}
+                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+              />
+            </label>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={save}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-60"
+              >
+                {saving ? (
+                  <Loader2 size={15} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <Save size={15} strokeWidth={2} aria-hidden="true" />
+                )}
+                บันทึก
+              </button>
+            </div>
+
+            <div className="mt-2 flex items-center gap-1.5 border-t border-zinc-100 pt-3 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:border-zinc-800">
+              <History size={13} strokeWidth={2} aria-hidden="true" />
+              ประวัติการดำเนินการ ({entries.length.toLocaleString("th-TH")} รายการ)
+            </div>
+            {entries.length === 0 ? (
+              <p className="flex items-center gap-1.5 py-4 text-sm text-zinc-400">
+                <ClipboardList size={15} strokeWidth={2} aria-hidden="true" />
+                ยังไม่มีประวัติการบำรุงรักษาสำหรับเครื่องนี้
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {entries.map((entry, i) => (
+                  <li
+                    key={`${entry.timestamp}-${i}`}
+                    className="rounded-lg border border-zinc-100 p-3 text-sm dark:border-zinc-800"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
+                      <span>{entry.maintenanceDate || "(ไม่ระบุวันที่)"}</span>
+                      <span>โดย {entry.recordedBy || "—"}</span>
+                    </div>
+                    {entry.software && (
+                      <p className="mt-1 text-zinc-800 dark:text-zinc-100">{entry.software}</p>
+                    )}
+                    {entry.manualSpecStatus && (
+                      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        ประเมินสเปก: {entry.manualSpecStatus}
+                      </p>
+                    )}
+                    {entry.notes && (
+                      <p className="mt-1 whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">{entry.notes}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

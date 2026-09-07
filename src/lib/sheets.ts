@@ -1,8 +1,19 @@
 import { google } from "googleapis";
 import { redactSurname, resolveFields, type EquipmentRow, type FieldMap } from "@/lib/fields";
 import type { Role } from "@/lib/auth";
+import { DEFAULT_SPEC_STANDARDS, type SpecStandards } from "@/lib/specEvaluation";
+import { getLatestMaintenanceLogByAsset, type MaintenanceLogEntry } from "@/lib/maintenanceLog";
 
 export type { EquipmentRow, FieldMap };
+// Re-exported so existing callers can keep importing these types (and the
+// spec-standards defaults) from lib/sheets, where the Google Sheets
+// read/write for them lives — the definitions themselves live in the pure
+// lib/specEvaluation.ts / lib/maintenanceLog.ts modules so those stay safely
+// importable from client components (see each file's top comment). Server
+// code should generally still prefer importing the read/write functions
+// (getSpecStandards, getMaintenanceLog, etc.) from here.
+export { DEFAULT_SPEC_STANDARDS, getLatestMaintenanceLogByAsset };
+export type { SpecStandards, MaintenanceLogEntry };
 
 // Each record pairs a row's data with its 1-based row number in the sheet
 // (data row index + 2, accounting for the header row at row 1). This is the
@@ -215,6 +226,11 @@ export async function updateEquipmentRow(
 
 export type EditLogAction =
   | "แก้ไข"
+  // Distinguishes the narrow "it"-role correction (installLocation /
+  // responsible-person only, from /manage/it/report) from a regular
+  // admin/superadmin edit in the audit trail — see
+  // /api/manage/it/records/[rowNumber] for the only place this is used.
+  | "แก้ไข (IT)"
   | "เพิ่มใหม่"
   | "จำหน่าย"
   | "ยกเลิกการจำหน่าย"
@@ -517,6 +533,201 @@ export async function updateReportSettings(updates: Partial<ReportSettings>): Pr
       );
     }
     throw new Error(`บันทึกการตั้งค่ารายงานไม่สำเร็จ: ${message}`);
+  }
+
+  return merged;
+}
+
+// ---------------------------------------------------------------------------
+// MaintenanceLog tab — the IT dashboard's per-machine service history
+// (/manage/it): every time IT services a computer they append one row here
+// instead of overwriting a single "current status" cell, so the full
+// history (every software/version update, every "เป่าฝุ่น" cleaning visit)
+// stays visible, not just the latest one. A machine's *current* status —
+// shown in the IT dashboard's spec tables — is simply whichever row has the
+// newest timestamp for that เลขครุภัณฑ์; see getLatestMaintenanceLogByAsset.
+//
+// "ซอฟต์แวร์ที่ติดตั้ง/อัปเดต" is deliberately free-form ("HOSxP 3: 3.2.6;
+// HOSxP 4: 4.1.0") rather than fixed HOSxP-3/HOSxP-4 columns — the hospital
+// asked for room to track other software later without a schema change.
+// joinSoftwareEntries/splitSoftwareEntries (fields.ts) are the only code
+// that needs to understand this string's shape.
+//
+// Same manually-created-tab convention as ReportSettings/Users/EditLog: the
+// sheet owner creates this tab by hand (see project setup notes) before
+// anyone logs a maintenance visit. Reading tolerates a missing tab (just
+// means "no history yet"); appending requires the tab to already exist.
+// ---------------------------------------------------------------------------
+
+// MaintenanceLogEntry / getLatestMaintenanceLogByAsset themselves are
+// defined in lib/maintenanceLog.ts and re-exported above.
+
+function getMaintenanceLogTab(): string {
+  return process.env.GOOGLE_SHEET_MAINTENANCE_LOG_TAB?.trim() || "MaintenanceLog";
+}
+
+const MAINTENANCE_LOG_COLUMNS = 7; // timestamp, assetNumber, recordedBy, software, maintenanceDate, manualSpecStatus, notes
+
+function parseManualSpecStatus(raw: string): MaintenanceLogEntry["manualSpecStatus"] {
+  const trimmed = raw.trim();
+  return trimmed === "ปกติ" || trimmed === "ต่ำกว่ามาตรฐาน" ? trimmed : "";
+}
+
+/** Every logged maintenance visit, oldest first (append order) — callers
+ * that want "current status per asset" should use
+ * getLatestMaintenanceLogByAsset instead of re-deriving it themselves. */
+export async function getMaintenanceLog(): Promise<MaintenanceLogEntry[]> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getMaintenanceLogTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:G100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      // Tab doesn't exist yet — no maintenance history recorded anywhere.
+      return [];
+    }
+    throw new Error(`อ่านประวัติการบำรุงรักษาไม่สำเร็จ: ${message}`);
+  }
+
+  return (values ?? [])
+    .filter((row) => (row[1] ?? "").toString().trim()) // must have an asset number
+    .map((row) => ({
+      timestamp: (row[0] ?? "").toString(),
+      assetNumber: (row[1] ?? "").toString().trim(),
+      recordedBy: (row[2] ?? "").toString(),
+      software: (row[3] ?? "").toString(),
+      maintenanceDate: (row[4] ?? "").toString(),
+      manualSpecStatus: parseManualSpecStatus((row[5] ?? "").toString()),
+      notes: (row[6] ?? "").toString(),
+    }));
+}
+
+/** Appends one maintenance-visit row. Throws a clear "create the tab
+ * first" error if GOOGLE_SHEET_MAINTENANCE_LOG_TAB / "MaintenanceLog"
+ * doesn't exist — same convention as appendEditLog. */
+export async function appendMaintenanceLogEntry(
+  entry: Omit<MaintenanceLogEntry, "timestamp"> & { timestamp?: string }
+): Promise<void> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getMaintenanceLogTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+  const timestamp = entry.timestamp ?? new Date().toISOString();
+
+  try {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: `${tab}!A1`,
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: {
+        values: [[
+          timestamp,
+          entry.assetNumber,
+          entry.recordedBy,
+          entry.software,
+          entry.maintenanceDate,
+          entry.manualSpecStatus,
+          entry.notes,
+        ]],
+      },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      throw new Error(
+        `ยังไม่พบแท็บชื่อ "${tab}" ในสเปรดชีต — สร้างแท็บนี้ก่อน (หัวตาราง: เวลา | เลขครุภัณฑ์ | ผู้บันทึก | ซอฟต์แวร์ที่ติดตั้ง/อัปเดต | วันที่บำรุงรักษา | ประเมินสเปกด้วยตนเอง | หมายเหตุ) หรือตั้งค่า GOOGLE_SHEET_MAINTENANCE_LOG_TAB ให้ตรงกับชื่อแท็บจริง`
+      );
+    }
+    throw new Error(`บันทึกประวัติการบำรุงรักษาไม่สำเร็จ: ${message}`);
+  }
+  void MAINTENANCE_LOG_COLUMNS; // referenced for documentation/consistency only
+}
+
+// ---------------------------------------------------------------------------
+// SpecStandards tab — the minimum PC spec the hospital currently considers
+// acceptable, used by lib/specEvaluation.ts to auto-flag a machine as
+// "ต่ำกว่ามาตรฐาน" from its already-recorded RAM/storage spec columns. Same
+// Key | Value shape and manual-tab-creation convention as ReportSettings —
+// see that section's comment for the read/write fallback rules, which this
+// mirrors exactly.
+// ---------------------------------------------------------------------------
+
+// SpecStandards / DEFAULT_SPEC_STANDARDS themselves are defined in
+// lib/specEvaluation.ts and re-exported above.
+
+const SPEC_STANDARDS_KEYS = Object.keys(DEFAULT_SPEC_STANDARDS) as (keyof SpecStandards)[];
+
+function getSpecStandardsTab(): string {
+  return process.env.GOOGLE_SHEET_SPEC_STANDARDS_TAB?.trim() || "SpecStandards";
+}
+
+export async function getSpecStandards(): Promise<SpecStandards> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getSpecStandardsTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:B200`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      return { ...DEFAULT_SPEC_STANDARDS };
+    }
+    throw new Error(`อ่านมาตรฐานสเปกไม่สำเร็จ: ${message}`);
+  }
+
+  const stored = new Map<string, string>();
+  for (const row of values ?? []) {
+    const key = (row[0] ?? "").toString().trim();
+    if (key) stored.set(key, (row[1] ?? "").toString());
+  }
+
+  const result = { ...DEFAULT_SPEC_STANDARDS };
+  for (const key of SPEC_STANDARDS_KEYS) {
+    const v = stored.get(key);
+    if (v !== undefined && v.trim() !== "") result[key] = v;
+  }
+  return result;
+}
+
+export async function updateSpecStandards(updates: Partial<SpecStandards>): Promise<SpecStandards> {
+  const current = await getSpecStandards();
+  const merged: SpecStandards = { ...current, ...updates };
+
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getSpecStandardsTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${tab}!A2:B${1 + SPEC_STANDARDS_KEYS.length}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: {
+        values: SPEC_STANDARDS_KEYS.map((key) => [key, merged[key]]),
+      },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      throw new Error(
+        `ยังไม่พบแท็บชื่อ "${tab}" ในสเปรดชีต — สร้างแท็บนี้ก่อน (หัวตาราง: Key | Value) หรือตั้งค่า GOOGLE_SHEET_SPEC_STANDARDS_TAB ให้ตรงกับชื่อแท็บจริง`
+      );
+    }
+    throw new Error(`บันทึกมาตรฐานสเปกไม่สำเร็จ: ${message}`);
   }
 
   return merged;

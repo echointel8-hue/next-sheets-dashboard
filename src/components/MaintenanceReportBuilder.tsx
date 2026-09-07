@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Printer as PrinterIcon } from "lucide-react";
+import { ArrowLeft, Check, Loader2, Printer as PrinterIcon, Save, X } from "lucide-react";
 import type { ReportSettings } from "@/lib/sheets";
 
 /** One selectable equipment item — already flattened/redaction-free by
@@ -17,6 +17,14 @@ export interface ReportEquipmentItem {
   installLocation: string;
   responsiblePerson: string;
   disposed: boolean;
+  /** For the optimistic-concurrency check on save-back — see
+   * /api/manage/it/records/[rowNumber]. */
+  snapshotHash: string;
+  /** False when the sheet splits คำนำหน้า/ชื่อ-นามสกุล into separate
+   * columns — a free-text name can't be saved back to two cells reliably,
+   * so the save button for this one field is hidden in that case (editing
+   * it for just this printout still works). */
+  canSaveResponsiblePerson: boolean;
 }
 
 interface SelectedRow {
@@ -25,7 +33,13 @@ interface SelectedRow {
   description: string;
   location: string;
   responsiblePerson: string;
+  canSaveResponsiblePerson: boolean;
+  snapshotHash: string;
+  locationChanged: boolean;
+  responsiblePersonChanged: boolean;
 }
+
+type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 const CARD = "rounded-2xl border border-emerald-900/10 bg-white shadow-sm dark:border-emerald-400/10 dark:bg-zinc-900";
 const INPUT_CLASS =
@@ -45,16 +59,27 @@ function formatThaiDate(iso: string): string {
   return `${d} ${THAI_MONTHS_SHORT[m - 1] ?? ""} ${y + 543}`;
 }
 
+const SETTINGS_FIELDS: { key: keyof ReportSettings; label: string }[] = [
+  { key: "orgName", label: "ชื่อหน่วยงาน" },
+  { key: "maintenanceFormTitle", label: "ชื่อแบบฟอร์ม" },
+  { key: "fiscalYearLabel", label: "ปีงบประมาณ (ข้อความแสดงผล)" },
+  { key: "acknowledgerName", label: "ชื่อผู้รับทราบ" },
+  { key: "acknowledgerPosition", label: "ตำแหน่งผู้รับทราบ" },
+  { key: "acknowledgerDepartment", label: "สังกัดผู้รับทราบ (แสดงใต้ตำแหน่ง)" },
+];
+
 export default function MaintenanceReportBuilder({
-  items,
+  items: initialItems,
   loadError,
-  settings,
+  settings: initialSettings,
 }: {
   items: ReportEquipmentItem[];
   loadError: string | null;
   settings: ReportSettings;
 }) {
+  const [items, setItems] = useState(initialItems);
   const [departmentFilter, setDepartmentFilter] = useState("");
+  const [equipmentTypeFilter, setEquipmentTypeFilter] = useState("");
   const [search, setSearch] = useState("");
   const [selectedRowNumbers, setSelectedRowNumbers] = useState<number[]>([]);
   const [formDepartment, setFormDepartment] = useState("");
@@ -64,6 +89,19 @@ export default function MaintenanceReportBuilder({
   const [overrides, setOverrides] = useState<
     Record<number, { location: string; responsiblePerson: string }>
   >({});
+  const [rowSaveStatus, setRowSaveStatus] = useState<Record<number, SaveStatus>>({});
+  const [rowSaveError, setRowSaveError] = useState<Record<number, string>>({});
+  const [savingAll, setSavingAll] = useState(false);
+
+  // Form header / signature text — editable right here (pre-filled from the
+  // saved ReportSettings) so a one-off change (a substitute signee, say)
+  // doesn't require a trip to the settings panel on /manage/it. "บันทึกเป็น
+  // ค่าเริ่มต้น" below writes it back to ReportSettings for next time;
+  // without pressing that, an edit here only affects this one printout.
+  const [formSettings, setFormSettings] = useState<ReportSettings>(initialSettings);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   const departmentOptions = useMemo(() => {
     const set = new Set<string>();
@@ -71,22 +109,41 @@ export default function MaintenanceReportBuilder({
     return [...set].sort((a, b) => a.localeCompare(b, "th"));
   }, [items]);
 
+  const equipmentTypeOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const it of items) if (it.equipmentType) set.add(it.equipmentType);
+    return [...set].sort((a, b) => a.localeCompare(b, "th"));
+  }, [items]);
+
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items.filter((it) => {
       if (departmentFilter && it.department !== departmentFilter) return false;
+      if (equipmentTypeFilter && it.equipmentType !== equipmentTypeFilter) return false;
       if (q) {
         const hay = `${it.assetNumber} ${it.brandModel} ${it.equipmentType} ${it.installLocation} ${it.responsiblePerson}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [items, departmentFilter, search]);
+  }, [items, departmentFilter, equipmentTypeFilter, search]);
 
   function toggleItem(rowNumber: number) {
     setSelectedRowNumbers((prev) =>
       prev.includes(rowNumber) ? prev.filter((n) => n !== rowNumber) : [...prev, rowNumber]
     );
+  }
+
+  function selectAllFiltered() {
+    setSelectedRowNumbers((prev) => {
+      const next = new Set(prev);
+      for (const it of filteredItems) next.add(it.rowNumber);
+      return [...next];
+    });
+  }
+
+  function clearSelection() {
+    setSelectedRowNumbers([]);
   }
 
   function updateOverride(rowNumber: number, field: "location" | "responsiblePerson", value: string) {
@@ -99,6 +156,8 @@ export default function MaintenanceReportBuilder({
         [field]: value,
       },
     }));
+    // A fresh edit invalidates whatever save result was showing for this row.
+    setRowSaveStatus((prev) => ({ ...prev, [rowNumber]: "idle" }));
   }
 
   // Preserve pick order (the order the person checked items in) rather than
@@ -110,15 +169,116 @@ export default function MaintenanceReportBuilder({
       .filter((it): it is ReportEquipmentItem => Boolean(it))
       .map((it) => {
         const o = overrides[it.rowNumber];
+        const location = o?.location ?? it.installLocation;
+        const responsiblePerson = o?.responsiblePerson ?? it.responsiblePerson;
         return {
           rowNumber: it.rowNumber,
           assetNumber: it.assetNumber,
           description: [it.equipmentType, it.brandModel].filter(Boolean).join(" — "),
-          location: o?.location ?? it.installLocation,
-          responsiblePerson: o?.responsiblePerson ?? it.responsiblePerson,
+          location,
+          responsiblePerson,
+          canSaveResponsiblePerson: it.canSaveResponsiblePerson,
+          snapshotHash: it.snapshotHash,
+          locationChanged: location !== it.installLocation,
+          responsiblePersonChanged: responsiblePerson !== it.responsiblePerson,
         };
       });
   }, [selectedRowNumbers, items, overrides]);
+
+  // A responsible-person edit only counts as "savable" when the sheet uses
+  // one combined name column (see canSaveResponsiblePerson) — otherwise
+  // there is nothing this row could send the API that it would accept, so
+  // treating it as dirty would just produce a confusing 400 on save.
+  function hasSavableChange(row: SelectedRow): boolean {
+    return row.locationChanged || (row.responsiblePersonChanged && row.canSaveResponsiblePerson);
+  }
+
+  const dirtyRowCount = selectedRows.filter(hasSavableChange).length;
+
+  async function saveRow(row: SelectedRow) {
+    if (!hasSavableChange(row)) return true;
+    setRowSaveStatus((prev) => ({ ...prev, [row.rowNumber]: "saving" }));
+    setRowSaveError((prev) => ({ ...prev, [row.rowNumber]: "" }));
+    try {
+      const body: Record<string, string> = { expectedSnapshotHash: row.snapshotHash };
+      if (row.locationChanged) body.installLocation = row.location;
+      if (row.responsiblePersonChanged && row.canSaveResponsiblePerson) {
+        body.responsiblePerson = row.responsiblePerson;
+      }
+      const res = await fetch(`/api/manage/it/records/${row.rowNumber}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setRowSaveStatus((prev) => ({ ...prev, [row.rowNumber]: "error" }));
+        setRowSaveError((prev) => ({ ...prev, [row.rowNumber]: json.error ?? "บันทึกไม่สำเร็จ" }));
+        return false;
+      }
+      // Fold the saved values back into the base item so the row reads as
+      // "up to date" (no longer "changed") and the next save's optimistic-
+      // concurrency check uses the fresh snapshotHash instead of a stale one.
+      setItems((prev) =>
+        prev.map((it) =>
+          it.rowNumber === row.rowNumber
+            ? {
+                ...it,
+                installLocation: row.locationChanged ? row.location : it.installLocation,
+                responsiblePerson:
+                  row.responsiblePersonChanged && row.canSaveResponsiblePerson
+                    ? row.responsiblePerson
+                    : it.responsiblePerson,
+                snapshotHash: json.snapshotHash ?? it.snapshotHash,
+              }
+            : it
+        )
+      );
+      setRowSaveStatus((prev) => ({ ...prev, [row.rowNumber]: "saved" }));
+      return true;
+    } catch {
+      setRowSaveStatus((prev) => ({ ...prev, [row.rowNumber]: "error" }));
+      setRowSaveError((prev) => ({ ...prev, [row.rowNumber]: "บันทึกไม่สำเร็จ กรุณาลองใหม่" }));
+      return false;
+    }
+  }
+
+  async function saveAllChanged() {
+    setSavingAll(true);
+    try {
+      for (const row of selectedRows) {
+        if (hasSavableChange(row)) {
+          await saveRow(row);
+        }
+      }
+    } finally {
+      setSavingAll(false);
+    }
+  }
+
+  async function saveSettingsAsDefault() {
+    setSettingsSaving(true);
+    setSettingsError(null);
+    setSettingsSaved(false);
+    try {
+      const res = await fetch("/api/manage/it/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formSettings),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setSettingsError(json.error ?? "บันทึกไม่สำเร็จ");
+        return;
+      }
+      setFormSettings(json.settings);
+      setSettingsSaved(true);
+    } catch {
+      setSettingsError("บันทึกไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
 
   const displayDate = visitDate ? formatThaiDate(visitDate) : "";
   const timeRangeLabel = timeFrom && timeTo ? `${timeFrom} - ${timeTo}` : timeFrom || timeTo || "";
@@ -198,6 +358,52 @@ export default function MaintenanceReportBuilder({
           </div>
 
           <div className={`${CARD} flex flex-col gap-3 p-4`}>
+            <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              ข้อความหัวแบบฟอร์ม / ผู้รับทราบ (แก้ไขเฉพาะรายงานนี้ หรือกด &quot;บันทึกเป็นค่าเริ่มต้น&quot; เพื่อใช้ในรายงานครั้งถัดไปด้วย)
+            </p>
+            {settingsError && (
+              <div
+                role="alert"
+                className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200"
+              >
+                {settingsError}
+              </div>
+            )}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {SETTINGS_FIELDS.map(({ key, label }) => (
+                <label key={key} className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                  {label}
+                  <input
+                    type="text"
+                    value={formSettings[key]}
+                    onChange={(e) => {
+                      setFormSettings((prev) => ({ ...prev, [key]: e.target.value }));
+                      setSettingsSaved(false);
+                    }}
+                    className={INPUT_CLASS}
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={saveSettingsAsDefault}
+                disabled={settingsSaving}
+                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                {settingsSaving ? (
+                  <Loader2 size={14} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <Save size={14} strokeWidth={2} aria-hidden="true" />
+                )}
+                บันทึกเป็นค่าเริ่มต้น
+              </button>
+              {settingsSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400">บันทึกแล้ว</span>}
+            </div>
+          </div>
+
+          <div className={`${CARD} flex flex-col gap-3 p-4`}>
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
               <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-xs sm:flex-1">
                 กรองตามกลุ่มงาน
@@ -215,6 +421,21 @@ export default function MaintenanceReportBuilder({
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-xs sm:flex-1">
+                กรองตามประเภทครุภัณฑ์
+                <select
+                  value={equipmentTypeFilter}
+                  onChange={(e) => setEquipmentTypeFilter(e.target.value)}
+                  className={INPUT_CLASS}
+                >
+                  <option value="">ทั้งหมด</option>
+                  {equipmentTypeOptions.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-xs sm:flex-1">
                 ค้นหา
                 <input
                   type="text"
@@ -224,7 +445,28 @@ export default function MaintenanceReportBuilder({
                   className={INPUT_CLASS}
                 />
               </label>
-              <span className="text-sm text-zinc-400 sm:ml-auto sm:self-center">
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={selectAllFiltered}
+                disabled={filteredItems.length === 0}
+                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                <Check size={13} strokeWidth={2} aria-hidden="true" />
+                เลือกทั้งหมดที่กรองอยู่ ({filteredItems.length.toLocaleString("th-TH")})
+              </button>
+              {selectedRowNumbers.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  <X size={13} strokeWidth={2} aria-hidden="true" />
+                  ล้างที่เลือก
+                </button>
+              )}
+              <span className="text-sm text-zinc-400 sm:ml-auto">
                 เลือกแล้ว {selectedRowNumbers.length.toLocaleString("th-TH")} รายการ
               </span>
             </div>
@@ -273,34 +515,87 @@ export default function MaintenanceReportBuilder({
 
           {selectedRows.length > 0 && (
             <div className={`${CARD} flex flex-col gap-3 p-4`}>
-              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                ปรับ &quot;สถานที่ตั้ง&quot; / &quot;ผู้รับผิดชอบครุภัณฑ์&quot; ก่อนพิมพ์ (ถ้าข้อมูลในระบบไม่ตรงกับปัจจุบัน)
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  ปรับ &quot;สถานที่ตั้ง&quot; / &quot;ผู้รับผิดชอบครุภัณฑ์&quot; ก่อนพิมพ์ (ถ้าข้อมูลในระบบไม่ตรงกับปัจจุบัน)
+                </p>
+                <button
+                  type="button"
+                  onClick={saveAllChanged}
+                  disabled={dirtyRowCount === 0 || savingAll}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-xs font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-50"
+                >
+                  {savingAll ? (
+                    <Loader2 size={13} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Save size={13} strokeWidth={2} aria-hidden="true" />
+                  )}
+                  บันทึกข้อมูลที่แก้ไขลงระบบ{dirtyRowCount > 0 ? ` (${dirtyRowCount})` : ""}
+                </button>
+              </div>
+              <p className="text-xs text-zinc-400">
+                การแก้ไขที่นี่ใช้กับรายงานฉบับนี้ทันที — กด &quot;บันทึกข้อมูลที่แก้ไขลงระบบ&quot; เพิ่มถ้าต้องการแก้ไขข้อมูลจริงในฐานข้อมูลด้วย
+                (จะบันทึกลง log การแก้ไขเหมือนการแก้ไขทั่วไป)
               </p>
               <div className="flex flex-col gap-2">
-                {selectedRows.map((row) => (
-                  <div
-                    key={row.rowNumber}
-                    className="grid grid-cols-1 gap-2 border-b border-zinc-50 pb-2 last:border-0 sm:grid-cols-3 dark:border-zinc-800/60"
-                  >
-                    <span className="self-center text-xs text-zinc-500 dark:text-zinc-400">
-                      {row.assetNumber || "—"} · {row.description || "—"}
-                    </span>
-                    <input
-                      type="text"
-                      value={row.location}
-                      onChange={(e) => updateOverride(row.rowNumber, "location", e.target.value)}
-                      placeholder="สถานที่ตั้ง"
-                      className={INPUT_CLASS}
-                    />
-                    <input
-                      type="text"
-                      value={row.responsiblePerson}
-                      onChange={(e) => updateOverride(row.rowNumber, "responsiblePerson", e.target.value)}
-                      placeholder="ผู้รับผิดชอบครุภัณฑ์"
-                      className={INPUT_CLASS}
-                    />
-                  </div>
-                ))}
+                {selectedRows.map((row) => {
+                  const status = rowSaveStatus[row.rowNumber] ?? "idle";
+                  return (
+                    <div
+                      key={row.rowNumber}
+                      className="grid grid-cols-1 gap-2 border-b border-zinc-50 pb-2 last:border-0 sm:grid-cols-[1fr_1fr_1fr_auto] dark:border-zinc-800/60"
+                    >
+                      <span className="self-center text-xs text-zinc-500 dark:text-zinc-400">
+                        {row.assetNumber || "—"} · {row.description || "—"}
+                      </span>
+                      <input
+                        type="text"
+                        value={row.location}
+                        onChange={(e) => updateOverride(row.rowNumber, "location", e.target.value)}
+                        placeholder="สถานที่ตั้ง"
+                        className={INPUT_CLASS}
+                      />
+                      <input
+                        type="text"
+                        value={row.responsiblePerson}
+                        onChange={(e) => updateOverride(row.rowNumber, "responsiblePerson", e.target.value)}
+                        placeholder="ผู้รับผิดชอบครุภัณฑ์"
+                        title={
+                          row.canSaveResponsiblePerson
+                            ? undefined
+                            : "ชีตนี้แยกคอลัมน์คำนำหน้า/ชื่อ-นามสกุล — แก้ไขได้เฉพาะรายงานนี้ บันทึกลงระบบไม่ได้"
+                        }
+                        className={INPUT_CLASS}
+                      />
+                      <div className="flex items-center gap-1.5 self-center text-xs">
+                        {status === "saving" && (
+                          <Loader2 size={14} strokeWidth={2} className="animate-spin text-zinc-400" aria-hidden="true" />
+                        )}
+                        {status === "saved" && (
+                          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                            <Check size={14} strokeWidth={2} aria-hidden="true" />
+                            บันทึกแล้ว
+                          </span>
+                        )}
+                        {status === "error" && (
+                          <span className="text-red-600 dark:text-red-400" title={rowSaveError[row.rowNumber]}>
+                            บันทึกไม่สำเร็จ
+                          </span>
+                        )}
+                        {hasSavableChange(row) && status !== "saving" && (
+                          <button
+                            type="button"
+                            onClick={() => saveRow(row)}
+                            className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2 py-1 font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                          >
+                            <Save size={12} strokeWidth={2} aria-hidden="true" />
+                            บันทึก
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -310,9 +605,9 @@ export default function MaintenanceReportBuilder({
             preview) so what ends up on paper is never a surprise. */}
         <div className="print-area rounded-2xl border border-zinc-200 bg-white p-8 text-zinc-900 shadow-sm print:rounded-none print:border-0 print:p-0 print:shadow-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
           <div className="flex flex-col items-center gap-1 text-center">
-            <p className="text-base font-bold">{settings.orgName}</p>
-            <p className="text-base font-bold">{settings.maintenanceFormTitle}</p>
-            <p className="text-sm">{settings.fiscalYearLabel}</p>
+            <p className="text-base font-bold">{formSettings.orgName}</p>
+            <p className="text-base font-bold">{formSettings.maintenanceFormTitle}</p>
+            <p className="text-sm">{formSettings.fiscalYearLabel}</p>
             {formDepartment && <p className="mt-1 text-sm">กลุ่มงาน: {formDepartment}</p>}
           </div>
 
@@ -383,9 +678,9 @@ export default function MaintenanceReportBuilder({
             </div>
             <div className="flex flex-col items-center gap-1">
               <p>ลงชื่อ ....................................................... ผู้รับทราบ</p>
-              <p>({settings.acknowledgerName})</p>
-              <p>ตำแหน่ง {settings.acknowledgerPosition}</p>
-              <p>{settings.acknowledgerDepartment}</p>
+              <p>({formSettings.acknowledgerName})</p>
+              <p>ตำแหน่ง {formSettings.acknowledgerPosition}</p>
+              <p>{formSettings.acknowledgerDepartment}</p>
             </div>
           </div>
         </div>

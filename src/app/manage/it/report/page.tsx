@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { SESSION_COOKIE, canAccessItDashboard, verifySessionToken } from "@/lib/auth";
 import { getEquipmentDataUnredacted, getReportSettings, DEFAULT_REPORT_SETTINGS } from "@/lib/sheets";
 import { isDeleted, isDisposed } from "@/lib/fields";
+import { rowSnapshotHash } from "@/lib/recordHash";
 import MaintenanceReportBuilder, { type ReportEquipmentItem } from "@/components/MaintenanceReportBuilder";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +51,12 @@ export default async function ManageItReportPage() {
           installLocation: f.installLocation ? (r.data[f.installLocation] ?? "").trim() : "",
           responsiblePerson: fullName,
           disposed: isDisposed(r.data, f),
+          snapshotHash: rowSnapshotHash(snapshot.headers, r.data),
+          // A split คำนำหน้า/ชื่อ-นามสกุล sheet can't take a single free-text
+          // name back (see /api/manage/it/records/[rowNumber]) — tell the
+          // client up front so it can hide that save option instead of
+          // letting every attempt fail.
+          canSaveResponsiblePerson: Boolean(f.fullNameHeader),
         };
       });
   } catch (err) {

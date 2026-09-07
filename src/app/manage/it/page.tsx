@@ -1,7 +1,15 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, canAccessItDashboard, verifySessionToken } from "@/lib/auth";
-import { getEquipmentDataUnredacted, getReportSettings, type ReportSettings } from "@/lib/sheets";
+import {
+  getEquipmentDataUnredacted,
+  getMaintenanceLog,
+  getReportSettings,
+  getSpecStandards,
+  type MaintenanceLogEntry,
+  type ReportSettings,
+  type SpecStandards,
+} from "@/lib/sheets";
 import { isDeleted } from "@/lib/fields";
 import { rowSnapshotHash } from "@/lib/recordHash";
 import ITDashboard, { type ITDashboardData } from "@/components/ITDashboard";
@@ -28,6 +36,8 @@ export default async function ManageItPage() {
 
   let initial: ITDashboardData | { error: string };
   let settings: ReportSettings | null = null;
+  let maintenanceLog: MaintenanceLogEntry[] = [];
+  let specStandards: SpecStandards | null = null;
   try {
     const snapshot = await getEquipmentDataUnredacted();
     // Deleted rows never reach any /manage view, IT included — same rule
@@ -47,11 +57,23 @@ export default async function ManageItPage() {
     initial = { error: err instanceof Error ? err.message : String(err) };
   }
 
+  // Both tolerate a missing sheet tab on their own (empty history / default
+  // thresholds) — this try/catch only guards an unexpected network/auth
+  // failure from also breaking the rest of the page.
+  try {
+    maintenanceLog = await getMaintenanceLog();
+    specStandards = await getSpecStandards();
+  } catch {
+    // Fall back to empty history + defaults, same rationale as settings above.
+  }
+
   return (
     <ITDashboard
       session={{ username: session.username, isBootstrap: session.isBootstrap }}
       initial={initial}
       initialSettings={settings}
+      initialMaintenanceLog={maintenanceLog}
+      initialSpecStandards={specStandards}
     />
   );
 }

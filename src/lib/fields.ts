@@ -411,6 +411,43 @@ export function joinMultiValue(values: string[]): string {
   return values.join(", ");
 }
 
+export interface SoftwareEntry {
+  name: string;
+  version: string;
+}
+
+/** Parses the free-form "name: version; name: version" string used by
+ * MaintenanceLogEntry.software (lib/sheets.ts — see that tab's comment for
+ * why it's deliberately not fixed HOSxP-3/HOSxP-4 columns) into structured
+ * rows for the IT dashboard's "อัปเดตสถานะ" form. A segment with no colon
+ * (e.g. a lone "Windows Update") is kept as a name with an empty version
+ * rather than dropped, so split -> join always round-trips without losing
+ * data. */
+export function splitSoftwareEntries(value: string): SoftwareEntry[] {
+  return value
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const idx = part.indexOf(":");
+      if (idx === -1) return { name: part, version: "" };
+      return { name: part.slice(0, idx).trim(), version: part.slice(idx + 1).trim() };
+    });
+}
+
+/** Inverse of splitSoftwareEntries. Drops any entry with a blank name (a
+ * leftover empty row from the add-entry form) and writes the rest back into
+ * the "name: version; name: version" shape appendMaintenanceLogEntry
+ * expects — a version-less entry is written as just the name, no trailing
+ * colon. */
+export function joinSoftwareEntries(entries: SoftwareEntry[]): string {
+  return entries
+    .map((e) => ({ name: e.name.trim(), version: e.version.trim() }))
+    .filter((e) => e.name)
+    .map((e) => (e.version ? `${e.name}: ${e.version}` : e.name))
+    .join("; ");
+}
+
 function headerIn(header: string, candidates: string[]): boolean {
   const trimmed = header.trim();
   return candidates.some((c) => c.trim() === trimmed);
