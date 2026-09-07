@@ -18,6 +18,11 @@ export default async function ManagePage() {
   if (!session) {
     redirect("/login?next=/manage");
   }
+  // it never sees the general equipment table (view+report only, see
+  // /manage/it) — send it straight there instead of an empty/wrong page.
+  if (session.role === "it") {
+    redirect("/manage/it");
+  }
 
   let initial: ManageData | { error: string };
   try {

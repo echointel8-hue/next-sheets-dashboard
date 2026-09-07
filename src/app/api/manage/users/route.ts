@@ -70,7 +70,7 @@ function readNewUserPayload(body: unknown): NewUserPayload | null {
   const b = body as Record<string, unknown>;
   if (typeof b.username !== "string" || b.username.trim() === "") return null;
   if (typeof b.password !== "string" || b.password.length < 4) return null;
-  if (b.role !== "superadmin" && b.role !== "admin") return null;
+  if (b.role !== "superadmin" && b.role !== "admin" && b.role !== "it") return null;
   if (typeof b.displayName !== "string") return null;
   if (typeof b.department !== "string") return null;
   return {
@@ -160,7 +160,7 @@ function readUpdateUserPayload(body: unknown): UpdateUserPayload | null {
     out.password = b.password;
   }
   if (b.role !== undefined) {
-    if (b.role !== "superadmin" && b.role !== "admin") return null;
+    if (b.role !== "superadmin" && b.role !== "admin" && b.role !== "it") return null;
     out.role = b.role;
   }
   if (b.department !== undefined) {

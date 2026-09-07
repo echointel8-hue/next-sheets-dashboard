@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ArrowLeft, LogOut, Pencil, Plus, ShieldCheck, UserRound } from "lucide-react";
+import { AlertTriangle, ArrowLeft, LogOut, Pencil, Plus, ShieldCheck, UserRound, Wrench } from "lucide-react";
 import UserFormModal, { type ManagedUser } from "@/components/UserFormModal";
 
 const CARD = "rounded-2xl border border-emerald-900/10 bg-white shadow-sm dark:border-emerald-400/10 dark:bg-zinc-900";
@@ -137,6 +137,8 @@ export default function UsersManager({
                           <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
                             {u.role === "superadmin" ? (
                               <ShieldCheck size={14} strokeWidth={2} aria-hidden="true" />
+                            ) : u.role === "it" ? (
+                              <Wrench size={14} strokeWidth={2} aria-hidden="true" />
                             ) : (
                               <UserRound size={14} strokeWidth={2} aria-hidden="true" />
                             )}

@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import { redactSurname, resolveFields, type EquipmentRow, type FieldMap } from "@/lib/fields";
+import type { Role } from "@/lib/auth";
 
 export type { EquipmentRow, FieldMap };
 
@@ -274,10 +275,21 @@ export interface UserRecord {
   rowNumber: number;
   username: string;
   passwordHash: string;
-  role: "superadmin" | "admin";
+  role: Role;
   department: string;
   displayName: string;
   active: boolean;
+}
+
+/** Parses the Role column's raw text, defaulting to the most restrictive
+ * role ("admin") for anything unrecognized — e.g. a blank cell, or a typo
+ * hand-edited into the sheet — rather than silently granting broader
+ * access than intended. */
+function parseRole(raw: string): Role {
+  const trimmed = raw.trim();
+  if (trimmed === "superadmin") return "superadmin";
+  if (trimmed === "it") return "it";
+  return "admin";
 }
 
 function parseActive(raw: string): boolean {
@@ -320,7 +332,7 @@ export async function getUsers(): Promise<UserRecord[]> {
       rowNumber,
       username: (r[0] ?? "").toString().trim(),
       passwordHash: (r[1] ?? "").toString().trim(),
-      role: (r[2] ?? "").toString().trim() === "superadmin" ? "superadmin" : "admin",
+      role: parseRole((r[2] ?? "").toString()),
       department: (r[3] ?? "").toString().trim(),
       displayName: (r[4] ?? "").toString().trim(),
       active: parseActive((r[5] ?? "").toString()),
@@ -330,7 +342,7 @@ export async function getUsers(): Promise<UserRecord[]> {
 export async function addUser(user: {
   username: string;
   passwordHash: string;
-  role: "superadmin" | "admin";
+  role: Role;
   department: string;
   displayName: string;
 }): Promise<void> {
@@ -390,6 +402,122 @@ export async function updateUser(
       ]],
     },
   });
+
+  return merged;
+}
+
+// ---------------------------------------------------------------------------
+// ReportSettings tab — the handful of fixed text pieces that appear on a
+// printed report (see /manage/it) but change independently of the app's
+// code: the org name, a report's title, and who signs as "ผู้รับทราบ" on
+// the maintenance form. Stored as plain key/value rows (Key | Value,
+// starting row 2) rather than one column per setting, so adding a new
+// setting later never means widening the sheet.
+//
+// This tab is NOT created by this app — like Users/EditLog, the sheet
+// owner creates it by hand (see project setup notes) before anyone edits
+// settings through /manage/it. Reading gracefully falls back to
+// DEFAULT_REPORT_SETTINGS when the tab doesn't exist yet (or a key isn't
+// in it) so the report generator still works with sensible text out of
+// the box; only *writing* an edited value requires the tab to actually
+// exist, and fails with a clear "create it first" message if it doesn't.
+// ---------------------------------------------------------------------------
+
+export interface ReportSettings {
+  orgName: string;
+  maintenanceFormTitle: string;
+  fiscalYearLabel: string;
+  acknowledgerName: string;
+  acknowledgerPosition: string;
+  acknowledgerDepartment: string;
+}
+
+// Matches the attached example form exactly, so a hospital that never
+// touches the settings screen still gets a correct-looking report.
+export const DEFAULT_REPORT_SETTINGS: ReportSettings = {
+  orgName: "โรงพยาบาลท่าตะเกียบ",
+  maintenanceFormTitle: "แบบฟอร์มการบำรุงรักษาเชิงป้องกันเครื่องคอมพิวเตอร์และครุภัณฑ์คอมพิวเตอร์",
+  fiscalYearLabel: "ประจำปีงบประมาณ 2569",
+  acknowledgerName: "นางขนัญธร เสียงล้ำ",
+  acknowledgerPosition: "เจ้าพนักงานเวชสถิติชำนาญงาน",
+  acknowledgerDepartment: "กลุ่มงานประกันสุขภาพและกลุ่มงานสุขภาพดิจิทัล",
+};
+
+// Fixed key order — also what updateReportSettings writes back, so the
+// tab's row order stays stable across edits instead of depending on
+// whatever order a partial update happened to touch keys in.
+const REPORT_SETTINGS_KEYS = Object.keys(DEFAULT_REPORT_SETTINGS) as (keyof ReportSettings)[];
+
+function getReportSettingsTab(): string {
+  return process.env.GOOGLE_SHEET_REPORT_SETTINGS_TAB?.trim() || "ReportSettings";
+}
+
+export async function getReportSettings(): Promise<ReportSettings> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getReportSettingsTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:B200`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      // Tab doesn't exist yet — every setting falls back to its default.
+      return { ...DEFAULT_REPORT_SETTINGS };
+    }
+    throw new Error(`อ่านการตั้งค่ารายงานไม่สำเร็จ: ${message}`);
+  }
+
+  const stored = new Map<string, string>();
+  for (const row of values ?? []) {
+    const key = (row[0] ?? "").toString().trim();
+    if (key) stored.set(key, (row[1] ?? "").toString());
+  }
+
+  const result = { ...DEFAULT_REPORT_SETTINGS };
+  for (const key of REPORT_SETTINGS_KEYS) {
+    const v = stored.get(key);
+    if (v !== undefined && v.trim() !== "") result[key] = v;
+  }
+  return result;
+}
+
+/** Merges `updates` into the current settings and rewrites the whole
+ * tab in the fixed REPORT_SETTINGS_KEYS order. Throws (with a
+ * create-the-tab-first message) if the tab doesn't exist — unlike
+ * getReportSettings, there's nothing sensible to fall back to for a
+ * *write*. */
+export async function updateReportSettings(updates: Partial<ReportSettings>): Promise<ReportSettings> {
+  const current = await getReportSettings();
+  const merged: ReportSettings = { ...current, ...updates };
+
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getReportSettingsTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${tab}!A2:B${1 + REPORT_SETTINGS_KEYS.length}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: {
+        values: REPORT_SETTINGS_KEYS.map((key) => [key, merged[key]]),
+      },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      throw new Error(
+        `ยังไม่พบแท็บชื่อ "${tab}" ในสเปรดชีต — สร้างแท็บนี้ก่อน (หัวตาราง: Key | Value) หรือตั้งค่า GOOGLE_SHEET_REPORT_SETTINGS_TAB ให้ตรงกับชื่อแท็บจริง`
+      );
+    }
+    throw new Error(`บันทึกการตั้งค่ารายงานไม่สำเร็จ: ${message}`);
+  }
 
   return merged;
 }

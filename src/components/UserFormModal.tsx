@@ -218,6 +218,7 @@ export default function UserFormModal({
               >
                 <option value="admin">admin (กลุ่มงานตัวเอง)</option>
                 <option value="superadmin">superadmin (ทุกกลุ่มงาน)</option>
+                <option value="it">it (ดูข้อมูล + ออกรายงานทุกกลุ่มงาน)</option>
               </select>
             </label>
 

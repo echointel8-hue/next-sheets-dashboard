@@ -1,9 +1,17 @@
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import type { NextRequest } from "next/server";
 
-// Login/session auth for the /manage area. Two roles:
+// Login/session auth for the /manage area. Three roles:
 // - superadmin: every department, can add/edit/dispose equipment
 // - admin: one per department, can only edit rows in their own department
+// - it: every department, read-only — no add/edit/dispose anywhere. Scoped
+//   to the technical dashboard at /manage/it (spec tables + printable
+//   maintenance-report generator) rather than the general /manage table.
+//   Only reaches /manage/it alongside the single bootstrap superadmin
+//   account, per the hospital's request — a regular superadmin created
+//   later through /manage/users does NOT get /manage/it access, even
+//   though role="superadmin" still means "every department" everywhere
+//   else. See the isBootstrap check in src/app/manage/it/page.tsx.
 //
 // User accounts live in the "Users" tab of the spreadsheet (see
 // src/lib/sheets.ts getUsers/addUser/updateUser) — only a password *hash*
@@ -22,7 +30,7 @@ const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours — a work shift
 export const SESSION_COOKIE = "manage_session";
 export const SESSION_MAX_AGE_SECONDS = SESSION_TTL_MS / 1000;
 
-export type Role = "superadmin" | "admin";
+export type Role = "superadmin" | "admin" | "it";
 
 export interface SessionPayload {
   username: string;
@@ -36,6 +44,19 @@ export interface SessionPayload {
    * their role is also "superadmin". */
   isBootstrap: boolean;
   exp: number; // epoch ms
+}
+
+/**
+ * /manage/it (spec dashboard + maintenance-report generator) is reachable
+ * by the "it" role, and — per the hospital's explicit request — the single
+ * env-configured bootstrap account alone, NOT every "superadmin" account.
+ * A regular superadmin created later through /manage/users has full
+ * add/edit/dispose rights everywhere else, but does not get this page.
+ * Centralized here since the page itself, its settings API route, and any
+ * future IT-only route all need the exact same check.
+ */
+export function canAccessItDashboard(session: Pick<SessionPayload, "role" | "isBootstrap">): boolean {
+  return session.role === "it" || (session.role === "superadmin" && session.isBootstrap);
 }
 
 /** Hashes a plaintext password for storage (in the Users sheet tab or the
@@ -115,7 +136,7 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
   }
   if (
     typeof payload.username !== "string" ||
-    (payload.role !== "superadmin" && payload.role !== "admin") ||
+    (payload.role !== "superadmin" && payload.role !== "admin" && payload.role !== "it") ||
     typeof payload.department !== "string" ||
     typeof payload.isBootstrap !== "boolean" ||
     typeof payload.exp !== "number"

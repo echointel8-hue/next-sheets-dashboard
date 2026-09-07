@@ -37,6 +37,15 @@ export async function PATCH(
   if (!session) {
     return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   }
+  // it is read-only everywhere (see /manage/it) — without this, it would
+  // fall through the admin-only department check below and land in the
+  // same unrestricted branch as superadmin.
+  if (session.role === "it") {
+    return NextResponse.json(
+      { error: "สิทธิ์ it ดูข้อมูลได้เท่านั้น ไม่สามารถแก้ไขรายการครุภัณฑ์ได้" },
+      { status: 403 }
+    );
+  }
 
   const { rowNumber: rowNumberParam } = await params;
   const rowNumber = Number(rowNumberParam);

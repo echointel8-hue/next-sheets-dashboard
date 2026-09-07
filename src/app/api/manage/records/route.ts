@@ -43,10 +43,13 @@ function formatSheetTimestamp(date: Date): string {
 }
 
 /**
- * Lists equipment rows scoped by role: superadmin sees every row, admin
- * sees only rows whose department column matches their own department.
- * proxy.ts already blocks unauthenticated requests to /api/manage/*, but
- * this route re-checks the session itself too — never trust that alone.
+ * Lists equipment rows scoped by role: superadmin and it both see every
+ * row (it is read-only across every department — see /manage/it — but
+ * still needs the full unrestricted list to build its spec tables and
+ * maintenance reports), admin sees only rows whose department column
+ * matches their own department. proxy.ts already blocks unauthenticated
+ * requests to /api/manage/*, but this route re-checks the session itself
+ * too — never trust that alone.
  */
 export async function GET(request: NextRequest) {
   const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
@@ -60,7 +63,7 @@ export async function GET(request: NextRequest) {
     // from every role, not just filtered out of the UI.
     const notDeleted = snapshot.rows.filter((r) => !isDeleted(r.data, snapshot.fields));
     const scopedRows =
-      session.role === "superadmin"
+      session.role === "superadmin" || session.role === "it"
         ? notDeleted
         : notDeleted.filter((r) => fieldValue(r.data, snapshot.fields.department) === session.department);
 

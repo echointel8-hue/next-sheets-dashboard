@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type { SheetSnapshot } from "@/lib/sheets";
 import {
+  DEPARTMENT_OPTIONS,
   DISPLAY_COLUMNS,
   getAssetNumber,
   getCellValue,
@@ -291,6 +292,13 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
   const departmentColorMap = useMemo(() => {
     if (!snapshot || !fields) return new Map<string, string>();
     const map = new Map<string, string>();
+    // Seed every department the hospital actually has (fields.ts
+    // DEPARTMENT_OPTIONS) first, so a department with zero equipment still
+    // gets the same brand gradient as every other bar in departmentBreakdown
+    // below — without this, TypeBreakdownChart would fall back to
+    // OTHER_COLOR for it (colorMap.get(label) ?? OTHER_COLOR), which reads
+    // as a different, unrelated category instead of "no data yet".
+    for (const dep of DEPARTMENT_OPTIONS) map.set(dep, "url(#brandBarGradient)");
     for (const row of rawRows) {
       const dep = fieldValue(row, fields.department) || UNSPECIFIED;
       // A subtle brand-hued gradient (defined once inside TypeBreakdownChart)
@@ -305,12 +313,31 @@ export default function Dashboard({ initial }: { initial: LoadResult }) {
   // as both filters (department, equipment type) narrow the result set.
   // Every distinct department gets its own bar (see departmentColorMap above
   // for why this one doesn't need an 8-category cap / "Other" fold).
+  //
+  // When no department filter is active, every department the hospital has
+  // (DEPARTMENT_OPTIONS) shows up even at zero equipment — the hospital
+  // wants the chart to read as a complete department list, not just "the
+  // departments that happen to have registered something so far". Seeding
+  // the Map with the fixed list *before* counting, rather than after,
+  // preserves that list's order for every department tied at the same
+  // count (Map keys keep their first-insertion position, and Array#sort is
+  // stable) — so once sorted by count descending, the zero-count bars still
+  // cluster together in the same order the hospital gave, instead of some
+  // arbitrary order. A department filter, in contrast, is the person
+  // deliberately narrowing to specific departments — forcing the other 17
+  // back in at zero would defeat that, so filtered view keeps the old
+  // behavior of only showing what's actually selected.
   const departmentBreakdown = useMemo(() => {
     if (!fields) return [];
-    return sortedByCountDesc(countBy(filteredRows, fields.department)).map(
-      ([label, count]) => ({ label, count })
-    );
-  }, [filteredRows, fields]);
+    const counts = new Map<string, number>();
+    if (departments.length === 0) {
+      for (const dep of DEPARTMENT_OPTIONS) counts.set(dep, 0);
+    }
+    for (const [label, count] of countBy(filteredRows, fields.department)) {
+      counts.set(label, (counts.get(label) ?? 0) + count);
+    }
+    return sortedByCountDesc(counts).map(([label, count]) => ({ label, count }));
+  }, [filteredRows, fields, departments]);
 
   const filteredDepartmentCount = useMemo(() => {
     if (!fields) return 0;
