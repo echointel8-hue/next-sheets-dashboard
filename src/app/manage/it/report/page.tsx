@@ -112,6 +112,13 @@ export default async function ManageItReportPage() {
       createdAt: t.createdAt,
       completedAt: t.completedAt,
       displayName: t.assignedToDisplayName || t.assignedToUsername,
+      // Filled in through the "อัปเดตสถานะงาน" modal on /manage/it/tasks
+      // (see TaskUpdateModal there) — carried down here so the month-strip
+      // popup below can show what was actually done, not just who/when.
+      actionsTaken: t.actionsTaken,
+      inspectionChecks: t.inspectionChecks,
+      partsChanged: t.partsChanged,
+      otherDetail: t.otherDetail,
     }));
   } catch {
     // Fall through with no badges.

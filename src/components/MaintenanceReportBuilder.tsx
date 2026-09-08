@@ -18,7 +18,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import type { MaintenanceTaskStatus, ReportSettings } from "@/lib/sheets";
+import type { InspectionCheck, MaintenanceTaskStatus, ReportSettings } from "@/lib/sheets";
 import MultiSelect from "@/components/MultiSelect";
 
 /** One selectable equipment item — already flattened/redaction-free by
@@ -44,13 +44,35 @@ export interface ReportEquipmentItem {
 
 /** One maintenance task, trimmed to just what the equipment-picker badges
  * (and the ปี filter driving them) need — see manage/it/report/page.tsx's
- * taskHistory mapping from the full MaintenanceTask. */
+ * taskHistory mapping from the full MaintenanceTask. actionsTaken/
+ * inspectionChecks/partsChanged/otherDetail are only ever filled in once
+ * someone opens "อัปเดตสถานะงาน" on /manage/it/tasks and saves — an
+ * in-progress task nobody has touched yet just carries empty values here,
+ * which the month-strip popup below renders as "ยังไม่ได้บันทึกรายละเอียด". */
 export interface ReportTaskEntry {
   equipmentRowNumber: number;
   status: MaintenanceTaskStatus;
   createdAt: string;
   completedAt: string;
   displayName: string;
+  actionsTaken: string[];
+  inspectionChecks: InspectionCheck[];
+  partsChanged: string;
+  otherDetail: string;
+}
+
+/** "ปกติ, เปลี่ยนอะไหล่ (จอ LCD), ส่งซ่อม" — folds the ผลการตรวจสอบโดย IT
+ * checkboxes back into one readable line for the month-strip popup, same
+ * checks as the printed form's "ผลการตรวจสอบโดย IT" box. Appends the
+ * matching free-text blank in parens where one was filled in. */
+function formatInspectionResult(t: ReportTaskEntry): string {
+  return t.inspectionChecks
+    .map((check) => {
+      if (check === "เปลี่ยนอะไหล่" && t.partsChanged.trim()) return `${check} (${t.partsChanged.trim()})`;
+      if (check === "อื่นๆ" && t.otherDetail.trim()) return `${check} (${t.otherDetail.trim()})`;
+      return check;
+    })
+    .join(", ");
 }
 
 interface SelectedRow {
@@ -1041,16 +1063,36 @@ export default function MaintenanceReportBuilder({
                   ) : (
                     <ul className="flex flex-col gap-2">
                       {(monthlyTasks[monthPopup.rowNumber]?.[monthPopup.month] ?? []).map((t, i) => (
-                        <li key={i} className="flex items-start gap-1.5">
-                          {t.status === "in_progress" ? (
-                            <Wrench size={13} strokeWidth={2} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                        <li key={i} className="flex flex-col gap-1 rounded-lg border border-zinc-100 p-2 dark:border-zinc-800">
+                          <div className="flex items-start gap-1.5">
+                            {t.status === "in_progress" ? (
+                              <Wrench size={13} strokeWidth={2} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                            ) : (
+                              <CheckCircle2 size={13} strokeWidth={2} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                            )}
+                            <span className="text-zinc-700 dark:text-zinc-300">
+                              {formatThaiDate((t.status === "in_progress" ? t.createdAt : t.completedAt || t.createdAt).slice(0, 10))} — {t.displayName}
+                              {t.status === "in_progress" && " (กำลังดำเนินการ)"}
+                            </span>
+                          </div>
+                          {t.actionsTaken.length === 0 && t.inspectionChecks.length === 0 ? (
+                            <p className="pl-[19px] text-xs text-zinc-400 italic">ยังไม่ได้บันทึกรายละเอียดการดำเนินการ</p>
                           ) : (
-                            <CheckCircle2 size={13} strokeWidth={2} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                            <>
+                              {t.actionsTaken.length > 0 && (
+                                <p className="pl-[19px] text-xs text-zinc-500 dark:text-zinc-400">
+                                  <span className="font-medium text-zinc-600 dark:text-zinc-300">การดำเนินการ:</span>{" "}
+                                  {t.actionsTaken.join(", ")}
+                                </p>
+                              )}
+                              {t.inspectionChecks.length > 0 && (
+                                <p className="pl-[19px] text-xs text-zinc-500 dark:text-zinc-400">
+                                  <span className="font-medium text-zinc-600 dark:text-zinc-300">ผลตรวจสอบโดย IT:</span>{" "}
+                                  {formatInspectionResult(t)}
+                                </p>
+                              )}
+                            </>
                           )}
-                          <span className="text-zinc-700 dark:text-zinc-300">
-                            {formatThaiDate((t.status === "in_progress" ? t.createdAt : t.completedAt || t.createdAt).slice(0, 10))} — {t.displayName}
-                            {t.status === "in_progress" && " (กำลังดำเนินการ)"}
-                          </span>
                         </li>
                       ))}
                     </ul>
