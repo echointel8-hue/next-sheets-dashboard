@@ -27,6 +27,16 @@ const notoSansThai = Noto_Sans_Thai({
 export const metadata: Metadata = {
   title: "ทะเบียนครุภัณฑ์คอมพิวเตอร์ โรงพยาบาลท่าตะเกียบ",
   description: "ระบบติดตามและค้นหาข้อมูลครุภัณฑ์คอมพิวเตอร์ โรงพยาบาลท่าตะเกียบ จากแบบฟอร์มลงทะเบียน",
+  // Tells Chrome (and other browsers honoring this convention) to never
+  // offer to auto-translate this site — it's Thai-only by design, so
+  // translation only gets in the way. More importantly, it heads off a
+  // well-known React ↔ Chrome-Translate conflict: if the browser translates
+  // a page anyway, it rewrites text nodes behind React's back, and the next
+  // time React updates that part of the DOM (any state change that
+  // adds/removes an element — e.g. a hover-triggered tooltip) it can crash
+  // trying to touch a node Translate already altered. Renders as
+  // <meta name="google" content="notranslate">.
+  other: { google: "notranslate" },
 };
 
 // Explicit viewport config (Next.js sets a sensible default automatically,

@@ -597,7 +597,20 @@ export default function MaintenanceReportBuilder({
   ];
 
   return (
-    <main className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 print:block print:bg-white print:px-0 print:py-0 sm:px-6 lg:px-10">
+    // translate="no" (+ the "notranslate" class, for older Chrome builds
+    // that still key off it) tells Chrome's built-in page-translate feature
+    // to leave this whole page alone. Without it, translating this page
+    // lets Chrome rewrite text nodes behind React's back; the next time
+    // React updates the DOM here (e.g. the month-strip popup below
+    // appearing/disappearing on hover) it can crash trying to remove/update
+    // a node Translate already altered — a well-known React ↔ Chrome
+    // Translate conflict, not specific to this page's own logic. Since this
+    // dashboard is Thai-only by design anyway, there's no reason to ever
+    // offer translation on it.
+    <main
+      translate="no"
+      className="notranslate flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 print:block print:bg-white print:px-0 print:py-0 sm:px-6 lg:px-10"
+    >
       <div className="flex w-full max-w-[75rem] flex-col gap-6 print:max-w-none print:gap-0">
         {/* Selection controls — never printed (see the @media print rule
             below, which also hides anything with the .no-print class as a
