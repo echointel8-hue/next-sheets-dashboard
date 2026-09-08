@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ArrowLeft,
   Check,
+  CheckCircle2,
   Loader2,
   MapPin,
   Plus,
@@ -17,7 +18,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import type { ReportSettings } from "@/lib/sheets";
+import type { MaintenanceTaskStatus, ReportSettings } from "@/lib/sheets";
 import MultiSelect from "@/components/MultiSelect";
 
 /** One selectable equipment item — already flattened/redaction-free by
@@ -40,6 +41,17 @@ export interface ReportEquipmentItem {
    * so the save button for this one field is hidden in that case (editing
    * it for just this printout still works). */
   canSaveResponsiblePerson: boolean;
+}
+
+/** One maintenance task, trimmed to just what the equipment-picker badges
+ * (and the ปี filter driving them) need — see manage/it/report/page.tsx's
+ * taskHistory mapping from the full MaintenanceTask. */
+export interface ReportTaskEntry {
+  equipmentRowNumber: number;
+  status: MaintenanceTaskStatus;
+  createdAt: string;
+  completedAt: string;
+  displayName: string;
 }
 
 interface SelectedRow {
@@ -106,7 +118,7 @@ export default function MaintenanceReportBuilder({
   loadError,
   settings: initialSettings,
   currentUser,
-  inProgress,
+  taskHistory,
 }: {
   items: ReportEquipmentItem[];
   loadError: string | null;
@@ -116,12 +128,13 @@ export default function MaintenanceReportBuilder({
    * maintenance tasks created when this report is printed (see
    * createTasksForSelection / the print button's onClick). */
   currentUser: { username: string; displayName: string };
-  /** Equipment rows with an open (not yet "เสร็จสิ้น") maintenance task,
-   * keyed by row number — shows a "กำลังบำรุงรักษาโดย ..." badge in the
-   * picker table below so a second IT account can see someone's already on
-   * it, without being blocked from also selecting it (informational only —
-   * see /manage/it/tasks for the actual task tracking). */
-  inProgress: Record<number, { displayName: string; createdAt: string }>;
+  /** Every maintenance task ever created (any equipment, any year) — the
+   * source for the "กำลังบำรุงรักษาโดย ..." / "เสร็จสิ้นล่าสุดโดย ..."
+   * badges in the picker table below. Kept as the raw list (not
+   * pre-reduced to one entry per row) so the ปี filter can re-derive those
+   * badges for whichever year is selected, client-side — a future year
+   * with no tasks yet just shows no badges, no code change needed. */
+  taskHistory: ReportTaskEntry[];
 }) {
   const [items, setItems] = useState(initialItems);
   // Multi-select — an empty array means "no filter on that dimension", same
@@ -130,6 +143,12 @@ export default function MaintenanceReportBuilder({
   const [departmentFilter, setDepartmentFilter] = useState<string[]>([]);
   const [equipmentTypeFilter, setEquipmentTypeFilter] = useState<string[]>([]);
   const [search, setSearch] = useState("");
+  // "" = ทุกปี (every task ever, newest wins — the original behavior);
+  // otherwise a พ.ศ. year string, restricting the badges below to tasks
+  // created in that year only. Lets IT staff review/report on a past
+  // annual cycle, or start a fresh-looking year with no carried-over
+  // badges, without any of this needing a code change come next year.
+  const [maintenanceYearFilter, setMaintenanceYearFilter] = useState("");
   const [selectedRowNumbers, setSelectedRowNumbers] = useState<number[]>([]);
   const [formDepartment, setFormDepartment] = useState("");
   const [visitDate, setVisitDate] = useState("");
@@ -186,6 +205,46 @@ export default function MaintenanceReportBuilder({
     for (const it of items) if (it.equipmentType) set.add(it.equipmentType);
     return [...set].sort((a, b) => a.localeCompare(b, "th")).map((value) => ({ value }));
   }, [items]);
+
+  // Every พ.ศ. year any task was created in, newest first, plus the current
+  // year always available even before anything's been logged for it yet —
+  // same "offer only years with real (or current) data" approach as the
+  // ปี filter on /manage/it/tasks.
+  const maintenanceYearOptions = useMemo(() => {
+    const set = new Set<string>([String(new Date().getFullYear() + 543)]);
+    for (const t of taskHistory) {
+      const y = new Date(t.createdAt).getFullYear();
+      if (!Number.isNaN(y)) set.add(String(y + 543));
+    }
+    return [...set].sort((a, b) => Number(b) - Number(a));
+  }, [taskHistory]);
+
+  // Re-derives the "กำลังบำรุงรักษาโดย ..." / "เสร็จสิ้นล่าสุดโดย ..."
+  // badge lookups from taskHistory, restricted to the selected ปี (created
+  // year) when one is picked — "ทุกปี" (maintenanceYearFilter === "") keeps
+  // the original all-time/newest-wins behavior.
+  const { inProgress, lastCompleted } = useMemo(() => {
+    const inProgress: Record<number, { displayName: string; createdAt: string }> = {};
+    const lastCompleted: Record<number, { displayName: string; completedAt: string }> = {};
+    for (const t of taskHistory) {
+      if (maintenanceYearFilter) {
+        const y = new Date(t.createdAt).getFullYear() + 543;
+        if (String(y) !== maintenanceYearFilter) continue;
+      }
+      if (t.status === "in_progress") {
+        const existing = inProgress[t.equipmentRowNumber];
+        if (!existing || t.createdAt > existing.createdAt) {
+          inProgress[t.equipmentRowNumber] = { displayName: t.displayName, createdAt: t.createdAt };
+        }
+      } else {
+        const existing = lastCompleted[t.equipmentRowNumber];
+        if (!existing || t.completedAt > existing.completedAt) {
+          lastCompleted[t.equipmentRowNumber] = { displayName: t.displayName, completedAt: t.completedAt };
+        }
+      }
+    }
+    return { inProgress, lastCompleted };
+  }, [taskHistory, maintenanceYearFilter]);
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -709,6 +768,22 @@ export default function MaintenanceReportBuilder({
                 onChange={setEquipmentTypeFilter}
                 className="sm:max-w-xs sm:flex-1"
               />
+              <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                ปีที่บำรุงรักษา
+                <select
+                  value={maintenanceYearFilter}
+                  onChange={(e) => setMaintenanceYearFilter(e.target.value)}
+                  aria-label="กรองสถานะบำรุงรักษาตามปี"
+                  className={INPUT_CLASS}
+                >
+                  <option value="">ทุกปี</option>
+                  {maintenanceYearOptions.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-xs sm:flex-1">
                 ค้นหา
                 <input
@@ -720,6 +795,9 @@ export default function MaintenanceReportBuilder({
                 />
               </label>
             </div>
+            <p className="text-xs text-zinc-400">
+              &quot;ปีที่บำรุงรักษา&quot; กรองเฉพาะป้ายสถานะกำลังดำเนินการ/เสร็จสิ้นด้านล่างให้ตรงกับปีนั้น — ไม่ซ่อนรายการครุภัณฑ์ออกจากตาราง
+            </p>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -770,11 +848,20 @@ export default function MaintenanceReportBuilder({
                       <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">
                         {[it.equipmentType, it.brandModel].filter(Boolean).join(" — ") || "—"}
                         {it.disposed && <span className="ml-1 text-[10px] text-zinc-400">(จำหน่ายแล้ว)</span>}
-                        {inProgress[it.rowNumber] && (
+                        {inProgress[it.rowNumber] ? (
                           <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                             <Wrench size={10} strokeWidth={2} aria-hidden="true" />
                             กำลังบำรุงรักษาโดย {inProgress[it.rowNumber].displayName}
                           </span>
+                        ) : (
+                          lastCompleted[it.rowNumber] && (
+                            <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                              <CheckCircle2 size={10} strokeWidth={2} aria-hidden="true" />
+                              เสร็จสิ้นล่าสุดโดย {lastCompleted[it.rowNumber].displayName}
+                              {lastCompleted[it.rowNumber].completedAt &&
+                                ` เมื่อ ${formatThaiDate(lastCompleted[it.rowNumber].completedAt.slice(0, 10))}`}
+                            </span>
+                          )
                         )}
                       </td>
                       <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">{it.department || "—"}</td>

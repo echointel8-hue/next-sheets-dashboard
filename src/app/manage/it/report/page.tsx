@@ -10,7 +10,10 @@ import {
 } from "@/lib/sheets";
 import { isDeleted, isDisposed } from "@/lib/fields";
 import { rowSnapshotHash } from "@/lib/recordHash";
-import MaintenanceReportBuilder, { type ReportEquipmentItem } from "@/components/MaintenanceReportBuilder";
+import MaintenanceReportBuilder, {
+  type ReportEquipmentItem,
+  type ReportTaskEntry,
+} from "@/components/MaintenanceReportBuilder";
 
 export const dynamic = "force-dynamic";
 
@@ -90,23 +93,25 @@ export default async function ManageItReportPage() {
     // fall through with the bare username
   }
 
-  // Feeds the "กำลังบำรุงรักษาโดย ..." badge in the equipment picker below —
-  // best-effort, since a missing MaintenanceTasks tab (getMaintenanceTasks
-  // already tolerates that) or any other read failure should just mean no
-  // badges this load, not break the whole report page.
-  const inProgress: Record<number, { displayName: string; createdAt: string }> = {};
+  // Feeds the "กำลังบำรุงรักษาโดย ..." / "เสร็จสิ้นล่าสุดโดย ..." badges in
+  // the equipment picker below. Every task is sent down (not just the
+  // latest-per-row summary) so the client can re-derive those badges for
+  // whichever ปี the IT account picks in the year filter — supports future
+  // years automatically, since a year with no tasks yet just shows no
+  // badges rather than needing any code change. Best-effort: a missing
+  // MaintenanceTasks tab (getMaintenanceTasks already tolerates that) or any
+  // other read failure should just mean no badges this load, not break the
+  // whole report page.
+  let taskHistory: ReportTaskEntry[] = [];
   try {
     const tasks = await getMaintenanceTasks();
-    for (const t of tasks) {
-      if (t.status !== "in_progress") continue;
-      const existing = inProgress[t.equipmentRowNumber];
-      if (!existing || t.createdAt > existing.createdAt) {
-        inProgress[t.equipmentRowNumber] = {
-          displayName: t.assignedToDisplayName || t.assignedToUsername,
-          createdAt: t.createdAt,
-        };
-      }
-    }
+    taskHistory = tasks.map((t) => ({
+      equipmentRowNumber: t.equipmentRowNumber,
+      status: t.status,
+      createdAt: t.createdAt,
+      completedAt: t.completedAt,
+      displayName: t.assignedToDisplayName || t.assignedToUsername,
+    }));
   } catch {
     // Fall through with no badges.
   }
@@ -117,7 +122,7 @@ export default async function ManageItReportPage() {
       loadError={loadError}
       settings={settings}
       currentUser={{ username: session.username, displayName }}
-      inProgress={inProgress}
+      taskHistory={taskHistory}
     />
   );
 }
