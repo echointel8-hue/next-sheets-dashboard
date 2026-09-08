@@ -14,6 +14,7 @@ import {
   Save,
   Settings,
   Trash2,
+  Wrench,
   X,
 } from "lucide-react";
 import type { ReportSettings } from "@/lib/sheets";
@@ -104,10 +105,23 @@ export default function MaintenanceReportBuilder({
   items: initialItems,
   loadError,
   settings: initialSettings,
+  currentUser,
+  inProgress,
 }: {
   items: ReportEquipmentItem[];
   loadError: string | null;
   settings: ReportSettings;
+  /** The logged-in IT account — auto-fills "ผู้ดำเนินการ" on the printed
+   * form (see the print-area date/time line below) and attributes any
+   * maintenance tasks created when this report is printed (see
+   * createTasksForSelection / the print button's onClick). */
+  currentUser: { username: string; displayName: string };
+  /** Equipment rows with an open (not yet "เสร็จสิ้น") maintenance task,
+   * keyed by row number — shows a "กำลังบำรุงรักษาโดย ..." badge in the
+   * picker table below so a second IT account can see someone's already on
+   * it, without being blocked from also selecting it (informational only —
+   * see /manage/it/tasks for the actual task tracking). */
+  inProgress: Record<number, { displayName: string; createdAt: string }>;
 }) {
   const [items, setItems] = useState(initialItems);
   // Multi-select — an empty array means "no filter on that dimension", same
@@ -143,6 +157,13 @@ export default function MaintenanceReportBuilder({
   // consistent regardless of a printer's own defaults. So orientation has
   // to be a control of our own instead, feeding the same @page rule below.
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("landscape");
+  // Printing is the moment a maintenance task is considered "started" (see
+  // handlePrint below) — creatingTasks disables the print button for the
+  // one round-trip that takes, and taskCreateError surfaces a failure
+  // without ever blocking the actual print (the paper form is what matters
+  // most; task tracking is secondary).
+  const [creatingTasks, setCreatingTasks] = useState(false);
+  const [taskCreateError, setTaskCreateError] = useState<string | null>(null);
 
   // Form header / signature text — editable right here (pre-filled from the
   // saved ReportSettings) so a one-off change (a substitute signee, say)
@@ -376,6 +397,43 @@ export default function MaintenanceReportBuilder({
     } finally {
       setSettingsSaving(false);
     }
+  }
+
+  /** Logs one "in progress" maintenance task per selected item (see
+   * /manage/it/tasks) and then opens the print dialog — printing this form
+   * is the point a maintenance round is considered to have started. Task
+   * logging never blocks the actual print: on failure it just leaves
+   * taskCreateError up for the person to notice, since the paper form is
+   * the part that has to happen regardless. */
+  async function handlePrint() {
+    if (selectedRows.length === 0) return;
+    setCreatingTasks(true);
+    setTaskCreateError(null);
+    try {
+      const res = await fetch("/api/manage/it/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: selectedRows.map((row) => ({
+            equipmentRowNumber: row.rowNumber,
+            assetNumber: row.assetNumber,
+            equipmentType: row.equipmentType,
+            brandModel: row.brandModel,
+            department: row.department,
+            location: row.location,
+          })),
+        }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setTaskCreateError(json.error ?? "บันทึกงานเข้าระบบติดตามไม่สำเร็จ — พิมพ์รายงานต่อได้ตามปกติ");
+      }
+    } catch {
+      setTaskCreateError("บันทึกงานเข้าระบบติดตามไม่สำเร็จ — พิมพ์รายงานต่อได้ตามปกติ");
+    } finally {
+      setCreatingTasks(false);
+    }
+    window.print();
   }
 
   const displayDate = visitDate ? formatThaiDate(visitDate) : "";
@@ -712,6 +770,12 @@ export default function MaintenanceReportBuilder({
                       <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">
                         {[it.equipmentType, it.brandModel].filter(Boolean).join(" — ") || "—"}
                         {it.disposed && <span className="ml-1 text-[10px] text-zinc-400">(จำหน่ายแล้ว)</span>}
+                        {inProgress[it.rowNumber] && (
+                          <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                            <Wrench size={10} strokeWidth={2} aria-hidden="true" />
+                            กำลังบำรุงรักษาโดย {inProgress[it.rowNumber].displayName}
+                          </span>
+                        )}
                       </td>
                       <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">{it.department || "—"}</td>
                       <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">{it.installLocation || "—"}</td>
@@ -926,7 +990,7 @@ export default function MaintenanceReportBuilder({
             <div className="flex flex-wrap gap-x-8 gap-y-2">
               <span>วันที่ดำเนินการ {displayDate || "............................................."}</span>
               <span>ช่วงเวลา {timeRangeLabel || "....................."}</span>
-              <span>ผู้ดำเนินการ .............................................</span>
+              <span>ผู้ดำเนินการ {currentUser.displayName || currentUser.username}</span>
             </div>
           </div>
 
@@ -965,31 +1029,42 @@ export default function MaintenanceReportBuilder({
         {/* Actions for the preview above — moved below it (rather than the
             page header) so they read as "do this to the form you just
             reviewed" instead of being disconnected from it up top. */}
-        <div className="no-print flex flex-wrap items-center justify-end gap-2 print:hidden">
-          <button
-            type="button"
-            onClick={() => setShowAdjustModal(true)}
-            disabled={selectedRows.length === 0}
-            title={selectedRows.length === 0 ? "เลือกครุภัณฑ์อย่างน้อย 1 รายการก่อน" : undefined}
-            className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            <MapPin size={16} strokeWidth={2} aria-hidden="true" />
-            แก้ไขสถานที่ตั้ง / ผู้รับผิดชอบ
-            {dirtyRowCount > 0 && (
-              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-xs font-semibold text-white">
-                {dirtyRowCount}
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => window.print()}
-            disabled={selectedRows.length === 0}
-            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-50"
-          >
-            <PrinterIcon size={16} strokeWidth={2} aria-hidden="true" />
-            พิมพ์ / บันทึกเป็น PDF
-          </button>
+        <div className="no-print flex flex-col items-end gap-2 print:hidden">
+          {taskCreateError && (
+            <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+              {taskCreateError}
+            </p>
+          )}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowAdjustModal(true)}
+              disabled={selectedRows.length === 0}
+              title={selectedRows.length === 0 ? "เลือกครุภัณฑ์อย่างน้อย 1 รายการก่อน" : undefined}
+              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              <MapPin size={16} strokeWidth={2} aria-hidden="true" />
+              แก้ไขสถานที่ตั้ง / ผู้รับผิดชอบ
+              {dirtyRowCount > 0 && (
+                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-xs font-semibold text-white">
+                  {dirtyRowCount}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={selectedRows.length === 0 || creatingTasks}
+              className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-50"
+            >
+              {creatingTasks ? (
+                <Loader2 size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+              ) : (
+                <PrinterIcon size={16} strokeWidth={2} aria-hidden="true" />
+              )}
+              พิมพ์ / บันทึกเป็น PDF
+            </button>
+          </div>
         </div>
       </div>
 

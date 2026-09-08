@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { google } from "googleapis";
 import { redactSurname, resolveFields, type EquipmentRow, type FieldMap } from "@/lib/fields";
 import type { Role } from "@/lib/auth";
@@ -673,6 +674,259 @@ export async function appendMaintenanceLogEntry(
     throw new Error(`บันทึกประวัติการบำรุงรักษาไม่สำเร็จ: ${message}`);
   }
   void MAINTENANCE_LOG_COLUMNS; // referenced for documentation/consistency only
+}
+
+// ---------------------------------------------------------------------------
+// MaintenanceTasks tab — one mutable row per "IT is working on this piece
+// of equipment right now" task, created automatically when an IT account
+// prints a maintenance report from /manage/it/report (see
+// createMaintenanceTasks, called from the report page's print button) and
+// later filled in / closed from /manage/it/tasks (see updateMaintenanceTask).
+// Unlike MaintenanceLog/EditLog above, this tab is NOT append-only — a task
+// row gets read back and overwritten in place as its status changes from
+// "in_progress" to "done", the same read-all/find-row/write-one-row pattern
+// as updateUser() uses for the Users tab. TaskId (a random UUID, not the row
+// number) is the stable identifier a client holds onto across that update,
+// since the physical sheet row can shift if someone else's task is
+// inserted/removed in between.
+//
+// ActionsTaken and InspectionChecks are small string arrays (checked items
+// from the printed form's checklists) stored as a JSON string in one cell —
+// same convention as ReportSettings.actionOptions above.
+//
+// Same manually-created-tab convention as every other tab here: the sheet
+// owner creates it by hand before anyone prints a report. Reading tolerates
+// a missing tab (just means "no tasks yet"); writing requires it to exist.
+// ---------------------------------------------------------------------------
+
+export type MaintenanceTaskStatus = "in_progress" | "done";
+export type InspectionCheck = "ปกติ" | "ส่งซ่อม" | "เปลี่ยนอะไหล่" | "อื่นๆ";
+
+export interface MaintenanceTask {
+  taskId: string;
+  createdAt: string;
+  /** The equipment row's own sheet row number at the time the task was
+   * created — kept for reference/audit only. Everything the task list and
+   * dashboard actually display is snapshotted onto this row below, so
+   * neither view needs to re-join against the live equipment sheet. */
+  equipmentRowNumber: number;
+  assetNumber: string;
+  equipmentType: string;
+  brandModel: string;
+  department: string;
+  location: string;
+  assignedToUsername: string;
+  assignedToDisplayName: string;
+  status: MaintenanceTaskStatus;
+  actionsTaken: string[];
+  inspectionChecks: InspectionCheck[];
+  /** Free text for the "เปลี่ยนอะไหล่ ...." blank on the printed form. */
+  partsChanged: string;
+  /** Free text for the "อื่นๆ ระบุ ...." blank on the printed form. */
+  otherDetail: string;
+  notes: string;
+  completedAt: string;
+  completedByUsername: string;
+}
+
+const MAINTENANCE_TASKS_HEADER_ROW = [
+  "TaskId", "CreatedAt", "EquipmentRowNumber", "AssetNumber", "EquipmentType", "BrandModel",
+  "Department", "Location", "AssignedToUsername", "AssignedToDisplayName", "Status",
+  "ActionsTaken", "InspectionChecks", "PartsChanged", "OtherDetail", "Notes",
+  "CompletedAt", "CompletedByUsername",
+];
+
+function getMaintenanceTasksTab(): string {
+  return process.env.GOOGLE_SHEET_MAINTENANCE_TASKS_TAB?.trim() || "MaintenanceTasks";
+}
+
+function parseJsonStringArray(raw: string): string[] {
+  if (!raw.trim()) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rowToMaintenanceTask(row: string[]): MaintenanceTask {
+  const col = (i: number) => (row[i] ?? "").toString();
+  return {
+    taskId: col(0).trim(),
+    createdAt: col(1),
+    equipmentRowNumber: Number(col(2)) || 0,
+    assetNumber: col(3),
+    equipmentType: col(4),
+    brandModel: col(5),
+    department: col(6),
+    location: col(7),
+    assignedToUsername: col(8),
+    assignedToDisplayName: col(9),
+    status: col(10).trim() === "done" ? "done" : "in_progress",
+    actionsTaken: parseJsonStringArray(col(11)),
+    inspectionChecks: parseJsonStringArray(col(12)) as InspectionCheck[],
+    partsChanged: col(13),
+    otherDetail: col(14),
+    notes: col(15),
+    completedAt: col(16),
+    completedByUsername: col(17),
+  };
+}
+
+function maintenanceTaskToRow(t: MaintenanceTask): (string | number)[] {
+  return [
+    t.taskId, t.createdAt, t.equipmentRowNumber, t.assetNumber, t.equipmentType, t.brandModel,
+    t.department, t.location, t.assignedToUsername, t.assignedToDisplayName, t.status,
+    JSON.stringify(t.actionsTaken), JSON.stringify(t.inspectionChecks), t.partsChanged,
+    t.otherDetail, t.notes, t.completedAt, t.completedByUsername,
+  ];
+}
+
+/** Every task, oldest first (append order) — the task-list page and
+ * dashboard both filter/aggregate this client-side rather than the API
+ * doing it, same rationale as getMaintenanceLog. */
+export async function getMaintenanceTasks(): Promise<MaintenanceTask[]> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getMaintenanceTasksTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:R100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      // Tab doesn't exist yet — no tasks have ever been logged.
+      return [];
+    }
+    throw new Error(`อ่านรายการงานบำรุงรักษาไม่สำเร็จ: ${message}`);
+  }
+
+  return (values ?? [])
+    .filter((row) => (row[0] ?? "").toString().trim() !== "")
+    .map(rowToMaintenanceTask);
+}
+
+/** Creates one "in progress" task per entry — called when an IT account
+ * prints a maintenance report, one row per piece of equipment on that
+ * report. Throws a clear "create the tab first" error if the
+ * MaintenanceTasks tab doesn't exist yet. */
+export async function createMaintenanceTasks(
+  entries: {
+    equipmentRowNumber: number;
+    assetNumber: string;
+    equipmentType: string;
+    brandModel: string;
+    department: string;
+    location: string;
+    assignedToUsername: string;
+    assignedToDisplayName: string;
+  }[]
+): Promise<MaintenanceTask[]> {
+  if (entries.length === 0) return [];
+
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getMaintenanceTasksTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+  const now = new Date().toISOString();
+
+  const tasks: MaintenanceTask[] = entries.map((e) => ({
+    taskId: randomUUID(),
+    createdAt: now,
+    equipmentRowNumber: e.equipmentRowNumber,
+    assetNumber: e.assetNumber,
+    equipmentType: e.equipmentType,
+    brandModel: e.brandModel,
+    department: e.department,
+    location: e.location,
+    assignedToUsername: e.assignedToUsername,
+    assignedToDisplayName: e.assignedToDisplayName,
+    status: "in_progress",
+    actionsTaken: [],
+    inspectionChecks: [],
+    partsChanged: "",
+    otherDetail: "",
+    notes: "",
+    completedAt: "",
+    completedByUsername: "",
+  }));
+
+  try {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: `${tab}!A1`,
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: tasks.map(maintenanceTaskToRow) },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      throw new Error(
+        `ยังไม่พบแท็บชื่อ "${tab}" ในสเปรดชีต — สร้างแท็บนี้ก่อน (หัวตาราง: ${MAINTENANCE_TASKS_HEADER_ROW.join(" | ")}) หรือตั้งค่า GOOGLE_SHEET_MAINTENANCE_TASKS_TAB ให้ตรงกับชื่อแท็บจริง`
+      );
+    }
+    throw new Error(`บันทึกงานบำรุงรักษาไม่สำเร็จ: ${message}`);
+  }
+
+  return tasks;
+}
+
+/** Merges `updates` into the task identified by `taskId` and rewrites just
+ * that one sheet row — looks the row up by scanning getMaintenanceTasks()
+ * rather than trusting a cached row number, same reasoning as updateUser()
+ * (another IT account's task could have been inserted/closed in between). */
+export async function updateMaintenanceTask(
+  taskId: string,
+  updates: Partial<
+    Pick<
+      MaintenanceTask,
+      "status" | "actionsTaken" | "inspectionChecks" | "partsChanged" | "otherDetail" | "notes" | "completedAt" | "completedByUsername"
+    >
+  >
+): Promise<MaintenanceTask> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getMaintenanceTasksTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:R100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`อ่านรายการงานบำรุงรักษาไม่สำเร็จ: ${message}`);
+  }
+
+  const rows = values ?? [];
+  const idx = rows.findIndex((row) => (row[0] ?? "").toString().trim() === taskId);
+  if (idx === -1) {
+    throw new Error("ไม่พบงานนี้ในระบบ — อาจถูกลบหรือแก้ไขไปแล้ว");
+  }
+  const merged: MaintenanceTask = { ...rowToMaintenanceTask(rows[idx]), ...updates };
+  const sheetRow = idx + 2;
+
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${tab}!A${sheetRow}:R${sheetRow}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [maintenanceTaskToRow(merged)] },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`บันทึกงานบำรุงรักษาไม่สำเร็จ: ${message}`);
+  }
+
+  return merged;
 }
 
 // ---------------------------------------------------------------------------

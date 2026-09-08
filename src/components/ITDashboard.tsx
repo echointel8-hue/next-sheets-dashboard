@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Building2,
+  ClipboardCheck,
   ClipboardList,
   Cpu,
   FileText,
@@ -244,6 +245,13 @@ export default function ITDashboard({
                 จัดการครุภัณฑ์ทั่วไป
               </Link>
             )}
+            <Link
+              href="/manage/it/tasks"
+              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              <ClipboardCheck size={16} strokeWidth={2} aria-hidden="true" />
+              งานบำรุงรักษา
+            </Link>
             <Link
               href="/manage/it/report"
               className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)]"

@@ -1,7 +1,13 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, canAccessItDashboard, verifySessionToken } from "@/lib/auth";
-import { getEquipmentDataUnredacted, getReportSettings, DEFAULT_REPORT_SETTINGS } from "@/lib/sheets";
+import {
+  getEquipmentDataUnredacted,
+  getMaintenanceTasks,
+  getReportSettings,
+  getUsers,
+  DEFAULT_REPORT_SETTINGS,
+} from "@/lib/sheets";
 import { isDeleted, isDisposed } from "@/lib/fields";
 import { rowSnapshotHash } from "@/lib/recordHash";
 import MaintenanceReportBuilder, { type ReportEquipmentItem } from "@/components/MaintenanceReportBuilder";
@@ -72,5 +78,46 @@ export default async function ManageItReportPage() {
     // network/auth failure from also breaking the report page.
   }
 
-  return <MaintenanceReportBuilder items={items} loadError={loadError} settings={settings} />;
+  // Auto-fills "ผู้ดำเนินการ" on the printed form with a real Thai name
+  // instead of a blank line to hand-fill — falls back to the bare login
+  // string if the Users tab is unreachable or has no matching row (e.g. the
+  // env-configured bootstrap account, which isn't a Users-tab row at all).
+  let displayName = session.username;
+  try {
+    const users = await getUsers();
+    displayName = users.find((u) => u.username === session.username)?.displayName || session.username;
+  } catch {
+    // fall through with the bare username
+  }
+
+  // Feeds the "กำลังบำรุงรักษาโดย ..." badge in the equipment picker below —
+  // best-effort, since a missing MaintenanceTasks tab (getMaintenanceTasks
+  // already tolerates that) or any other read failure should just mean no
+  // badges this load, not break the whole report page.
+  const inProgress: Record<number, { displayName: string; createdAt: string }> = {};
+  try {
+    const tasks = await getMaintenanceTasks();
+    for (const t of tasks) {
+      if (t.status !== "in_progress") continue;
+      const existing = inProgress[t.equipmentRowNumber];
+      if (!existing || t.createdAt > existing.createdAt) {
+        inProgress[t.equipmentRowNumber] = {
+          displayName: t.assignedToDisplayName || t.assignedToUsername,
+          createdAt: t.createdAt,
+        };
+      }
+    }
+  } catch {
+    // Fall through with no badges.
+  }
+
+  return (
+    <MaintenanceReportBuilder
+      items={items}
+      loadError={loadError}
+      settings={settings}
+      currentUser={{ username: session.username, displayName }}
+      inProgress={inProgress}
+    />
+  );
 }
