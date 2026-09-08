@@ -1023,19 +1023,34 @@ export default function MaintenanceReportBuilder({
               clipping instead of getting cut off inside that scroll box. A
               pinned (clicked) popup also gets a full-screen invisible
               backdrop to close on an outside click, same pattern as the
-              settings/adjust modals above. */}
+              settings/adjust modals above.
+
+              pointer-events-none on the popup panel itself is load-bearing,
+              not decorative: without it, a popup that renders close to the
+              cursor (right below a 16px-tall tick) can end up under the
+              mouse, which fires mouseleave on the tick underneath →
+              onMouseLeave clears monthPopup → the popup disappears → the
+              tick is hovered again → onMouseEnter sets it right back → an
+              infinite hover/re-render loop that pegs the tab and crashes it
+              (reproduced: the whole page goes to Chrome's "This page
+              couldn't load" screen the instant a tick is touched). Making
+              the panel transparent to the mouse means it can never steal
+              the hover target out from under the tick that opened it, so
+              the loop can't start; the tick's own onMouseLeave is still
+              what closes it. Clicks still reach the full-screen backdrop
+              behind it (z-40 vs the panel's z-50) since there's nothing
+              inside the panel to click anyway. */}
           {monthPopup && (
             <>
               {monthPopup.pinned && (
                 <div className="fixed inset-0 z-40" onClick={() => setMonthPopup(null)} role="presentation" />
               )}
               <div
-                className="fixed z-50 w-64 max-w-[calc(100vw-1rem)] rounded-xl border border-zinc-200 bg-white p-3 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+                className="pointer-events-none fixed z-50 w-64 max-w-[calc(100vw-1rem)] rounded-xl border border-zinc-200 bg-white p-3 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
                 style={{
                   top: monthPopup.rect.bottom + 6,
                   left: Math.min(Math.max(8, monthPopup.rect.left - 100), window.innerWidth - 8 - 256),
                 }}
-                onMouseLeave={() => setMonthPopup((prev) => (prev?.pinned ? prev : null))}
               >
                 <p className="mb-1.5 font-semibold text-zinc-800 dark:text-zinc-100">
                   {THAI_MONTHS_FULL[monthPopup.month]} {maintenanceYearFilter || String(new Date().getFullYear() + 543)}
