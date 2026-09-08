@@ -383,6 +383,26 @@ export default function MaintenanceReportBuilder({
   // Blank rows mid-edit in the settings modal never leak into the printed
   // table — see cleanActionOptions.
   const printActionOptions = cleanActionOptions(formSettings.actionOptions);
+  // One ผู้ตรวจสอบ block per department, then ผู้รับทราบ last — all rendered
+  // from a single grid below so they pair up left/right instead of
+  // ผู้รับทราบ always getting shoved onto its own row. See that grid's
+  // comment for why.
+  const signatureBlocks = [
+    ...selectedDepartments.map((dep) => ({
+      key: `inspector-${dep}`,
+      heading: "ลงชื่อ ....................................................... ผู้ตรวจสอบ",
+      nameLine: "(.......................................................)",
+      positionLine: "ตำแหน่ง .......................................................",
+      subLabel: dep,
+    })),
+    {
+      key: "acknowledger",
+      heading: "ลงชื่อ ....................................................... ผู้รับทราบ",
+      nameLine: `(${formSettings.acknowledgerName})`,
+      positionLine: `ตำแหน่ง ${formSettings.acknowledgerPosition}`,
+      subLabel: formSettings.acknowledgerDepartment,
+    },
+  ];
 
   return (
     <main className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 print:block print:bg-white print:px-0 print:py-0 sm:px-6 lg:px-10">
@@ -911,43 +931,34 @@ export default function MaintenanceReportBuilder({
           </div>
 
           {/* One "ผู้ตรวจสอบ" block per department represented in the
-              selection (see selectedDepartments above) — lets one printout
-              cover several departments' PM visits in a single day. Kept in
-              its own row above ผู้รับทราบ (rather than side by side, as
-              before) so it can grow past two departments and the
-              ผู้รับทราบ block simply ends up further down the page.
+              selection (see selectedDepartments above), plus ผู้รับทราบ as
+              the final block in the very same grid — so with one
+              department it pairs up naturally as ผู้ตรวจสอบ-left /
+              ผู้รับทราบ-right instead of ผู้รับทราบ always being forced onto
+              its own row below (wasting the row's other half). Lets one
+              printout cover several departments' PM visits in a single day.
               print:break-inside-avoid on each block stops a page break from
-              ever landing mid-signature (no more "signature falls off the
-              bottom of the page"); an odd one out spans both columns so it
-              never sits alone looking like a half-filled row, whichever
-              page it lands on. */}
+              ever landing mid-signature; an odd one out (here, whichever
+              block ends up alone) spans both columns instead of sitting
+              lopsided in a half-filled row. */}
           <div className="mt-6 grid grid-cols-1 gap-x-8 gap-y-8 text-center text-sm sm:grid-cols-2">
-            {selectedDepartments.map((dep, idx) => (
+            {signatureBlocks.map((block, idx) => (
               <div
-                key={dep}
+                key={block.key}
                 className={`flex flex-col items-center gap-1.5 print:break-inside-avoid ${
-                  selectedDepartments.length % 2 === 1 && idx === selectedDepartments.length - 1
-                    ? "sm:col-span-2"
-                    : ""
+                  signatureBlocks.length % 2 === 1 && idx === signatureBlocks.length - 1 ? "sm:col-span-2" : ""
                 }`}
               >
                 {/* pt-6 leaves blank room above the dotted line for an
                     actual pen signature — the dots alone (no space above
                     them) left no room to sign without touching the block
                     above. */}
-                <p className="pt-6">ลงชื่อ ....................................................... ผู้ตรวจสอบ</p>
-                <p>(.......................................................)</p>
-                <p>ตำแหน่ง .......................................................</p>
-                <p className="font-medium">{dep}</p>
+                <p className="pt-6">{block.heading}</p>
+                <p>{block.nameLine}</p>
+                <p>{block.positionLine}</p>
+                <p className="font-medium">{block.subLabel}</p>
               </div>
             ))}
-          </div>
-
-          <div className="mt-8 flex flex-col items-center gap-1.5 text-center text-sm print:break-inside-avoid">
-            <p className="pt-6">ลงชื่อ ....................................................... ผู้รับทราบ</p>
-            <p>({formSettings.acknowledgerName})</p>
-            <p>ตำแหน่ง {formSettings.acknowledgerPosition}</p>
-            <p>{formSettings.acknowledgerDepartment}</p>
           </div>
         </div>
 
