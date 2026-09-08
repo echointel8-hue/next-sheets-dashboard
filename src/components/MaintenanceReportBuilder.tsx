@@ -396,10 +396,6 @@ export default function MaintenanceReportBuilder({
               <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">
                 ออกรายงาน: แบบฟอร์มบำรุงรักษาเชิงป้องกัน
               </h1>
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                เลือกครุภัณฑ์ กรอกวันที่/ช่วงเวลา แล้วกด &quot;พิมพ์&quot; — ใช้ฟังก์ชัน Print ของเบราว์เซอร์เลือก &quot;บันทึกเป็น PDF&quot;
-                ได้เลย ไม่ต้องดาวน์โหลดไฟล์แยก
-              </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Link
@@ -416,34 +412,6 @@ export default function MaintenanceReportBuilder({
               >
                 <Settings size={16} strokeWidth={2} aria-hidden="true" />
                 ตั้งค่าแบบฟอร์มรายงาน
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowAdjustModal(true)}
-                disabled={selectedRows.length === 0}
-                title={
-                  selectedRows.length === 0
-                    ? "เลือกครุภัณฑ์อย่างน้อย 1 รายการก่อน"
-                    : undefined
-                }
-                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                <MapPin size={16} strokeWidth={2} aria-hidden="true" />
-                แก้ไขสถานที่ตั้ง / ผู้รับผิดชอบ
-                {dirtyRowCount > 0 && (
-                  <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-xs font-semibold text-white">
-                    {dirtyRowCount}
-                  </span>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                disabled={selectedRows.length === 0}
-                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-50"
-              >
-                <PrinterIcon size={16} strokeWidth={2} aria-hidden="true" />
-                พิมพ์ / บันทึกเป็น PDF
               </button>
             </div>
           </header>
@@ -964,6 +932,36 @@ export default function MaintenanceReportBuilder({
             <p>ตำแหน่ง {formSettings.acknowledgerPosition}</p>
             <p>{formSettings.acknowledgerDepartment}</p>
           </div>
+        </div>
+
+        {/* Actions for the preview above — moved below it (rather than the
+            page header) so they read as "do this to the form you just
+            reviewed" instead of being disconnected from it up top. */}
+        <div className="no-print flex flex-wrap items-center justify-end gap-2 print:hidden">
+          <button
+            type="button"
+            onClick={() => setShowAdjustModal(true)}
+            disabled={selectedRows.length === 0}
+            title={selectedRows.length === 0 ? "เลือกครุภัณฑ์อย่างน้อย 1 รายการก่อน" : undefined}
+            className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            <MapPin size={16} strokeWidth={2} aria-hidden="true" />
+            แก้ไขสถานที่ตั้ง / ผู้รับผิดชอบ
+            {dirtyRowCount > 0 && (
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-xs font-semibold text-white">
+                {dirtyRowCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            disabled={selectedRows.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-50"
+          >
+            <PrinterIcon size={16} strokeWidth={2} aria-hidden="true" />
+            พิมพ์ / บันทึกเป็น PDF
+          </button>
         </div>
       </div>
 
