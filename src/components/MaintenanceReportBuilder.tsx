@@ -1,12 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
   Check,
   CheckCircle2,
-  History,
   Loader2,
   MapPin,
   Plus,
@@ -84,6 +83,14 @@ const INPUT_CLASS =
 const THAI_MONTHS_SHORT = [
   "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
   "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
+];
+
+/** Full names, in the same index order as THAI_MONTHS_SHORT — used only for
+ * the month-strip popup heading below (e.g. "สิงหาคม 2569"), where the
+ * abbreviation would read a bit too terse for a heading. */
+const THAI_MONTHS_FULL = [
+  "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
 ];
 
 /** "2026-08-14" -> "14 ส.ค. 2569" (Buddhist calendar, matching every other
@@ -240,14 +247,15 @@ export default function MaintenanceReportBuilder({
   // itself the visit; see the badge below), all from taskHistory and all
   // restricted to the selected ปี (created year) when one is picked —
   // "ทุกปี" (maintenanceYearFilter === "") keeps the original
-  // all-time/newest-wins behavior. visitCounts is the "how many times has
-  // this been maintained" answer the hospital asked for — a running total
-  // per equipment, not yet broken down by month (that's a possible later
-  // step if the plain count isn't enough on its own).
-  const { inProgress, lastCompleted, visitCounts } = useMemo(() => {
+  // all-time/newest-wins behavior. monthlyTasks is the same data grouped one
+  // step further, by เดือน (0 = ม.ค. ... 11 = ธ.ค.) within that same ปี — it
+  // drives the 12-month strip in the picker table below (replaces the old
+  // "เลขครุภัณฑ์" column) and its hover/click popup.
+  const { inProgress, lastCompleted, visitCounts, monthlyTasks } = useMemo(() => {
     const inProgress: Record<number, { displayName: string; createdAt: string }> = {};
     const lastCompleted: Record<number, { displayName: string; completedAt: string }> = {};
     const visitCounts: Record<number, number> = {};
+    const monthlyTasks: Record<number, ReportTaskEntry[][]> = {};
     for (const t of taskHistory) {
       if (maintenanceYearFilter) {
         const y = new Date(t.createdAt).getFullYear() + 543;
@@ -265,9 +273,49 @@ export default function MaintenanceReportBuilder({
           lastCompleted[t.equipmentRowNumber] = { displayName: t.displayName, completedAt: t.completedAt };
         }
       }
+      const monthIdx = new Date(t.createdAt).getMonth();
+      if (!Number.isNaN(monthIdx)) {
+        if (!monthlyTasks[t.equipmentRowNumber]) {
+          monthlyTasks[t.equipmentRowNumber] = Array.from({ length: 12 }, () => []);
+        }
+        monthlyTasks[t.equipmentRowNumber][monthIdx].push(t);
+      }
     }
-    return { inProgress, lastCompleted, visitCounts };
+    return { inProgress, lastCompleted, visitCounts, monthlyTasks };
   }, [taskHistory, maintenanceYearFilter]);
+
+  // Which month-strip tick currently shows its popup — a single shared piece
+  // of state (not one per cell) since only one can be open at a time. `rect`
+  // is the tick's own getBoundingClientRect() captured at hover/click time,
+  // used to position the popup with position:fixed so it always escapes the
+  // picker table's own scroll clipping (max-h-80 overflow-y-auto above)
+  // instead of getting cut off inside that box. `pinned` distinguishes a
+  // hover preview (closes on mouse-leave) from a click (stays open until the
+  // same tick is clicked again or the backdrop is clicked).
+  const [monthPopup, setMonthPopup] = useState<{
+    rowNumber: number;
+    month: number;
+    rect: DOMRect;
+    pinned: boolean;
+  } | null>(null);
+
+  function handleMonthHover(e: MouseEvent<HTMLElement>, rowNumber: number, month: number) {
+    setMonthPopup((prev) =>
+      prev?.pinned ? prev : { rowNumber, month, rect: e.currentTarget.getBoundingClientRect(), pinned: false }
+    );
+  }
+
+  function handleMonthLeave() {
+    setMonthPopup((prev) => (prev?.pinned ? prev : null));
+  }
+
+  function handleMonthClick(e: MouseEvent<HTMLElement>, rowNumber: number, month: number) {
+    setMonthPopup((prev) =>
+      prev?.pinned && prev.rowNumber === rowNumber && prev.month === month
+        ? null
+        : { rowNumber, month, rect: e.currentTarget.getBoundingClientRect(), pinned: true }
+    );
+  }
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -867,7 +915,7 @@ export default function MaintenanceReportBuilder({
                 <thead className="sticky top-0 bg-white dark:bg-zinc-900">
                   <tr className="border-b border-zinc-100 text-[10px] uppercase tracking-wide text-zinc-400 dark:border-zinc-800">
                     <th scope="col" className="px-2 py-2 font-medium">เลือก</th>
-                    <th scope="col" className="px-2 py-2 font-medium">เลขครุภัณฑ์</th>
+                    <th scope="col" className="px-2 py-2 font-medium">เดือนที่บำรุงรักษา</th>
                     <th scope="col" className="px-2 py-2 font-medium">รายการ</th>
                     <th scope="col" className="px-2 py-2 font-medium">กลุ่มงาน</th>
                     <th scope="col" className="px-2 py-2 font-medium">สถานที่ตั้ง</th>
@@ -884,17 +932,53 @@ export default function MaintenanceReportBuilder({
                           aria-label={`เลือก ${it.assetNumber || it.equipmentType}`}
                         />
                       </td>
-                      <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">{it.assetNumber || "—"}</td>
-                      <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">
-                        {[it.equipmentType, it.brandModel].filter(Boolean).join(" — ") || "—"}
+                      <td className="px-2 py-1.5 align-top">
+                        <div
+                          className="flex items-center gap-[2px]"
+                          role="group"
+                          aria-label={`เดือนที่บำรุงรักษาในปี ${maintenanceYearFilter || "ทุกปี"}`}
+                        >
+                          {THAI_MONTHS_SHORT.map((label, monthIdx) => {
+                            const monthTasks = monthlyTasks[it.rowNumber]?.[monthIdx] ?? [];
+                            const hasInProgress = monthTasks.some((t) => t.status === "in_progress");
+                            return (
+                              <button
+                                key={monthIdx}
+                                type="button"
+                                onMouseEnter={(e) => handleMonthHover(e, it.rowNumber, monthIdx)}
+                                onMouseLeave={handleMonthLeave}
+                                onClick={(e) => handleMonthClick(e, it.rowNumber, monthIdx)}
+                                aria-label={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง`}
+                                className={`h-4 w-[5px] shrink-0 rounded-sm transition-colors ${
+                                  monthTasks.length === 0
+                                    ? "bg-zinc-100 dark:bg-zinc-800"
+                                    : hasInProgress
+                                      ? "bg-amber-400 dark:bg-amber-500"
+                                      : "bg-emerald-400 dark:bg-emerald-500"
+                                }`}
+                              />
+                            );
+                          })}
+                        </div>
+                        {visitCounts[it.rowNumber] > 0 && (
+                          <p className="mt-0.5 text-[9px] text-zinc-400 dark:text-zinc-500">
+                            {visitCounts[it.rowNumber].toLocaleString("th-TH")} ครั้ง
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300 align-top">
+                        <div className="font-medium">{it.equipmentType || "—"}</div>
+                        <div className="text-[10px] leading-snug text-zinc-400 dark:text-zinc-500">
+                          {[it.assetNumber, it.brandModel].filter(Boolean).join(" · ") || "—"}
+                        </div>
                         {inProgress[it.rowNumber] ? (
-                          <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                          <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                             <Wrench size={10} strokeWidth={2} aria-hidden="true" />
                             กำลังบำรุงรักษาโดย {inProgress[it.rowNumber].displayName}
                           </span>
                         ) : (
                           lastCompleted[it.rowNumber] && (
-                            <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                               <CheckCircle2 size={10} strokeWidth={2} aria-hidden="true" />
                               เสร็จสิ้นล่าสุดโดย {lastCompleted[it.rowNumber].displayName}
                               {lastCompleted[it.rowNumber].completedAt &&
@@ -902,16 +986,9 @@ export default function MaintenanceReportBuilder({
                             </span>
                           )
                         )}
-                        {visitCounts[it.rowNumber] > 0 && (
-                          <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-                            <History size={10} strokeWidth={2} aria-hidden="true" />
-                            บำรุงรักษาแล้ว {visitCounts[it.rowNumber].toLocaleString("th-TH")} ครั้ง (
-                            {maintenanceYearFilter || "ทุกปี"})
-                          </span>
-                        )}
                       </td>
-                      <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">{it.department || "—"}</td>
-                      <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">{it.installLocation || "—"}</td>
+                      <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300 align-top">{it.department || "—"}</td>
+                      <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300 align-top">{it.installLocation || "—"}</td>
                     </tr>
                   ))}
                   {filteredItems.length === 0 && (
@@ -925,6 +1002,53 @@ export default function MaintenanceReportBuilder({
               </table>
             </div>
           </div>
+
+          {/* Month-strip popup — the list of maintenance tasks for whichever
+              tick is currently hovered/clicked (see monthPopup state above).
+              position:fixed against the tick's own captured rect so it
+              always escapes the picker table's max-h-80 overflow-y-auto
+              clipping instead of getting cut off inside that scroll box. A
+              pinned (clicked) popup also gets a full-screen invisible
+              backdrop to close on an outside click, same pattern as the
+              settings/adjust modals above. */}
+          {monthPopup && (
+            <>
+              {monthPopup.pinned && (
+                <div className="fixed inset-0 z-40" onClick={() => setMonthPopup(null)} role="presentation" />
+              )}
+              <div
+                className="fixed z-50 w-64 max-w-[calc(100vw-1rem)] rounded-xl border border-zinc-200 bg-white p-3 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+                style={{
+                  top: monthPopup.rect.bottom + 6,
+                  left: Math.min(Math.max(8, monthPopup.rect.left - 100), window.innerWidth - 8 - 256),
+                }}
+                onMouseLeave={() => setMonthPopup((prev) => (prev?.pinned ? prev : null))}
+              >
+                <p className="mb-1.5 font-semibold text-zinc-800 dark:text-zinc-100">
+                  {THAI_MONTHS_FULL[monthPopup.month]} {maintenanceYearFilter || String(new Date().getFullYear() + 543)}
+                </p>
+                {(monthlyTasks[monthPopup.rowNumber]?.[monthPopup.month] ?? []).length === 0 ? (
+                  <p className="text-zinc-400">ไม่มีการบำรุงรักษาในเดือนนี้</p>
+                ) : (
+                  <ul className="flex flex-col gap-1.5">
+                    {(monthlyTasks[monthPopup.rowNumber]?.[monthPopup.month] ?? []).map((t, i) => (
+                      <li key={i} className="flex items-start gap-1.5">
+                        {t.status === "in_progress" ? (
+                          <Wrench size={11} strokeWidth={2} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                        ) : (
+                          <CheckCircle2 size={11} strokeWidth={2} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                        )}
+                        <span className="text-zinc-700 dark:text-zinc-300">
+                          {formatThaiDate((t.status === "in_progress" ? t.createdAt : t.completedAt || t.createdAt).slice(0, 10))} — {t.displayName}
+                          {t.status === "in_progress" && " (กำลังดำเนินการ)"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </>
+          )}
 
           {showAdjustModal && selectedRows.length > 0 && (
             <div
