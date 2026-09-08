@@ -956,7 +956,7 @@ export default function MaintenanceReportBuilder({
                 <p className="pt-6">{block.heading}</p>
                 <p>{block.nameLine}</p>
                 <p>{block.positionLine}</p>
-                <p className="font-medium">{block.subLabel}</p>
+                <p>{block.subLabel}</p>
               </div>
             ))}
           </div>
