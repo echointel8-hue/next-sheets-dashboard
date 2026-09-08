@@ -239,6 +239,25 @@ export default function MaintenanceReportBuilder({
       });
   }, [selectedRowNumbers, items, overrides]);
 
+  // Distinct กลุ่มงาน among the selected equipment, in first-picked order —
+  // drives one "ผู้ตรวจสอบ" signature block per department below the table
+  // (see the print area), so a single printout can cover several
+  // departments' PM work in one day instead of one department per sheet.
+  // Falls back to the old generic label when none of the selected rows
+  // carry a department (e.g. that column is blank in the sheet).
+  const selectedDepartments = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const row of selectedRows) {
+      const dep = row.department.trim();
+      if (dep && !seen.has(dep)) {
+        seen.add(dep);
+        list.push(dep);
+      }
+    }
+    return list.length > 0 ? list : ["กลุ่มงานผู้รับบริการ"];
+  }, [selectedRows]);
+
   // A responsible-person edit only counts as "savable" when the sheet uses
   // one combined name column (see canSaveResponsiblePerson) — otherwise
   // there is nothing this row could send the API that it would accept, so
@@ -896,8 +915,8 @@ export default function MaintenanceReportBuilder({
                     <td className="border border-zinc-400 px-1 py-1 align-top">
                       <div className="grid grid-cols-2 gap-x-1 gap-y-0.5 whitespace-nowrap text-[9px]">
                         <span>☐ ปกติ</span>
+                        <span>☐ เปลี่ยนอะไหล่ ..........</span>
                         <span>☐ ส่งซ่อม</span>
-                        <span>☐ เปลี่ยนอะไหล่</span>
                         <span>☐ อื่นๆ ระบุ .....................</span>
                       </div>
                     </td>
@@ -922,19 +941,28 @@ export default function MaintenanceReportBuilder({
             </div>
           </div>
 
-          <div className="mt-8 grid grid-cols-1 gap-8 text-center text-sm sm:grid-cols-2">
-            <div className="flex flex-col items-center gap-1">
-              <p>ลงชื่อ ....................................................... ผู้ตรวจสอบ</p>
-              <p>(.......................................................)</p>
-              <p>ตำแหน่ง .......................................................</p>
-              <p>กลุ่มงานผู้รับบริการ</p>
-            </div>
-            <div className="flex flex-col items-center gap-1">
-              <p>ลงชื่อ ....................................................... ผู้รับทราบ</p>
-              <p>({formSettings.acknowledgerName})</p>
-              <p>ตำแหน่ง {formSettings.acknowledgerPosition}</p>
-              <p>{formSettings.acknowledgerDepartment}</p>
-            </div>
+          {/* One "ผู้ตรวจสอบ" block per department represented in the
+              selection (see selectedDepartments above) — lets one printout
+              cover several departments' PM visits in a single day. Kept in
+              its own row above ผู้รับทราบ (rather than side by side, as
+              before) so it can grow past two departments and the
+              ผู้รับทราบ block simply ends up further down the page. */}
+          <div className="mt-8 grid grid-cols-1 gap-x-8 gap-y-6 text-center text-sm sm:grid-cols-2">
+            {selectedDepartments.map((dep) => (
+              <div key={dep} className="flex flex-col items-center gap-1">
+                <p>ลงชื่อ ....................................................... ผู้ตรวจสอบ</p>
+                <p>(.......................................................)</p>
+                <p>ตำแหน่ง .......................................................</p>
+                <p className="font-medium">{dep}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-8 flex flex-col items-center gap-1 text-center text-sm">
+            <p>ลงชื่อ ....................................................... ผู้รับทราบ</p>
+            <p>({formSettings.acknowledgerName})</p>
+            <p>ตำแหน่ง {formSettings.acknowledgerPosition}</p>
+            <p>{formSettings.acknowledgerDepartment}</p>
           </div>
         </div>
       </div>
