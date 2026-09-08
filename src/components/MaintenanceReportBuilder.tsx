@@ -153,6 +153,15 @@ export default function MaintenanceReportBuilder({
   const [maintenanceYearFilter, setMaintenanceYearFilter] = useState(() =>
     String(new Date().getFullYear() + 543)
   );
+  // Unlike ปีที่บำรุงรักษา (which only reshapes the badges/counts above),
+  // this one actually hides non-matching rows from the picker table below —
+  // per the hospital's explicit request for a real filter, same behavior as
+  // กลุ่มงาน/ประเภทครุภัณฑ์. Classified per row from the same
+  // inProgress/lastCompleted lookups (already scoped to maintenanceYearFilter),
+  // so picking a status is always relative to whichever ปีที่บำรุงรักษา is
+  // selected — e.g. "ยังไม่เคยบำรุงรักษา" means "no task logged in that ปี"
+  // (or ever, under "ทุกปี"), not "never in the sheet's whole history".
+  const [maintenanceStatusFilter, setMaintenanceStatusFilter] = useState<"" | "in_progress" | "done" | "none">("");
   const [selectedRowNumbers, setSelectedRowNumbers] = useState<number[]>([]);
   const [formDepartment, setFormDepartment] = useState("");
   const [visitDate, setVisitDate] = useState("");
@@ -263,13 +272,17 @@ export default function MaintenanceReportBuilder({
     return items.filter((it) => {
       if (departmentFilter.length > 0 && !departmentFilter.includes(it.department)) return false;
       if (equipmentTypeFilter.length > 0 && !equipmentTypeFilter.includes(it.equipmentType)) return false;
+      if (maintenanceStatusFilter) {
+        const status = inProgress[it.rowNumber] ? "in_progress" : lastCompleted[it.rowNumber] ? "done" : "none";
+        if (status !== maintenanceStatusFilter) return false;
+      }
       if (q) {
         const hay = `${it.assetNumber} ${it.brandModel} ${it.equipmentType} ${it.installLocation} ${it.responsiblePerson}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [items, departmentFilter, equipmentTypeFilter, search]);
+  }, [items, departmentFilter, equipmentTypeFilter, maintenanceStatusFilter, inProgress, lastCompleted, search]);
 
   function toggleItem(rowNumber: number) {
     setSelectedRowNumbers((prev) =>
@@ -796,6 +809,20 @@ export default function MaintenanceReportBuilder({
                   ))}
                 </select>
               </label>
+              <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                กรองสถานะ
+                <select
+                  value={maintenanceStatusFilter}
+                  onChange={(e) => setMaintenanceStatusFilter(e.target.value as typeof maintenanceStatusFilter)}
+                  aria-label="กรองรายการตามสถานะบำรุงรักษา"
+                  className={INPUT_CLASS}
+                >
+                  <option value="">ทั้งหมด</option>
+                  <option value="in_progress">กำลังดำเนินการ</option>
+                  <option value="done">เสร็จสิ้นแล้ว</option>
+                  <option value="none">ยังไม่เคยบำรุงรักษา</option>
+                </select>
+              </label>
               <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-xs sm:flex-1">
                 ค้นหา
                 <input
@@ -808,7 +835,7 @@ export default function MaintenanceReportBuilder({
               </label>
             </div>
             <p className="text-xs text-zinc-400">
-              &quot;ปีที่บำรุงรักษา&quot; กรองเฉพาะป้ายสถานะและจำนวนครั้งด้านล่างให้ตรงกับปีนั้น — ไม่ซ่อนรายการครุภัณฑ์ออกจากตาราง ค่าเริ่มต้นคือปีปัจจุบันเสมอ เลือก &quot;ทุกปี&quot; เพื่อดูประวัติทั้งหมด
+              &quot;ปีที่บำรุงรักษา&quot; กรองป้ายสถานะและจำนวนครั้งด้านล่างให้ตรงกับปีนั้น (ค่าเริ่มต้นคือปีปัจจุบันเสมอ เลือก &quot;ทุกปี&quot; เพื่อดูประวัติทั้งหมด) — &quot;กรองสถานะ&quot; ใช้ผลจากปีเดียวกันนี้มาซ่อนรายการที่ไม่ตรงเงื่อนไขออกจากตารางด้านล่างด้วย
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <button
