@@ -9,6 +9,7 @@ import {
   ClipboardList,
   Loader2,
   Save,
+  Trash2,
   Users,
   Wrench,
   X,
@@ -51,7 +52,7 @@ export default function MaintenanceTasksBoard({
   loadError,
   actionOptions,
 }: {
-  session: { username: string; isBootstrap: boolean };
+  session: { username: string; displayName: string; isBootstrap: boolean };
   initialTasks: MaintenanceTask[];
   loadError: string | null;
   actionOptions: string[];
@@ -62,6 +63,8 @@ export default function MaintenanceTasksBoard({
   const [search, setSearch] = useState("");
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [fetchError] = useState<string | null>(loadError);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const assigneeOptions = useMemo(() => {
     const set = new Set<string>();
@@ -126,13 +129,39 @@ export default function MaintenanceTasksBoard({
     return json.task as MaintenanceTask;
   }
 
+  /** Deletes a mistakenly-created task outright (wrong equipment selected,
+   * duplicate print) — not the normal "close this task" flow, which is the
+   * "เสร็จสิ้น" button inside the update modal instead. */
+  async function deleteTask(task: MaintenanceTask) {
+    const label = [task.assetNumber, task.equipmentType].filter(Boolean).join(" — ") || "งานนี้";
+    const confirmed = window.confirm(`ยืนยันลบรายการ "${label}" ใช่หรือไม่?\n\nรายการนี้จะหายไปจากตารางทันทีและกู้คืนไม่ได้`);
+    if (!confirmed) return;
+
+    setDeleteError(null);
+    setDeletingTaskId(task.taskId);
+    try {
+      const res = await fetch(`/api/manage/it/tasks/${task.taskId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setDeleteError(json.error ?? "ลบรายการไม่สำเร็จ");
+        return;
+      }
+      setTasks((prev) => prev.filter((t) => t.taskId !== task.taskId));
+      if (activeTaskId === task.taskId) setActiveTaskId(null);
+    } catch {
+      setDeleteError("ลบรายการไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setDeletingTaskId(null);
+    }
+  }
+
   return (
     <main className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 sm:px-6 lg:px-10">
       <div className="flex w-full max-w-[75rem] flex-col gap-6">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">งานบำรุงรักษา (Task)</h1>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{session.username}</p>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{session.displayName || session.username}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link
@@ -151,6 +180,15 @@ export default function MaintenanceTasksBoard({
             className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200"
           >
             {fetchError}
+          </div>
+        )}
+
+        {deleteError && (
+          <div
+            role="alert"
+            className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200"
+          >
+            {deleteError}
           </div>
         )}
 
@@ -287,14 +325,30 @@ export default function MaintenanceTasksBoard({
                       )}
                     </td>
                     <td className="px-3 py-2 align-top text-right">
-                      <button
-                        type="button"
-                        onClick={() => setActiveTaskId(t.taskId)}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                      >
-                        <Wrench size={13} strokeWidth={2} aria-hidden="true" />
-                        {t.status === "in_progress" ? "อัปเดตสถานะ" : "ดูรายละเอียด"}
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setActiveTaskId(t.taskId)}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        >
+                          <Wrench size={13} strokeWidth={2} aria-hidden="true" />
+                          {t.status === "in_progress" ? "อัปเดตสถานะ" : "ดูรายละเอียด"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteTask(t)}
+                          disabled={deletingTaskId === t.taskId}
+                          title="ลบรายการนี้"
+                          aria-label="ลบรายการนี้"
+                          className="inline-flex items-center justify-center rounded-full border border-zinc-200 p-1.5 text-zinc-400 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:hover:border-red-900/50 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                        >
+                          {deletingTaskId === t.taskId ? (
+                            <Loader2 size={13} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                          ) : (
+                            <Trash2 size={13} strokeWidth={2} aria-hidden="true" />
+                          )}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

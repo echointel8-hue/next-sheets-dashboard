@@ -1,7 +1,13 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, canAccessItDashboard, verifySessionToken } from "@/lib/auth";
-import { getMaintenanceTasks, getReportSettings, DEFAULT_REPORT_SETTINGS, type MaintenanceTask } from "@/lib/sheets";
+import {
+  getMaintenanceTasks,
+  getReportSettings,
+  getUsers,
+  DEFAULT_REPORT_SETTINGS,
+  type MaintenanceTask,
+} from "@/lib/sheets";
 import MaintenanceTasksBoard from "@/components/MaintenanceTasksBoard";
 
 export const dynamic = "force-dynamic";
@@ -42,9 +48,19 @@ export default async function ManageItTasksPage() {
     // other ReportSettings reader in this app.
   }
 
+  // Shows a real Thai name in the page header instead of the bare login —
+  // same lookup/fallback as /manage/it/report's "ผู้ดำเนินการ" auto-fill.
+  let displayName = session.username;
+  try {
+    const users = await getUsers();
+    displayName = users.find((u) => u.username === session.username)?.displayName || session.username;
+  } catch {
+    // fall through with the bare username
+  }
+
   return (
     <MaintenanceTasksBoard
-      session={{ username: session.username, isBootstrap: session.isBootstrap }}
+      session={{ username: session.username, displayName, isBootstrap: session.isBootstrap }}
       initialTasks={tasks}
       loadError={loadError}
       actionOptions={actionOptions}

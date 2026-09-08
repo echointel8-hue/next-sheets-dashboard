@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, canAccessItDashboard, verifySessionToken } from "@/lib/auth";
-import { updateMaintenanceTask, type InspectionCheck, type MaintenanceTask } from "@/lib/sheets";
+import { deleteMaintenanceTask, updateMaintenanceTask, type InspectionCheck, type MaintenanceTask } from "@/lib/sheets";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +93,33 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   try {
     const task = await updateMaintenanceTask(taskId, finalUpdates);
     return NextResponse.json({ task });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+/** Deletes one task outright — for a mistakenly-created task (wrong
+ * equipment selected, duplicate print), not a normal "close this task"
+ * action (that's PATCH status:"done"). Same access rule as PATCH: any
+ * IT-dashboard account, not just the one who created it. */
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ taskId: string }> }) {
+  const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
+  if (!session) {
+    return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
+  }
+  if (!canAccessItDashboard(session)) {
+    return NextResponse.json({ error: "ไม่มีสิทธิ์เข้าถึงหน้านี้" }, { status: 403 });
+  }
+
+  const { taskId } = await params;
+  if (!taskId) {
+    return NextResponse.json({ error: "ไม่พบงานนี้" }, { status: 400 });
+  }
+
+  try {
+    await deleteMaintenanceTask(taskId);
+    return NextResponse.json({ ok: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });

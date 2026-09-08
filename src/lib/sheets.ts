@@ -929,6 +929,74 @@ export async function updateMaintenanceTask(
   return merged;
 }
 
+/** Physically removes one task row from the MaintenanceTasks tab — for when
+ * IT selected the wrong equipment (or a duplicate) and wants the mistaken
+ * task gone entirely, not just closed. Unlike updateMaintenanceTask this
+ * doesn't rewrite a row in place; it deletes the sheet row outright via a
+ * deleteDimension batchUpdate, so it disappears from every list immediately
+ * and never leaves a blank row behind. Same find-by-taskId scan as
+ * updateMaintenanceTask, for the same reason (another account's task could
+ * have shifted the physical row in between). */
+export async function deleteMaintenanceTask(taskId: string): Promise<void> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getMaintenanceTasksTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:R100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`อ่านรายการงานบำรุงรักษาไม่สำเร็จ: ${message}`);
+  }
+
+  const rows = values ?? [];
+  const idx = rows.findIndex((row) => (row[0] ?? "").toString().trim() === taskId);
+  if (idx === -1) {
+    throw new Error("ไม่พบงานนี้ในระบบ — อาจถูกลบไปแล้ว");
+  }
+  const sheetRow = idx + 2; // 1-based sheet row — matches updateMaintenanceTask's own math
+
+  let sheetId: number | null | undefined;
+  try {
+    const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: "sheets.properties" });
+    sheetId = meta.data.sheets?.find((s) => s.properties?.title === tab)?.properties?.sheetId;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`ลบงานบำรุงรักษาไม่สำเร็จ: ${message}`);
+  }
+  if (sheetId == null) {
+    throw new Error(`ไม่พบแท็บชื่อ "${tab}" ในสเปรดชีต`);
+  }
+
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            deleteDimension: {
+              range: {
+                sheetId,
+                dimension: "ROWS",
+                startIndex: sheetRow - 1,
+                endIndex: sheetRow,
+              },
+            },
+          },
+        ],
+      },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`ลบงานบำรุงรักษาไม่สำเร็จ: ${message}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // SpecStandards tab — the minimum PC spec the hospital currently considers
 // acceptable, used by lib/specEvaluation.ts to auto-flag a machine as
