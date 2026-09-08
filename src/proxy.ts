@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import {
+  SESSION_COOKIE,
+  SESSION_MAX_AGE_SECONDS,
+  createSessionToken,
+  verifySessionToken,
+  type SessionPayload,
+} from "@/lib/auth";
 
 /**
  * Two independent auth layers, checked in order:
@@ -32,19 +38,45 @@ export function proxy(request: NextRequest) {
   const isManagePage = pathname === "/manage" || pathname.startsWith("/manage/");
   const isManageApi = pathname === "/api/manage" || pathname.startsWith("/api/manage/");
 
-  if (isManagePage || isManageApi) {
-    const token = request.cookies.get(SESSION_COOKIE)?.value;
-    if (!verifySessionToken(token)) {
-      if (isManageApi) {
-        return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
-      }
-      const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("next", pathname);
-      return NextResponse.redirect(loginUrl);
+  const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
+
+  if ((isManagePage || isManageApi) && !session) {
+    if (isManageApi) {
+      return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
     }
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", pathname);
+    return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+  // Sliding idle timeout: any request — on any page, not just /manage —
+  // that still carries a valid session re-mints the cookie with a fresh
+  // expiry, so browsing the public dashboard (or anywhere else on the
+  // site) while logged in never drops the login on its own. It only lapses
+  // once SESSION_MAX_AGE_SECONDS passes with no requests at all. Skipped
+  // for the two routes that already set this same cookie themselves
+  // (login mints it fresh, logout clears it) — refreshing here too would
+  // race whichever Set-Cookie header the browser ends up applying last.
+  const managesOwnCookie = pathname === "/api/auth/login" || pathname === "/api/auth/logout";
+  if (session && !managesOwnCookie) refreshSessionCookie(response, session);
+  return response;
+}
+
+function refreshSessionCookie(response: NextResponse, session: SessionPayload) {
+  const refreshed = createSessionToken({
+    username: session.username,
+    role: session.role,
+    department: session.department,
+    isBootstrap: session.isBootstrap,
+  });
+  response.cookies.set(SESSION_COOKIE, refreshed, {
+    httpOnly: true,
+    sameSite: "strict",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: SESSION_MAX_AGE_SECONDS,
+  });
 }
 
 function checkBasicAuth(request: NextRequest): NextResponse | null {

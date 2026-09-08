@@ -26,7 +26,15 @@ import type { NextRequest } from "next/server";
 // Only the single env-configured bootstrap account (SessionPayload.
 // isBootstrap) can — see checkBootstrapAccount() in the login route.
 
-const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours — a work shift
+// A sliding idle timeout, not a fixed session length: createSessionToken
+// always stamps exp as "now + this", and proxy.ts re-mints the cookie with
+// a fresh exp on every request that carries a still-valid one (any page,
+// not just /manage) — so an active user's login never drops just from
+// navigating around the site, but 5 minutes with *no* requests at all (tab
+// idle, or closed) lets the existing exp lapse and the next /manage visit
+// bounces to /login. Per the hospital's explicit request for a 5-minute
+// idle logout instead of the previous fixed 8-hour session.
+const SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutes of inactivity
 export const SESSION_COOKIE = "manage_session";
 export const SESSION_MAX_AGE_SECONDS = SESSION_TTL_MS / 1000;
 
