@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import type { InspectionCheck, MaintenanceTaskStatus, ReportSettings } from "@/lib/sheets";
+import { TITLE_PREFIX_OPTIONS } from "@/lib/fields";
 import MultiSelect from "@/components/MultiSelect";
 
 /** One selectable equipment item — already flattened/redaction-free by
@@ -31,14 +32,23 @@ export interface ReportEquipmentItem {
   brandModel: string;
   department: string;
   installLocation: string;
+  /** Combined "คำนำหน้า ชื่อ-นามสกุล" for display/search/print — always
+   * derived from titlePrefix + nameOnly below, whichever sheet shape this
+   * came from (see manage/it/report/page.tsx). */
   responsiblePerson: string;
+  /** One of TITLE_PREFIX_OPTIONS (@/lib/fields), or "" if none was set or
+   * none could be detected — drives the คำนำหน้า dropdown in the
+   * "แก้ไข ... ก่อนพิมพ์" modal below. */
+  titlePrefix: string;
+  /** ชื่อ-นามสกุล without the คำนำหน้า. */
+  nameOnly: string;
   /** For the optimistic-concurrency check on save-back — see
    * /api/manage/it/records/[rowNumber]. */
   snapshotHash: string;
-  /** False when the sheet splits คำนำหน้า/ชื่อ-นามสกุล into separate
-   * columns — a free-text name can't be saved back to two cells reliably,
-   * so the save button for this one field is hidden in that case (editing
-   * it for just this printout still works). */
+  /** Whether editing titlePrefix/nameOnly here can save back to the sheet
+   * (true whenever the sheet has either a combined name column or both
+   * split columns) — false only for a sheet missing both shapes entirely,
+   * in which case editing here only affects this one printout. */
   canSaveResponsiblePerson: boolean;
 }
 
@@ -90,6 +100,8 @@ interface SelectedRow {
   department: string;
   location: string;
   responsiblePerson: string;
+  titlePrefix: string;
+  nameOnly: string;
   canSaveResponsiblePerson: boolean;
   snapshotHash: string;
   locationChanged: boolean;
@@ -185,6 +197,19 @@ export default function MaintenanceReportBuilder({
   const [maintenanceYearFilter, setMaintenanceYearFilter] = useState(() =>
     String(new Date().getFullYear() + 543)
   );
+  // Companion to ปีที่บำรุงรักษา — narrows the "กำลังบำรุงรักษาโดย .../
+  // เสร็จสิ้นล่าสุดโดย ..." badge and the "X ครั้ง" count (see the useMemo
+  // below) down to one เดือน within that ปี, defaulting to the current
+  // month. Per the hospital's request, this is what makes that status
+  // "reset" every month instead of only every year: on day 1 of a new
+  // month this default alone makes every item look untouched again for
+  // that badge, with no code change and no data actually deleted — the
+  // month-strip below still shows the full year's history regardless of
+  // this filter (it only restricts monthlyTasks by ปี, never by this), so
+  // nothing about past months is ever hidden, only what counts as "current".
+  const [maintenanceMonthFilter, setMaintenanceMonthFilter] = useState(() =>
+    String(new Date().getMonth() + 1)
+  );
   // Unlike ปีที่บำรุงรักษา (which only reshapes the badges/counts above),
   // this one actually hides non-matching rows from the picker table below —
   // per the hospital's explicit request for a real filter, same behavior as
@@ -199,7 +224,7 @@ export default function MaintenanceReportBuilder({
   const [timeFrom, setTimeFrom] = useState("");
   const [timeTo, setTimeTo] = useState("");
   const [overrides, setOverrides] = useState<
-    Record<number, { location: string; responsiblePerson: string }>
+    Record<number, { location: string; titlePrefix: string; nameOnly: string }>
   >({});
   const [rowSaveStatus, setRowSaveStatus] = useState<Record<number, SaveStatus>>({});
   const [rowSaveError, setRowSaveError] = useState<Record<number, string>>({});
@@ -266,13 +291,16 @@ export default function MaintenanceReportBuilder({
   // Re-derives the "กำลังบำรุงรักษาโดย ..." / "เสร็จสิ้นล่าสุดโดย ..." badge
   // lookups, plus a plain per-equipment visit count (visitCounts — every
   // task counts once regardless of status, since printing the report is
-  // itself the visit; see the badge below), all from taskHistory and all
-  // restricted to the selected ปี (created year) when one is picked —
-  // "ทุกปี" (maintenanceYearFilter === "") keeps the original
-  // all-time/newest-wins behavior. monthlyTasks is the same data grouped one
-  // step further, by เดือน (0 = ม.ค. ... 11 = ธ.ค.) within that same ปี — it
-  // drives the 12-month strip in the picker table below (replaces the old
-  // "เลขครุภัณฑ์" column) and its hover/click popup.
+  // itself the visit; see the badge below), restricted to the selected ปี
+  // (created year) AND เดือน — per the hospital's request this is what
+  // "resets" the badge every month, not just every year. monthlyTasks is
+  // the same data grouped one step further, by เดือน (0 = ม.ค. ... 11 =
+  // ธ.ค.) — it drives the 12-month strip in the picker table below (and its
+  // click popup) and is deliberately restricted by ปี ONLY, never by เดือน,
+  // so the strip always shows the whole selected year's history regardless
+  // of which single เดือน the badge above is currently focused on — nothing
+  // about a past month's color/detail is ever hidden, only what counts as
+  // "current status" for the badge.
   const { inProgress, lastCompleted, visitCounts, monthlyTasks } = useMemo(() => {
     const inProgress: Record<number, { displayName: string; createdAt: string }> = {};
     const lastCompleted: Record<number, { displayName: string; completedAt: string }> = {};
@@ -283,6 +311,14 @@ export default function MaintenanceReportBuilder({
         const y = new Date(t.createdAt).getFullYear() + 543;
         if (String(y) !== maintenanceYearFilter) continue;
       }
+      const monthIdx = new Date(t.createdAt).getMonth();
+      if (!Number.isNaN(monthIdx)) {
+        if (!monthlyTasks[t.equipmentRowNumber]) {
+          monthlyTasks[t.equipmentRowNumber] = Array.from({ length: 12 }, () => []);
+        }
+        monthlyTasks[t.equipmentRowNumber][monthIdx].push(t);
+      }
+      if (maintenanceMonthFilter && String(monthIdx + 1) !== maintenanceMonthFilter) continue;
       visitCounts[t.equipmentRowNumber] = (visitCounts[t.equipmentRowNumber] ?? 0) + 1;
       if (t.status === "in_progress") {
         const existing = inProgress[t.equipmentRowNumber];
@@ -295,16 +331,9 @@ export default function MaintenanceReportBuilder({
           lastCompleted[t.equipmentRowNumber] = { displayName: t.displayName, completedAt: t.completedAt };
         }
       }
-      const monthIdx = new Date(t.createdAt).getMonth();
-      if (!Number.isNaN(monthIdx)) {
-        if (!monthlyTasks[t.equipmentRowNumber]) {
-          monthlyTasks[t.equipmentRowNumber] = Array.from({ length: 12 }, () => []);
-        }
-        monthlyTasks[t.equipmentRowNumber][monthIdx].push(t);
-      }
     }
     return { inProgress, lastCompleted, visitCounts, monthlyTasks };
-  }, [taskHistory, maintenanceYearFilter]);
+  }, [taskHistory, maintenanceYearFilter, maintenanceMonthFilter]);
 
   // Which month-strip tick's task list is open, shown as a small centered
   // modal (see the JSX below) — click-only, no hover tracking. An earlier
@@ -352,13 +381,14 @@ export default function MaintenanceReportBuilder({
     setSelectedRowNumbers([]);
   }
 
-  function updateOverride(rowNumber: number, field: "location" | "responsiblePerson", value: string) {
+  function updateOverride(rowNumber: number, field: "location" | "titlePrefix" | "nameOnly", value: string) {
     const source = items.find((it) => it.rowNumber === rowNumber);
     setOverrides((prev) => ({
       ...prev,
       [rowNumber]: {
         location: prev[rowNumber]?.location ?? source?.installLocation ?? "",
-        responsiblePerson: prev[rowNumber]?.responsiblePerson ?? source?.responsiblePerson ?? "",
+        titlePrefix: prev[rowNumber]?.titlePrefix ?? source?.titlePrefix ?? "",
+        nameOnly: prev[rowNumber]?.nameOnly ?? source?.nameOnly ?? "",
         [field]: value,
       },
     }));
@@ -376,7 +406,9 @@ export default function MaintenanceReportBuilder({
       .map((it) => {
         const o = overrides[it.rowNumber];
         const location = o?.location ?? it.installLocation;
-        const responsiblePerson = o?.responsiblePerson ?? it.responsiblePerson;
+        const titlePrefix = o?.titlePrefix ?? it.titlePrefix;
+        const nameOnly = o?.nameOnly ?? it.nameOnly;
+        const responsiblePerson = [titlePrefix, nameOnly].filter(Boolean).join(" ");
         return {
           rowNumber: it.rowNumber,
           assetNumber: it.assetNumber,
@@ -386,10 +418,12 @@ export default function MaintenanceReportBuilder({
           department: it.department,
           location,
           responsiblePerson,
+          titlePrefix,
+          nameOnly,
           canSaveResponsiblePerson: it.canSaveResponsiblePerson,
           snapshotHash: it.snapshotHash,
           locationChanged: location !== it.installLocation,
-          responsiblePersonChanged: responsiblePerson !== it.responsiblePerson,
+          responsiblePersonChanged: titlePrefix !== it.titlePrefix || nameOnly !== it.nameOnly,
         };
       });
   }, [selectedRowNumbers, items, overrides]);
@@ -431,7 +465,11 @@ export default function MaintenanceReportBuilder({
       const body: Record<string, string> = { expectedSnapshotHash: row.snapshotHash };
       if (row.locationChanged) body.installLocation = row.location;
       if (row.responsiblePersonChanged && row.canSaveResponsiblePerson) {
-        body.responsiblePerson = row.responsiblePerson;
+        // Sent as a pair — see /api/manage/it/records/[rowNumber], which
+        // needs both halves together regardless of which sheet shape (one
+        // combined column, or split คำนำหน้า/ชื่อ-นามสกุล) it ends up in.
+        body.responsibleTitlePrefix = row.titlePrefix;
+        body.responsibleName = row.nameOnly;
       }
       const res = await fetch(`/api/manage/it/records/${row.rowNumber}`, {
         method: "PATCH",
@@ -457,6 +495,9 @@ export default function MaintenanceReportBuilder({
                   row.responsiblePersonChanged && row.canSaveResponsiblePerson
                     ? row.responsiblePerson
                     : it.responsiblePerson,
+                titlePrefix:
+                  row.responsiblePersonChanged && row.canSaveResponsiblePerson ? row.titlePrefix : it.titlePrefix,
+                nameOnly: row.responsiblePersonChanged && row.canSaveResponsiblePerson ? row.nameOnly : it.nameOnly,
                 snapshotHash: json.snapshotHash ?? it.snapshotHash,
               }
             : it
@@ -857,6 +898,21 @@ export default function MaintenanceReportBuilder({
                 className="sm:max-w-xs sm:flex-1"
               />
               <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                เดือนที่บำรุงรักษา
+                <select
+                  value={maintenanceMonthFilter}
+                  onChange={(e) => setMaintenanceMonthFilter(e.target.value)}
+                  aria-label="กรองสถานะบำรุงรักษาตามเดือน"
+                  className={INPUT_CLASS}
+                >
+                  {THAI_MONTHS_FULL.map((label, idx) => (
+                    <option key={label} value={idx + 1}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
                 ปีที่บำรุงรักษา
                 <select
                   value={maintenanceYearFilter}
@@ -897,7 +953,7 @@ export default function MaintenanceReportBuilder({
               </label>
             </div>
             <p className="text-xs text-zinc-400">
-              &quot;ปีที่บำรุงรักษา&quot; กรองป้ายสถานะและจำนวนครั้งด้านล่างให้ตรงกับปีนั้น (ค่าเริ่มต้นคือปีปัจจุบันเสมอ) — &quot;กรองสถานะ&quot; ใช้ผลจากปีเดียวกันนี้มาซ่อนรายการที่ไม่ตรงเงื่อนไขออกจากตารางด้านล่างด้วย
+              &quot;เดือน/ปีที่บำรุงรักษา&quot; กรองป้ายสถานะและจำนวนครั้งด้านล่างให้ตรงกับเดือนนั้นโดยเฉพาะ (ค่าเริ่มต้นคือเดือน/ปีปัจจุบันเสมอ — สถานะจึงรีเซ็ตใหม่ทุกเดือน) — &quot;กรองสถานะ&quot; ใช้ผลจากเดือนเดียวกันนี้มาซ่อนรายการที่ไม่ตรงเงื่อนไขออกจากตารางด้านล่างด้วย แถบ 12 เดือนในตารางยังแสดงประวัติทั้งปีให้ย้อนดูได้เสมอ ไม่ถูกซ่อนตามตัวกรองนี้
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -930,8 +986,8 @@ export default function MaintenanceReportBuilder({
                     <th scope="col" className="px-2 py-2 font-medium">เลือก</th>
                     <th scope="col" className="px-2 py-2 font-medium">เดือนที่บำรุงรักษา</th>
                     <th scope="col" className="px-2 py-2 font-medium">รายการ</th>
-                    <th scope="col" className="px-2 py-2 font-medium">กลุ่มงาน</th>
-                    <th scope="col" className="px-2 py-2 font-medium">สถานที่ตั้ง</th>
+                    <th scope="col" className="px-2 py-2 font-medium">กลุ่มงาน / สถานที่ตั้ง</th>
+                    <th scope="col" className="px-2 py-2 font-medium">ผู้รับผิดชอบครุภัณฑ์</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -947,13 +1003,14 @@ export default function MaintenanceReportBuilder({
                       </td>
                       <td className="px-2 py-1.5 align-top">
                         <div
-                          className="flex items-center gap-[2px]"
+                          className="flex items-center gap-[3px]"
                           role="group"
                           aria-label={`เดือนที่บำรุงรักษาในปี ${maintenanceYearFilter || "ทุกปี"}`}
                         >
                           {THAI_MONTHS_SHORT.map((label, monthIdx) => {
                             const monthTasks = monthlyTasks[it.rowNumber]?.[monthIdx] ?? [];
                             const hasInProgress = monthTasks.some((t) => t.status === "in_progress");
+                            const isFilteredMonth = String(monthIdx + 1) === maintenanceMonthFilter;
                             return (
                               <button
                                 key={monthIdx}
@@ -961,20 +1018,25 @@ export default function MaintenanceReportBuilder({
                                 onClick={() => setMonthPopup({ rowNumber: it.rowNumber, month: monthIdx })}
                                 title={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง — คลิกเพื่อดูรายละเอียด`}
                                 aria-label={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง — คลิกเพื่อดูรายละเอียด`}
-                                className={`h-4 w-[5px] shrink-0 rounded-sm transition-colors ${
+                                className={`h-6 w-2 shrink-0 rounded-[3px] transition-colors ${
                                   monthTasks.length === 0
-                                    ? "bg-zinc-100 dark:bg-zinc-800"
+                                    ? "bg-zinc-200 dark:bg-zinc-700"
                                     : hasInProgress
-                                      ? "bg-amber-400 dark:bg-amber-500"
-                                      : "bg-emerald-400 dark:bg-emerald-500"
+                                      ? "bg-amber-500 dark:bg-amber-400"
+                                      : "bg-emerald-500 dark:bg-emerald-400"
+                                } ${
+                                  isFilteredMonth
+                                    ? "ring-2 ring-[var(--brand)] ring-offset-1 ring-offset-white dark:ring-offset-zinc-900"
+                                    : ""
                                 }`}
                               />
                             );
                           })}
                         </div>
                         {visitCounts[it.rowNumber] > 0 && (
-                          <p className="mt-0.5 text-[9px] text-zinc-400 dark:text-zinc-500">
-                            {visitCounts[it.rowNumber].toLocaleString("th-TH")} ครั้ง
+                          <p className="mt-1 text-[9px] text-zinc-400 dark:text-zinc-500">
+                            {visitCounts[it.rowNumber].toLocaleString("th-TH")} ครั้ง (
+                            {THAI_MONTHS_SHORT[Number(maintenanceMonthFilter) - 1] ?? ""})
                           </p>
                         )}
                       </td>
@@ -999,8 +1061,15 @@ export default function MaintenanceReportBuilder({
                           )
                         )}
                       </td>
-                      <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300 align-top">{it.department || "—"}</td>
-                      <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300 align-top">{it.installLocation || "—"}</td>
+                      <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300 align-top">
+                        <div>{it.department || "—"}</div>
+                        <div className="text-[10px] leading-snug text-zinc-400 dark:text-zinc-500">
+                          {it.installLocation || "—"}
+                        </div>
+                      </td>
+                      <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300 align-top">
+                        {it.responsiblePerson || "—"}
+                      </td>
                     </tr>
                   ))}
                   {filteredItems.length === 0 && (
@@ -1128,17 +1197,13 @@ export default function MaintenanceReportBuilder({
                 </div>
 
                 <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
-                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                    ใช้เมื่อข้อมูลในระบบไม่ตรงกับปัจจุบัน — แก้ไขที่นี่ใช้กับรายงานฉบับนี้ทันที กด &quot;บันทึกข้อมูลที่แก้ไขลงระบบ&quot;
-                    ด้านล่างเพิ่ม ถ้าต้องการแก้ไขข้อมูลจริงในฐานข้อมูลด้วย (จะบันทึกลง log การแก้ไขเหมือนการแก้ไขทั่วไป)
-                  </p>
                   <div className="flex flex-col gap-2">
                     {selectedRows.map((row) => {
                       const status = rowSaveStatus[row.rowNumber] ?? "idle";
                       return (
                         <div
                           key={row.rowNumber}
-                          className="grid grid-cols-1 gap-2 border-b border-zinc-50 pb-2 last:border-0 sm:grid-cols-[1fr_1fr_1fr_auto] dark:border-zinc-800/60"
+                          className="grid grid-cols-1 gap-2 border-b border-zinc-50 pb-2 last:border-0 sm:grid-cols-[1fr_1fr_0.7fr_1fr_auto] dark:border-zinc-800/60"
                         >
                           <span className="self-center text-xs text-zinc-500 dark:text-zinc-400">
                             {row.assetNumber || "—"} · {row.description || "—"}
@@ -1150,15 +1215,33 @@ export default function MaintenanceReportBuilder({
                             placeholder="สถานที่ตั้ง"
                             className={INPUT_CLASS}
                           />
-                          <input
-                            type="text"
-                            value={row.responsiblePerson}
-                            onChange={(e) => updateOverride(row.rowNumber, "responsiblePerson", e.target.value)}
-                            placeholder="ผู้รับผิดชอบครุภัณฑ์"
+                          <select
+                            value={row.titlePrefix}
+                            onChange={(e) => updateOverride(row.rowNumber, "titlePrefix", e.target.value)}
+                            aria-label="คำนำหน้า"
                             title={
                               row.canSaveResponsiblePerson
                                 ? undefined
-                                : "ชีตนี้แยกคอลัมน์คำนำหน้า/ชื่อ-นามสกุล — แก้ไขได้เฉพาะรายงานนี้ บันทึกลงระบบไม่ได้"
+                                : "ชีตนี้ไม่มีคอลัมน์ชื่อผู้รับผิดชอบครุภัณฑ์ — แก้ไขได้เฉพาะรายงานนี้ บันทึกลงระบบไม่ได้"
+                            }
+                            className={INPUT_CLASS}
+                          >
+                            <option value="">คำนำหน้า</option>
+                            {TITLE_PREFIX_OPTIONS.map((p) => (
+                              <option key={p} value={p}>
+                                {p}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="text"
+                            value={row.nameOnly}
+                            onChange={(e) => updateOverride(row.rowNumber, "nameOnly", e.target.value)}
+                            placeholder="ชื่อ-นามสกุล"
+                            title={
+                              row.canSaveResponsiblePerson
+                                ? undefined
+                                : "ชีตนี้ไม่มีคอลัมน์ชื่อผู้รับผิดชอบครุภัณฑ์ — แก้ไขได้เฉพาะรายงานนี้ บันทึกลงระบบไม่ได้"
                             }
                             className={INPUT_CLASS}
                           />
