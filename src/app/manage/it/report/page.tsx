@@ -20,9 +20,11 @@ export const dynamic = "force-dynamic";
 /**
  * /manage/it/report — the printable "แบบฟอร์มการบำรุงรักษาเชิงป้องกัน..."
  * generator. Same access rule as /manage/it (see canAccessItDashboard): the
- * "it" role and the bootstrap superadmin only. A disposed item can still be
- * picked (a maintenance visit can legitimately be the reason it got
- * disposed), but a soft-deleted one never shows up, same as everywhere else.
+ * "it" role and the bootstrap superadmin only. Both a soft-deleted row and
+ * an already-disposed one are excluded from the picker — a disposed item
+ * never needs another maintenance visit, so per the hospital's explicit
+ * request it's dropped from IT's list entirely rather than shown with a
+ * "(จำหน่ายแล้ว)" tag as before.
  */
 export default async function ManageItReportPage() {
   const cookieStore = await cookies();
@@ -39,7 +41,7 @@ export default async function ManageItReportPage() {
   try {
     const snapshot = await getEquipmentDataUnredacted();
     items = snapshot.rows
-      .filter((r) => !isDeleted(r.data, snapshot.fields))
+      .filter((r) => !isDeleted(r.data, snapshot.fields) && !isDisposed(r.data, snapshot.fields))
       .map((r) => {
         const f = snapshot.fields;
         const brand = f.brand.map((h) => r.data[h]).find((v) => (v ?? "").trim())?.trim() ?? "";
@@ -59,7 +61,6 @@ export default async function ManageItReportPage() {
           department: f.department ? (r.data[f.department] ?? "").trim() : "",
           installLocation: f.installLocation ? (r.data[f.installLocation] ?? "").trim() : "",
           responsiblePerson: fullName,
-          disposed: isDisposed(r.data, f),
           snapshotHash: rowSnapshotHash(snapshot.headers, r.data),
           // A split คำนำหน้า/ชื่อ-นามสกุล sheet can't take a single free-text
           // name back (see /api/manage/it/records/[rowNumber]) — tell the

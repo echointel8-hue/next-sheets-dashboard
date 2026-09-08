@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   Check,
   CheckCircle2,
+  History,
   Loader2,
   MapPin,
   Plus,
@@ -32,7 +33,6 @@ export interface ReportEquipmentItem {
   department: string;
   installLocation: string;
   responsiblePerson: string;
-  disposed: boolean;
   /** For the optimistic-concurrency check on save-back — see
    * /api/manage/it/records/[rowNumber]. */
   snapshotHash: string;
@@ -143,12 +143,16 @@ export default function MaintenanceReportBuilder({
   const [departmentFilter, setDepartmentFilter] = useState<string[]>([]);
   const [equipmentTypeFilter, setEquipmentTypeFilter] = useState<string[]>([]);
   const [search, setSearch] = useState("");
-  // "" = ทุกปี (every task ever, newest wins — the original behavior);
-  // otherwise a พ.ศ. year string, restricting the badges below to tasks
-  // created in that year only. Lets IT staff review/report on a past
-  // annual cycle, or start a fresh-looking year with no carried-over
-  // badges, without any of this needing a code change come next year.
-  const [maintenanceYearFilter, setMaintenanceYearFilter] = useState("");
+  // Defaults to the current พ.ศ. year (computed fresh on every load, not a
+  // stored value) rather than "ทุกปี" — per the hospital's request that the
+  // maintenance status "reset" year to year: on 1 ม.ค. of a new year this
+  // default alone makes every item look untouched (no tasks yet that year),
+  // with zero carry-over from the year before and no code change needed.
+  // "" still means ทุกปี (every task ever, newest wins) — selectable from
+  // the dropdown to review the full history, same as picking any past year.
+  const [maintenanceYearFilter, setMaintenanceYearFilter] = useState(() =>
+    String(new Date().getFullYear() + 543)
+  );
   const [selectedRowNumbers, setSelectedRowNumbers] = useState<number[]>([]);
   const [formDepartment, setFormDepartment] = useState("");
   const [visitDate, setVisitDate] = useState("");
@@ -219,18 +223,26 @@ export default function MaintenanceReportBuilder({
     return [...set].sort((a, b) => Number(b) - Number(a));
   }, [taskHistory]);
 
-  // Re-derives the "กำลังบำรุงรักษาโดย ..." / "เสร็จสิ้นล่าสุดโดย ..."
-  // badge lookups from taskHistory, restricted to the selected ปี (created
-  // year) when one is picked — "ทุกปี" (maintenanceYearFilter === "") keeps
-  // the original all-time/newest-wins behavior.
-  const { inProgress, lastCompleted } = useMemo(() => {
+  // Re-derives the "กำลังบำรุงรักษาโดย ..." / "เสร็จสิ้นล่าสุดโดย ..." badge
+  // lookups, plus a plain per-equipment visit count (visitCounts — every
+  // task counts once regardless of status, since printing the report is
+  // itself the visit; see the badge below), all from taskHistory and all
+  // restricted to the selected ปี (created year) when one is picked —
+  // "ทุกปี" (maintenanceYearFilter === "") keeps the original
+  // all-time/newest-wins behavior. visitCounts is the "how many times has
+  // this been maintained" answer the hospital asked for — a running total
+  // per equipment, not yet broken down by month (that's a possible later
+  // step if the plain count isn't enough on its own).
+  const { inProgress, lastCompleted, visitCounts } = useMemo(() => {
     const inProgress: Record<number, { displayName: string; createdAt: string }> = {};
     const lastCompleted: Record<number, { displayName: string; completedAt: string }> = {};
+    const visitCounts: Record<number, number> = {};
     for (const t of taskHistory) {
       if (maintenanceYearFilter) {
         const y = new Date(t.createdAt).getFullYear() + 543;
         if (String(y) !== maintenanceYearFilter) continue;
       }
+      visitCounts[t.equipmentRowNumber] = (visitCounts[t.equipmentRowNumber] ?? 0) + 1;
       if (t.status === "in_progress") {
         const existing = inProgress[t.equipmentRowNumber];
         if (!existing || t.createdAt > existing.createdAt) {
@@ -243,7 +255,7 @@ export default function MaintenanceReportBuilder({
         }
       }
     }
-    return { inProgress, lastCompleted };
+    return { inProgress, lastCompleted, visitCounts };
   }, [taskHistory, maintenanceYearFilter]);
 
   const filteredItems = useMemo(() => {
@@ -796,7 +808,7 @@ export default function MaintenanceReportBuilder({
               </label>
             </div>
             <p className="text-xs text-zinc-400">
-              &quot;ปีที่บำรุงรักษา&quot; กรองเฉพาะป้ายสถานะกำลังดำเนินการ/เสร็จสิ้นด้านล่างให้ตรงกับปีนั้น — ไม่ซ่อนรายการครุภัณฑ์ออกจากตาราง
+              &quot;ปีที่บำรุงรักษา&quot; กรองเฉพาะป้ายสถานะและจำนวนครั้งด้านล่างให้ตรงกับปีนั้น — ไม่ซ่อนรายการครุภัณฑ์ออกจากตาราง ค่าเริ่มต้นคือปีปัจจุบันเสมอ เลือก &quot;ทุกปี&quot; เพื่อดูประวัติทั้งหมด
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -847,7 +859,6 @@ export default function MaintenanceReportBuilder({
                       <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">{it.assetNumber || "—"}</td>
                       <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">
                         {[it.equipmentType, it.brandModel].filter(Boolean).join(" — ") || "—"}
-                        {it.disposed && <span className="ml-1 text-[10px] text-zinc-400">(จำหน่ายแล้ว)</span>}
                         {inProgress[it.rowNumber] ? (
                           <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                             <Wrench size={10} strokeWidth={2} aria-hidden="true" />
@@ -862,6 +873,13 @@ export default function MaintenanceReportBuilder({
                                 ` เมื่อ ${formatThaiDate(lastCompleted[it.rowNumber].completedAt.slice(0, 10))}`}
                             </span>
                           )
+                        )}
+                        {visitCounts[it.rowNumber] > 0 && (
+                          <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                            <History size={10} strokeWidth={2} aria-hidden="true" />
+                            บำรุงรักษาแล้ว {visitCounts[it.rowNumber].toLocaleString("th-TH")} ครั้ง (
+                            {maintenanceYearFilter || "ทุกปี"})
+                          </span>
                         )}
                       </td>
                       <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300">{it.department || "—"}</td>
