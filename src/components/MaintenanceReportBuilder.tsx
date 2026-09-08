@@ -884,7 +884,7 @@ export default function MaintenanceReportBuilder({
                     <td className="border border-zinc-400 px-1 py-1 align-top">
                       <div className="grid grid-cols-2 gap-x-1 gap-y-0.5 whitespace-nowrap text-[9px]">
                         <span>☐ ปกติ</span>
-                        <span>☐ เปลี่ยนอะไหล่ ..........</span>
+                        <span>☐ เปลี่ยนอะไหล่ ................</span>
                         <span>☐ ส่งซ่อม</span>
                         <span>☐ อื่นๆ ระบุ .....................</span>
                       </div>
