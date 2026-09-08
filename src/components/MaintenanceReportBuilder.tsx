@@ -921,17 +921,21 @@ export default function MaintenanceReportBuilder({
               bottom of the page"); an odd one out spans both columns so it
               never sits alone looking like a half-filled row, whichever
               page it lands on. */}
-          <div className="mt-6 grid grid-cols-1 gap-x-8 gap-y-4 text-center text-sm sm:grid-cols-2">
+          <div className="mt-6 grid grid-cols-1 gap-x-8 gap-y-8 text-center text-sm sm:grid-cols-2">
             {selectedDepartments.map((dep, idx) => (
               <div
                 key={dep}
-                className={`flex flex-col items-center gap-1 print:break-inside-avoid ${
+                className={`flex flex-col items-center gap-1.5 print:break-inside-avoid ${
                   selectedDepartments.length % 2 === 1 && idx === selectedDepartments.length - 1
                     ? "sm:col-span-2"
                     : ""
                 }`}
               >
-                <p>ลงชื่อ ....................................................... ผู้ตรวจสอบ</p>
+                {/* pt-6 leaves blank room above the dotted line for an
+                    actual pen signature — the dots alone (no space above
+                    them) left no room to sign without touching the block
+                    above. */}
+                <p className="pt-6">ลงชื่อ ....................................................... ผู้ตรวจสอบ</p>
                 <p>(.......................................................)</p>
                 <p>ตำแหน่ง .......................................................</p>
                 <p className="font-medium">{dep}</p>
@@ -939,8 +943,8 @@ export default function MaintenanceReportBuilder({
             ))}
           </div>
 
-          <div className="mt-6 flex flex-col items-center gap-1 text-center text-sm print:break-inside-avoid">
-            <p>ลงชื่อ ....................................................... ผู้รับทราบ</p>
+          <div className="mt-8 flex flex-col items-center gap-1.5 text-center text-sm print:break-inside-avoid">
+            <p className="pt-6">ลงชื่อ ....................................................... ผู้รับทราบ</p>
             <p>({formSettings.acknowledgerName})</p>
             <p>ตำแหน่ง {formSettings.acknowledgerPosition}</p>
             <p>{formSettings.acknowledgerDepartment}</p>
