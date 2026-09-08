@@ -148,8 +148,11 @@ export default function MaintenanceReportBuilder({
   // maintenance status "reset" year to year: on 1 ม.ค. of a new year this
   // default alone makes every item look untouched (no tasks yet that year),
   // with zero carry-over from the year before and no code change needed.
-  // "" still means ทุกปี (every task ever, newest wins) — selectable from
-  // the dropdown to review the full history, same as picking any past year.
+  // "" still means ทุกปี (every task ever, newest wins) internally, but per
+  // the hospital's request that option is no longer offered in the dropdown
+  // below (only real พ.ศ. years) — this state can just never be "" in
+  // practice now. Left in place rather than ripped out since it's harmless
+  // and easy to bring back if "ดูประวัติทั้งหมด" is ever wanted again.
   const [maintenanceYearFilter, setMaintenanceYearFilter] = useState(() =>
     String(new Date().getFullYear() + 543)
   );
@@ -159,8 +162,7 @@ export default function MaintenanceReportBuilder({
   // กลุ่มงาน/ประเภทครุภัณฑ์. Classified per row from the same
   // inProgress/lastCompleted lookups (already scoped to maintenanceYearFilter),
   // so picking a status is always relative to whichever ปีที่บำรุงรักษา is
-  // selected — e.g. "ยังไม่เคยบำรุงรักษา" means "no task logged in that ปี"
-  // (or ever, under "ทุกปี"), not "never in the sheet's whole history".
+  // selected — e.g. "ยังไม่เคยบำรุงรักษา" means "no task logged in that ปี".
   const [maintenanceStatusFilter, setMaintenanceStatusFilter] = useState<"" | "in_progress" | "done" | "none">("");
   const [selectedRowNumbers, setSelectedRowNumbers] = useState<number[]>([]);
   const [formDepartment, setFormDepartment] = useState("");
@@ -801,7 +803,6 @@ export default function MaintenanceReportBuilder({
                   aria-label="กรองสถานะบำรุงรักษาตามปี"
                   className={INPUT_CLASS}
                 >
-                  <option value="">ทุกปี</option>
                   {maintenanceYearOptions.map((y) => (
                     <option key={y} value={y}>
                       {y}
@@ -835,7 +836,7 @@ export default function MaintenanceReportBuilder({
               </label>
             </div>
             <p className="text-xs text-zinc-400">
-              &quot;ปีที่บำรุงรักษา&quot; กรองป้ายสถานะและจำนวนครั้งด้านล่างให้ตรงกับปีนั้น (ค่าเริ่มต้นคือปีปัจจุบันเสมอ เลือก &quot;ทุกปี&quot; เพื่อดูประวัติทั้งหมด) — &quot;กรองสถานะ&quot; ใช้ผลจากปีเดียวกันนี้มาซ่อนรายการที่ไม่ตรงเงื่อนไขออกจากตารางด้านล่างด้วย
+              &quot;ปีที่บำรุงรักษา&quot; กรองป้ายสถานะและจำนวนครั้งด้านล่างให้ตรงกับปีนั้น (ค่าเริ่มต้นคือปีปัจจุบันเสมอ) — &quot;กรองสถานะ&quot; ใช้ผลจากปีเดียวกันนี้มาซ่อนรายการที่ไม่ตรงเงื่อนไขออกจากตารางด้านล่างด้วย
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <button
