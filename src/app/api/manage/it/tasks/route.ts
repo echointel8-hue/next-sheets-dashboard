@@ -76,7 +76,19 @@ function readItemsPayload(body: unknown): TaskItemPayload[] | null {
  * so the equipment list can show "กำลังบำรุงรักษาโดย {ชื่อ}" right away.
  * assignedTo is always the logged-in session's own username/display name —
  * never taken from the request body, same rule as maintenance-log's
- * recordedBy — so a task can't be created and attributed to someone else. */
+ * recordedBy — so a task can't be created and attributed to someone else.
+ *
+ * Skips any item that already has an in-progress task — printing the same
+ * equipment's report a second time (a second copy, a reprint after a
+ * mistake, re-selecting it alongside other items) used to always insert
+ * another "in progress" row, so the same equipment could end up with two+
+ * open tasks for the same visit, both showing up separately (and both
+ * "ยังไม่ได้บันทึกรายละเอียดการดำเนินการ" until someone updates one) in the
+ * month-strip popup on /manage/it/report. One open task per equipment is
+ * enough — printing again just means printing again, not starting a second
+ * maintenance round on top of one already in flight. Does not skip when the
+ * existing task is already "done": that one's finished, so printing again
+ * legitimately starts a new round and gets a fresh task, same as before. */
 export async function POST(request: NextRequest) {
   const { session, response } = requireItAccess(request);
   if (!session) return response;
@@ -104,14 +116,20 @@ export async function POST(request: NextRequest) {
       // fall through with the username
     }
 
+    const existingTasks = await getMaintenanceTasks();
+    const alreadyInProgress = new Set(
+      existingTasks.filter((t) => t.status === "in_progress").map((t) => t.equipmentRowNumber)
+    );
+    const itemsToCreate = items.filter((it) => !alreadyInProgress.has(it.equipmentRowNumber));
+
     const tasks = await createMaintenanceTasks(
-      items.map((it) => ({
+      itemsToCreate.map((it) => ({
         ...it,
         assignedToUsername: session.username,
         assignedToDisplayName: displayName,
       }))
     );
-    return NextResponse.json({ tasks });
+    return NextResponse.json({ tasks, skippedAlreadyInProgress: items.length - itemsToCreate.length });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });

@@ -8,7 +8,7 @@ import {
   getUsers,
   DEFAULT_REPORT_SETTINGS,
 } from "@/lib/sheets";
-import { isDeleted, isDisposed } from "@/lib/fields";
+import { isDeleted, isDisposed, TITLE_PREFIX_OPTIONS } from "@/lib/fields";
 import { rowSnapshotHash } from "@/lib/recordHash";
 import MaintenanceReportBuilder, {
   type ReportEquipmentItem,
@@ -16,6 +16,25 @@ import MaintenanceReportBuilder, {
 } from "@/components/MaintenanceReportBuilder";
 
 export const dynamic = "force-dynamic";
+
+/** Best-effort split of a combined "คำนำหน้า+ชื่อ-นามสกุล" string into its
+ * two parts, for sheets that only have the one combined column — lets the
+ * "แก้ไข ... ก่อนพิมพ์" modal offer the same คำนำหน้า dropdown either way
+ * instead of a free-text prefix. TITLE_PREFIX_OPTIONS is already ordered
+ * "นางสาว" before "นาง" (a prefix of "นางสาว" as a string), which matters
+ * here — matching "นาง" first would wrongly chop "นางสาว...” down to
+ * "นาง" + "สาว...". Falls back to no detected prefix (blank คำนำหน้า, the
+ * whole string as the name) when nothing matches, e.g. an already-blank
+ * cell or a name typed without any prefix at all. */
+function splitTitlePrefix(fullName: string): { titlePrefix: string; nameOnly: string } {
+  const trimmed = fullName.trim();
+  for (const prefix of TITLE_PREFIX_OPTIONS) {
+    if (trimmed.startsWith(prefix)) {
+      return { titlePrefix: prefix, nameOnly: trimmed.slice(prefix.length).trim() };
+    }
+  }
+  return { titlePrefix: "", nameOnly: trimmed };
+}
 
 /**
  * /manage/it/report — the printable "แบบฟอร์มการบำรุงรักษาเชิงป้องกัน..."
@@ -47,12 +66,22 @@ export default async function ManageItReportPage() {
         const brand = f.brand.map((h) => r.data[h]).find((v) => (v ?? "").trim())?.trim() ?? "";
         const model = f.model.map((h) => r.data[h]).find((v) => (v ?? "").trim())?.trim() ?? "";
         const brandModel = brand && model ? `${brand} / ${model}` : brand || model;
-        const fullName = f.fullNameHeader
-          ? (r.data[f.fullNameHeader] ?? "").trim()
-          : [f.titlePrefixHeader ? r.data[f.titlePrefixHeader] : "", f.nameHeader ? r.data[f.nameHeader] : ""]
-              .map((s) => (s ?? "").trim())
-              .filter(Boolean)
-              .join(" ");
+        // Either shape (one combined column, or split
+        // คำนำหน้า/ชื่อ-นามสกุล columns) ends up as the same titlePrefix +
+        // nameOnly pair here, so the "แก้ไข ... ก่อนพิมพ์" modal can offer
+        // one consistent คำนำหน้า dropdown + ชื่อ-นามสกุล box regardless of
+        // which shape this particular sheet uses — see
+        // /api/manage/it/records/[rowNumber] for how each shape gets saved
+        // back on its own side.
+        let titlePrefix: string;
+        let nameOnly: string;
+        if (f.fullNameHeader) {
+          ({ titlePrefix, nameOnly } = splitTitlePrefix(r.data[f.fullNameHeader] ?? ""));
+        } else {
+          titlePrefix = f.titlePrefixHeader ? (r.data[f.titlePrefixHeader] ?? "").trim() : "";
+          nameOnly = f.nameHeader ? (r.data[f.nameHeader] ?? "").trim() : "";
+        }
+        const fullName = [titlePrefix, nameOnly].filter(Boolean).join(" ");
         return {
           rowNumber: r.rowNumber,
           assetNumber: f.assetNumber ? (r.data[f.assetNumber] ?? "").trim() : "",
@@ -61,12 +90,14 @@ export default async function ManageItReportPage() {
           department: f.department ? (r.data[f.department] ?? "").trim() : "",
           installLocation: f.installLocation ? (r.data[f.installLocation] ?? "").trim() : "",
           responsiblePerson: fullName,
+          titlePrefix,
+          nameOnly,
           snapshotHash: rowSnapshotHash(snapshot.headers, r.data),
-          // A split คำนำหน้า/ชื่อ-นามสกุล sheet can't take a single free-text
-          // name back (see /api/manage/it/records/[rowNumber]) — tell the
-          // client up front so it can hide that save option instead of
-          // letting every attempt fail.
-          canSaveResponsiblePerson: Boolean(f.fullNameHeader),
+          // Now savable either way: a combined column gets
+          // "titlePrefix nameOnly" written back as one string, a split pair
+          // gets each part written to its own column — see
+          // /api/manage/it/records/[rowNumber].
+          canSaveResponsiblePerson: Boolean(f.fullNameHeader) || Boolean(f.titlePrefixHeader && f.nameHeader),
         };
       });
   } catch (err) {

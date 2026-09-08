@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, canAccessItDashboard, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog, getEquipmentDataUnredacted, updateEquipmentRow } from "@/lib/sheets";
-import { isDeleted } from "@/lib/fields";
+import { isDeleted, TITLE_PREFIX_OPTIONS } from "@/lib/fields";
 import { rowSnapshotHash } from "@/lib/recordHash";
 
 export const dynamic = "force-dynamic";
 
 interface ItRecordPatchPayload {
   installLocation?: string;
-  responsiblePerson?: string;
+  // Sent together as one pair (never independently) — see the
+  // responsibleTitlePrefix handling below for why: whichever sheet shape
+  // this row uses, writing the name back needs both parts at once.
+  responsibleTitlePrefix?: string;
+  responsibleName?: string;
   expectedSnapshotHash?: string;
 }
 
@@ -20,9 +24,14 @@ function readPayload(body: unknown): ItRecordPatchPayload | null {
     if (typeof b.installLocation !== "string") return null;
     out.installLocation = b.installLocation;
   }
-  if (b.responsiblePerson !== undefined) {
-    if (typeof b.responsiblePerson !== "string") return null;
-    out.responsiblePerson = b.responsiblePerson;
+  // The client always sends both halves together when the name changed (see
+  // MaintenanceReportBuilder's saveRow) — require both here too rather than
+  // guessing what an isolated half would mean.
+  if (b.responsibleTitlePrefix !== undefined || b.responsibleName !== undefined) {
+    if (typeof b.responsibleTitlePrefix !== "string" || typeof b.responsibleName !== "string") return null;
+    if (b.responsibleTitlePrefix && !TITLE_PREFIX_OPTIONS.includes(b.responsibleTitlePrefix)) return null;
+    out.responsibleTitlePrefix = b.responsibleTitlePrefix;
+    out.responsibleName = b.responsibleName;
   }
   if (b.expectedSnapshotHash !== undefined) {
     if (typeof b.expectedSnapshotHash !== "string") return null;
@@ -30,7 +39,7 @@ function readPayload(body: unknown): ItRecordPatchPayload | null {
   }
   // Reject an empty patch outright rather than silently no-op-ing — almost
   // certainly a client bug if it ever happens.
-  if (out.installLocation === undefined && out.responsiblePerson === undefined) return null;
+  if (out.installLocation === undefined && out.responsibleName === undefined) return null;
   return out;
 }
 
@@ -116,26 +125,36 @@ export async function PATCH(
       if (oldValue !== newValue) changes.push({ header, oldValue, newValue });
     }
 
-    if (payload.responsiblePerson !== undefined) {
+    if (payload.responsibleName !== undefined) {
+      const titlePrefix = (payload.responsibleTitlePrefix ?? "").trim();
+      const name = payload.responsibleName.trim();
       // Some sheets split ชื่อ-สกุล into separate คำนำหน้า / ชื่อ-นามสกุล
       // columns instead of one combined question (see fields.ts
-      // resolveFields) — a single free-text name can't be split back into
-      // those two cells reliably, so saving this field back is only
-      // supported when the sheet uses one combined name column.
-      if (!snapshot.fields.fullNameHeader) {
+      // resolveFields) — write to whichever shape this sheet actually has.
+      // A sheet with neither shape at all (shouldn't normally happen; see
+      // canSaveResponsiblePerson on the report page) has nowhere to save
+      // this, so it's rejected rather than silently dropped.
+      if (snapshot.fields.fullNameHeader) {
+        const header = snapshot.fields.fullNameHeader;
+        const oldValue = record.data[header] ?? "";
+        const newValue = [titlePrefix, name].filter(Boolean).join(" ");
+        nextValues[header] = newValue;
+        if (oldValue !== newValue) changes.push({ header, oldValue, newValue });
+      } else if (snapshot.fields.titlePrefixHeader && snapshot.fields.nameHeader) {
+        const prefixHeader = snapshot.fields.titlePrefixHeader;
+        const nameHeader = snapshot.fields.nameHeader;
+        const oldPrefix = record.data[prefixHeader] ?? "";
+        const oldName = record.data[nameHeader] ?? "";
+        nextValues[prefixHeader] = titlePrefix;
+        nextValues[nameHeader] = name;
+        if (oldPrefix !== titlePrefix) changes.push({ header: prefixHeader, oldValue: oldPrefix, newValue: titlePrefix });
+        if (oldName !== name) changes.push({ header: nameHeader, oldValue: oldName, newValue: name });
+      } else {
         return NextResponse.json(
-          {
-            error:
-              "ชีตนี้แยกคอลัมน์คำนำหน้า/ชื่อ-นามสกุลออกจากกัน ระบบบันทึกชื่อผู้รับผิดชอบกลับเป็นข้อความเดียวไม่ได้ — แก้ไขได้เฉพาะตอนพิมพ์รายงานนี้เท่านั้น",
-          },
+          { error: "ชีตนี้ไม่มีคอลัมน์ชื่อผู้รับผิดชอบครุภัณฑ์ — บันทึกไม่ได้" },
           { status: 400 }
         );
       }
-      const header = snapshot.fields.fullNameHeader;
-      const oldValue = record.data[header] ?? "";
-      const newValue = payload.responsiblePerson.trim();
-      nextValues[header] = newValue;
-      if (oldValue !== newValue) changes.push({ header, oldValue, newValue });
     }
 
     if (changes.length === 0) {
