@@ -142,7 +142,7 @@ export default function MaintenanceReportBuilder({
   // which this page always does, to keep the printed A4 size/margins
   // consistent regardless of a printer's own defaults. So orientation has
   // to be a control of our own instead, feeding the same @page rule below.
-  const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
+  const [orientation, setOrientation] = useState<"portrait" | "landscape">("landscape");
 
   // Form header / signature text — editable right here (pre-filled from the
   // saved ReportSettings) so a one-off change (a substitute signee, say)
@@ -479,10 +479,6 @@ export default function MaintenanceReportBuilder({
                 </div>
 
                 <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
-                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                    ข้อความหัวแบบฟอร์ม / ผู้รับทราบ — แก้ไขที่นี่จะใช้กับรายงานฉบับนี้ทันที กด &quot;บันทึกเป็นค่าเริ่มต้น&quot;
-                    ด้านล่างเพิ่ม ถ้าต้องการให้ใช้ในรายงานครั้งถัดไปด้วย
-                  </p>
                   {settingsError && (
                     <div
                       role="alert"
@@ -491,28 +487,33 @@ export default function MaintenanceReportBuilder({
                       {settingsError}
                     </div>
                   )}
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {SETTINGS_FIELDS.map(({ key, label }) => (
-                      <label key={key} className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-                        {label}
-                        <input
-                          type="text"
-                          value={formSettings[key]}
-                          onChange={(e) => {
-                            setFormSettings((prev) => ({ ...prev, [key]: e.target.value }));
-                            setSettingsSaved(false);
-                          }}
-                          className={INPUT_CLASS}
-                        />
-                      </label>
-                    ))}
+
+                  {/* Each setting group gets its own bordered card — kept
+                      visually distinct instead of one long form, since
+                      these three are edited on different occasions (rarely
+                      for the header text, often for the checklist). */}
+                  <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+                    <p className="text-sm font-bold text-zinc-800 dark:text-zinc-100">ข้อความหัวแบบฟอร์ม</p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {SETTINGS_FIELDS.map(({ key, label }) => (
+                        <label key={key} className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                          {label}
+                          <input
+                            type="text"
+                            value={formSettings[key]}
+                            onChange={(e) => {
+                              setFormSettings((prev) => ({ ...prev, [key]: e.target.value }));
+                              setSettingsSaved(false);
+                            }}
+                            className={INPUT_CLASS}
+                          />
+                        </label>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="mt-1 flex flex-col gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-                    <span className="text-sm text-zinc-500 dark:text-zinc-400">
-                      รายการในช่อง &quot;การดำเนินการ&quot; ของตาราง (แต่ละรายการแสดงเป็นช่องติ๊กในรายงานที่พิมพ์ —
-                      เพิ่ม/แก้ไข/ลบได้)
-                    </span>
+                  <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+                    <p className="text-sm font-bold text-zinc-800 dark:text-zinc-100">รายการ &quot;การดำเนินการ&quot;</p>
                     <div className="flex flex-col gap-2">
                       {formSettings.actionOptions.map((opt, idx) => (
                         <div key={idx} className="flex items-center gap-2">
@@ -546,14 +547,14 @@ export default function MaintenanceReportBuilder({
                     </button>
                   </div>
 
-                  <div className="mt-1 flex flex-col gap-1.5 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-                    <span className="text-sm text-zinc-500 dark:text-zinc-400">
-                      แนวกระดาษที่พิมพ์ (ตารางกว้างหลายคอลัมน์ — เลือกแนวนอนถ้าพอดีกว่า)
-                    </span>
+                  <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+                    <p className="text-sm font-bold text-zinc-800 dark:text-zinc-100">แนวกระดาษที่พิมพ์</p>
                     {/* Chrome hides its own print-dialog "Layout" control
                         once the page's @page CSS sets a size, so this is
                         what actually switches orientation — see the
-                        `orientation` state comment above. */}
+                        `orientation` state comment above. Defaults to
+                        landscape since the table is wide enough that
+                        that's the right choice almost every time. */}
                     <div
                       role="group"
                       aria-label="แนวกระดาษ"
