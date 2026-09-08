@@ -8,19 +8,14 @@ import {
   ArrowLeft,
   Building2,
   ClipboardCheck,
-  ClipboardList,
   Cpu,
   FileText,
   Filter,
-  History,
   Loader2,
   LogOut,
   Package,
-  Plus,
   Printer,
   Save,
-  Trash2,
-  Wrench,
   X,
 } from "lucide-react";
 import {
@@ -31,11 +26,8 @@ import {
   getAssetNumber,
   getBrandModel,
   getFullName,
-  joinSoftwareEntries,
-  splitSoftwareEntries,
   type EquipmentRow,
   type FieldMap,
-  type SoftwareEntry,
 } from "@/lib/fields";
 import type { SpecStandards } from "@/lib/sheets";
 import { getLatestMaintenanceLogByAsset, type MaintenanceLogEntry } from "@/lib/maintenanceLog";
@@ -99,22 +91,13 @@ export default function ITDashboard({
   const [equipmentTypeFilter, setEquipmentTypeFilter] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [showSpecSettings, setShowSpecSettings] = useState(false);
-  const [maintenanceLog, setMaintenanceLog] = useState<MaintenanceLogEntry[]>(initialMaintenanceLog);
+  const [maintenanceLog] = useState<MaintenanceLogEntry[]>(initialMaintenanceLog);
   const [specStandards, setSpecStandards] = useState<SpecStandards>(initialSpecStandards ?? DEFAULT_SPEC_STANDARDS);
-  const [statusModalAsset, setStatusModalAsset] = useState<{ assetNumber: string; label: string } | null>(null);
 
   const latestMaintenanceByAsset = useMemo(
     () => getLatestMaintenanceLogByAsset(maintenanceLog),
     [maintenanceLog]
   );
-
-  /** Merges a fresh batch of entries for one asset (the API's response
-   * after a successful POST already returns every entry for that asset, not
-   * just the new one) into the full log — replace-then-concat rather than
-   * append, so a retried/duplicate save can never double-count. */
-  function mergeMaintenanceEntries(assetNumber: string, freshEntriesForAsset: MaintenanceLogEntry[]) {
-    setMaintenanceLog((prev) => [...prev.filter((e) => e.assetNumber !== assetNumber), ...freshEntriesForAsset]);
-  }
 
   const rows = useMemo(() => (!isError(data) ? data.rows : []), [data]);
   const headers = useMemo(() => (!isError(data) ? data.headers : []), [data]);
@@ -402,7 +385,6 @@ export default function ITDashboard({
               latestMaintenanceByAsset={latestMaintenanceByAsset}
               specStandards={specStandards}
               showSpecStatus
-              onUpdateStatus={(assetNumber, label) => setStatusModalAsset({ assetNumber, label })}
             />
 
             <SpecTable
@@ -415,23 +397,10 @@ export default function ITDashboard({
               latestMaintenanceByAsset={latestMaintenanceByAsset}
               specStandards={specStandards}
               showSpecStatus={false}
-              onUpdateStatus={(assetNumber, label) => setStatusModalAsset({ assetNumber, label })}
             />
           </>
         )}
       </div>
-
-      {statusModalAsset && (
-        <MaintenanceStatusModal
-          assetNumber={statusModalAsset.assetNumber}
-          label={statusModalAsset.label}
-          entries={maintenanceLog
-            .filter((e) => e.assetNumber === statusModalAsset.assetNumber)
-            .sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1))}
-          onClose={() => setStatusModalAsset(null)}
-          onSaved={(fresh) => mergeMaintenanceEntries(statusModalAsset.assetNumber, fresh)}
-        />
-      )}
     </main>
   );
 }
@@ -523,7 +492,6 @@ function SpecTable({
   latestMaintenanceByAsset,
   specStandards,
   showSpecStatus,
-  onUpdateStatus,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -534,9 +502,8 @@ function SpecTable({
   latestMaintenanceByAsset: Map<string, MaintenanceLogEntry>;
   specStandards: SpecStandards;
   showSpecStatus: boolean;
-  onUpdateStatus: (assetNumber: string, label: string) => void;
 }) {
-  const columnCount = 6 + specColumns.length + 2 + (showSpecStatus ? 1 : 0) + 1;
+  const columnCount = 6 + specColumns.length + 2 + (showSpecStatus ? 1 : 0);
   return (
     <div className={CARD}>
       <div className="flex items-center gap-2 border-b border-emerald-900/10 px-4 py-3 text-sm font-semibold text-zinc-800 dark:border-emerald-400/10 dark:text-zinc-100">
@@ -564,9 +531,6 @@ function SpecTable({
               <th scope="col" className="px-2 py-2 font-medium sm:px-3">ซอฟต์แวร์ล่าสุด</th>
               <th scope="col" className="px-2 py-2 font-medium sm:px-3">เป่าฝุ่นล่าสุด</th>
               {showSpecStatus && <th scope="col" className="px-2 py-2 font-medium sm:px-3">สถานะสเปก</th>}
-              <th scope="col" className="px-2 py-2 font-medium sm:px-3">
-                <span className="sr-only">อัปเดตสถานะ</span>
-              </th>
             </tr>
           </thead>
           <tbody>
@@ -634,18 +598,6 @@ function SpecTable({
                       )}
                     </td>
                   )}
-                  <td className="px-2 py-2 align-top sm:px-3">
-                    <button
-                      type="button"
-                      disabled={!assetNumber}
-                      onClick={() => onUpdateStatus(assetNumber, brandModel || assetNumber)}
-                      title={assetNumber ? "อัปเดตสถานะการบำรุงรักษา" : "ไม่มีเลขครุภัณฑ์ — อัปเดตสถานะไม่ได้"}
-                      className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                    >
-                      <Wrench size={12} strokeWidth={2} aria-hidden="true" />
-                      อัปเดตสถานะ
-                    </button>
-                  </td>
                 </tr>
               );
             })}
@@ -736,7 +688,6 @@ function SpecStandardsPanel({
       </div>
       <p className="text-xs text-zinc-500 dark:text-zinc-400">
         ใช้เปรียบเทียบกับข้อมูลสเปก RAM/หน่วยจัดเก็บที่บันทึกไว้ในระบบของแต่ละเครื่อง — เป็นการประเมินแบบอัตโนมัติ
-        คู่ขนานไปกับการประเมินด้วยตนเองต่อครั้งที่ปุ่ม &quot;อัปเดตสถานะ&quot; ของแต่ละเครื่อง
       </p>
       {error && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
@@ -800,255 +751,3 @@ function SpecStandardsPanel({
   );
 }
 
-function todayIsoDate(): string {
-  const now = new Date();
-  const offset = now.getTimezoneOffset();
-  return new Date(now.getTime() - offset * 60000).toISOString().slice(0, 10);
-}
-
-/** Per-machine "อัปเดตสถานะ" modal — shows the full logged history for one
- * เลขครุภัณฑ์ (newest first) plus a form to append a new visit: a dynamic
- * list of software/version rows (see splitSoftwareEntries/joinSoftwareEntries
- * in fields.ts — deliberately free-form, not fixed HOSxP-3/4 fields), a
- * cleaning/maintenance date (defaults to today), IT's own manual spec
- * judgment for this visit, and a free-text note. Every visit is appended as
- * a new row (see lib/sheets.ts MaintenanceLog section) — nothing here ever
- * overwrites an earlier entry, so the full history stays intact. */
-function MaintenanceStatusModal({
-  assetNumber,
-  label,
-  entries,
-  onClose,
-  onSaved,
-}: {
-  assetNumber: string;
-  label: string;
-  /** This asset's history, newest first. */
-  entries: MaintenanceLogEntry[];
-  onClose: () => void;
-  onSaved: (freshEntriesForAsset: MaintenanceLogEntry[]) => void;
-}) {
-  // Pre-fill from the latest logged visit's software list (if any) rather
-  // than always starting blank — the common case here is "bump one existing
-  // entry's version" (e.g. HOSxP 3 -> 3.2.6), not retyping the whole list
-  // from scratch every visit.
-  const [softwareRows, setSoftwareRows] = useState<SoftwareEntry[]>(() => {
-    const latest = entries[0]?.software ? splitSoftwareEntries(entries[0].software) : [];
-    return latest.length > 0 ? latest : [{ name: "", version: "" }];
-  });
-  const [maintenanceDate, setMaintenanceDate] = useState(todayIsoDate);
-  const [manualSpecStatus, setManualSpecStatus] = useState<MaintenanceLogEntry["manualSpecStatus"]>("");
-  const [notes, setNotes] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  function updateSoftwareRow(index: number, patch: Partial<SoftwareEntry>) {
-    setSoftwareRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
-  }
-
-  function addSoftwareRow() {
-    setSoftwareRows((prev) => [...prev, { name: "", version: "" }]);
-  }
-
-  function removeSoftwareRow(index: number) {
-    setSoftwareRows((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
-  }
-
-  async function save() {
-    setError(null);
-    const software = joinSoftwareEntries(softwareRows);
-    if (!software && !maintenanceDate && !manualSpecStatus && !notes.trim()) {
-      setError("กรุณากรอกข้อมูลอย่างน้อยหนึ่งอย่างก่อนบันทึก");
-      return;
-    }
-    setSaving(true);
-    try {
-      const res = await fetch("/api/manage/it/maintenance-log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assetNumber, software, maintenanceDate, manualSpecStatus, notes: notes.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error ?? "บันทึกไม่สำเร็จ");
-        return;
-      }
-      onSaved(json.entries as MaintenanceLogEntry[]);
-      setSoftwareRows([{ name: "", version: "" }]);
-      setManualSpecStatus("");
-      setNotes("");
-    } catch {
-      setError("บันทึกไม่สำเร็จ กรุณาลองใหม่");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-      role="presentation"
-    >
-      <div
-        className={`${CARD} flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-3 border-b border-emerald-900/10 px-4 py-3 dark:border-emerald-400/10">
-          <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-            <Wrench size={15} strokeWidth={2} aria-hidden="true" />
-            อัปเดตสถานะการบำรุงรักษา — {label} ({assetNumber})
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
-            aria-label="ปิด"
-          >
-            <X size={16} strokeWidth={2} aria-hidden="true" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400">
-              <Plus size={13} strokeWidth={2} aria-hidden="true" />
-              บันทึกการเข้าดำเนินการครั้งใหม่
-            </div>
-
-            {error && (
-              <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
-                {error}
-              </div>
-            )}
-
-            <div className="flex flex-col gap-2">
-              <span className="text-sm text-zinc-500 dark:text-zinc-400">ซอฟต์แวร์ที่ติดตั้ง/อัปเดต</span>
-              {softwareRows.map((row, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={row.name}
-                    onChange={(e) => updateSoftwareRow(i, { name: e.target.value })}
-                    placeholder="ชื่อซอฟต์แวร์ เช่น HOSxP 3"
-                    className="h-10 flex-1 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                  />
-                  <input
-                    type="text"
-                    value={row.version}
-                    onChange={(e) => updateSoftwareRow(i, { version: e.target.value })}
-                    placeholder="เวอร์ชัน เช่น 3.2.6"
-                    className="h-10 w-32 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeSoftwareRow(i)}
-                    disabled={softwareRows.length <= 1}
-                    aria-label="ลบแถวนี้"
-                    className="rounded-full p-2 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-zinc-800"
-                  >
-                    <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={addSoftwareRow}
-                className="inline-flex w-fit items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                <Plus size={13} strokeWidth={2} aria-hidden="true" />
-                เพิ่มซอฟต์แวร์
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-                วันที่ดำเนินการ / เป่าฝุ่น
-                <input
-                  type="date"
-                  value={maintenanceDate}
-                  onChange={(e) => setMaintenanceDate(e.target.value)}
-                  className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-                ประเมินสเปกด้วยตนเอง (ครั้งนี้)
-                <select
-                  value={manualSpecStatus}
-                  onChange={(e) => setManualSpecStatus(e.target.value as MaintenanceLogEntry["manualSpecStatus"])}
-                  className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                >
-                  <option value="">— ไม่ประเมิน —</option>
-                  <option value="ปกติ">ปกติ</option>
-                  <option value="ต่ำกว่ามาตรฐาน">ต่ำกว่ามาตรฐาน</option>
-                </select>
-              </label>
-            </div>
-
-            <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-              หมายเหตุ
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={2}
-                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-              />
-            </label>
-
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={save}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-60"
-              >
-                {saving ? (
-                  <Loader2 size={15} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-                ) : (
-                  <Save size={15} strokeWidth={2} aria-hidden="true" />
-                )}
-                บันทึก
-              </button>
-            </div>
-
-            <div className="mt-2 flex items-center gap-1.5 border-t border-zinc-100 pt-3 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:border-zinc-800">
-              <History size={13} strokeWidth={2} aria-hidden="true" />
-              ประวัติการดำเนินการ ({entries.length.toLocaleString("th-TH")} รายการ)
-            </div>
-            {entries.length === 0 ? (
-              <p className="flex items-center gap-1.5 py-4 text-sm text-zinc-400">
-                <ClipboardList size={15} strokeWidth={2} aria-hidden="true" />
-                ยังไม่มีประวัติการบำรุงรักษาสำหรับเครื่องนี้
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {entries.map((entry, i) => (
-                  <li
-                    key={`${entry.timestamp}-${i}`}
-                    className="rounded-lg border border-zinc-100 p-3 text-sm dark:border-zinc-800"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
-                      <span>{entry.maintenanceDate || "(ไม่ระบุวันที่)"}</span>
-                      <span>โดย {entry.recordedBy || "—"}</span>
-                    </div>
-                    {entry.software && (
-                      <p className="mt-1 text-zinc-800 dark:text-zinc-100">{entry.software}</p>
-                    )}
-                    {entry.manualSpecStatus && (
-                      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                        ประเมินสเปก: {entry.manualSpecStatus}
-                      </p>
-                    )}
-                    {entry.notes && (
-                      <p className="mt-1 whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">{entry.notes}</p>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
