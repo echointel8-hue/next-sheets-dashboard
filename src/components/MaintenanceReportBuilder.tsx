@@ -831,7 +831,7 @@ export default function MaintenanceReportBuilder({
             {formDepartment && <p className="mt-1 text-sm">กลุ่มงาน: {formDepartment}</p>}
           </div>
 
-          <div className="mt-5">
+          <div className="mt-4">
             <p className="mb-2 text-sm font-semibold">ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา</p>
             <table className="w-full border-collapse text-[10px] leading-snug">
               <colgroup>
@@ -902,7 +902,7 @@ export default function MaintenanceReportBuilder({
             </table>
           </div>
 
-          <div className="mt-6 text-sm">
+          <div className="mt-4 text-sm print:break-inside-avoid">
             <div className="flex flex-wrap gap-x-8 gap-y-2">
               <span>วันที่ดำเนินการ {displayDate || "............................................."}</span>
               <span>ช่วงเวลา {timeRangeLabel || "....................."}</span>
@@ -915,10 +915,22 @@ export default function MaintenanceReportBuilder({
               cover several departments' PM visits in a single day. Kept in
               its own row above ผู้รับทราบ (rather than side by side, as
               before) so it can grow past two departments and the
-              ผู้รับทราบ block simply ends up further down the page. */}
-          <div className="mt-8 grid grid-cols-1 gap-x-8 gap-y-6 text-center text-sm sm:grid-cols-2">
-            {selectedDepartments.map((dep) => (
-              <div key={dep} className="flex flex-col items-center gap-1">
+              ผู้รับทราบ block simply ends up further down the page.
+              print:break-inside-avoid on each block stops a page break from
+              ever landing mid-signature (no more "signature falls off the
+              bottom of the page"); an odd one out spans both columns so it
+              never sits alone looking like a half-filled row, whichever
+              page it lands on. */}
+          <div className="mt-6 grid grid-cols-1 gap-x-8 gap-y-4 text-center text-sm sm:grid-cols-2">
+            {selectedDepartments.map((dep, idx) => (
+              <div
+                key={dep}
+                className={`flex flex-col items-center gap-1 print:break-inside-avoid ${
+                  selectedDepartments.length % 2 === 1 && idx === selectedDepartments.length - 1
+                    ? "sm:col-span-2"
+                    : ""
+                }`}
+              >
                 <p>ลงชื่อ ....................................................... ผู้ตรวจสอบ</p>
                 <p>(.......................................................)</p>
                 <p>ตำแหน่ง .......................................................</p>
@@ -927,7 +939,7 @@ export default function MaintenanceReportBuilder({
             ))}
           </div>
 
-          <div className="mt-8 flex flex-col items-center gap-1 text-center text-sm">
+          <div className="mt-6 flex flex-col items-center gap-1 text-center text-sm print:break-inside-avoid">
             <p>ลงชื่อ ....................................................... ผู้รับทราบ</p>
             <p>({formSettings.acknowledgerName})</p>
             <p>ตำแหน่ง {formSettings.acknowledgerPosition}</p>
