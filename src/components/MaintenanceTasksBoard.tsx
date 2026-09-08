@@ -7,6 +7,7 @@ import {
   Check,
   CheckCircle2,
   ClipboardList,
+  FileText,
   Loader2,
   Save,
   Trash2,
@@ -218,6 +219,13 @@ export default function MaintenanceTasksBoard({
             >
               <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
               กลับไปแดชบอร์ด IT
+            </Link>
+            <Link
+              href="/manage/it/report"
+              className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)]"
+            >
+              <FileText size={16} strokeWidth={2} aria-hidden="true" />
+              พิมพ์แบบฟอร์ม
             </Link>
           </div>
         </header>
