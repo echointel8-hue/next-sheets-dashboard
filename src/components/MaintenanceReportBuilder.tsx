@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type MouseEvent } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -284,38 +284,16 @@ export default function MaintenanceReportBuilder({
     return { inProgress, lastCompleted, visitCounts, monthlyTasks };
   }, [taskHistory, maintenanceYearFilter]);
 
-  // Which month-strip tick currently shows its popup — a single shared piece
-  // of state (not one per cell) since only one can be open at a time. `rect`
-  // is the tick's own getBoundingClientRect() captured at hover/click time,
-  // used to position the popup with position:fixed so it always escapes the
-  // picker table's own scroll clipping (max-h-80 overflow-y-auto above)
-  // instead of getting cut off inside that box. `pinned` distinguishes a
-  // hover preview (closes on mouse-leave) from a click (stays open until the
-  // same tick is clicked again or the backdrop is clicked).
-  const [monthPopup, setMonthPopup] = useState<{
-    rowNumber: number;
-    month: number;
-    rect: DOMRect;
-    pinned: boolean;
-  } | null>(null);
-
-  function handleMonthHover(e: MouseEvent<HTMLElement>, rowNumber: number, month: number) {
-    setMonthPopup((prev) =>
-      prev?.pinned ? prev : { rowNumber, month, rect: e.currentTarget.getBoundingClientRect(), pinned: false }
-    );
-  }
-
-  function handleMonthLeave() {
-    setMonthPopup((prev) => (prev?.pinned ? prev : null));
-  }
-
-  function handleMonthClick(e: MouseEvent<HTMLElement>, rowNumber: number, month: number) {
-    setMonthPopup((prev) =>
-      prev?.pinned && prev.rowNumber === rowNumber && prev.month === month
-        ? null
-        : { rowNumber, month, rect: e.currentTarget.getBoundingClientRect(), pinned: true }
-    );
-  }
+  // Which month-strip tick's task list is open, shown as a small centered
+  // modal (see the JSX below) — click-only, no hover tracking. An earlier
+  // version tried a hover-following tooltip positioned with
+  // getBoundingClientRect()/position:fixed, but that's exactly what crashed
+  // the page: the tooltip could render close enough to the cursor to steal
+  // the mouseleave/mouseenter pair from the tick underneath it, causing an
+  // open→close→open loop that pegged the tab. A plain click-to-open modal
+  // (same pattern as showSettings/showAdjustModal above) has no hover state
+  // to fight over, so that failure mode can't happen here.
+  const [monthPopup, setMonthPopup] = useState<{ rowNumber: number; month: number } | null>(null);
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -958,10 +936,9 @@ export default function MaintenanceReportBuilder({
                               <button
                                 key={monthIdx}
                                 type="button"
-                                onMouseEnter={(e) => handleMonthHover(e, it.rowNumber, monthIdx)}
-                                onMouseLeave={handleMonthLeave}
-                                onClick={(e) => handleMonthClick(e, it.rowNumber, monthIdx)}
-                                aria-label={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง`}
+                                onClick={() => setMonthPopup({ rowNumber: it.rowNumber, month: monthIdx })}
+                                title={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง — คลิกเพื่อดูรายละเอียด`}
+                                aria-label={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง — คลิกเพื่อดูรายละเอียด`}
                                 className={`h-4 w-[5px] shrink-0 rounded-sm transition-colors ${
                                   monthTasks.length === 0
                                     ? "bg-zinc-100 dark:bg-zinc-800"
@@ -1016,66 +993,71 @@ export default function MaintenanceReportBuilder({
             </div>
           </div>
 
-          {/* Month-strip popup — the list of maintenance tasks for whichever
-              tick is currently hovered/clicked (see monthPopup state above).
-              position:fixed against the tick's own captured rect so it
-              always escapes the picker table's max-h-80 overflow-y-auto
-              clipping instead of getting cut off inside that scroll box. A
-              pinned (clicked) popup also gets a full-screen invisible
-              backdrop to close on an outside click, same pattern as the
-              settings/adjust modals above.
-
-              pointer-events-none on the popup panel itself is load-bearing,
-              not decorative: without it, a popup that renders close to the
-              cursor (right below a 16px-tall tick) can end up under the
-              mouse, which fires mouseleave on the tick underneath →
-              onMouseLeave clears monthPopup → the popup disappears → the
-              tick is hovered again → onMouseEnter sets it right back → an
-              infinite hover/re-render loop that pegs the tab and crashes it
-              (reproduced: the whole page goes to Chrome's "This page
-              couldn't load" screen the instant a tick is touched). Making
-              the panel transparent to the mouse means it can never steal
-              the hover target out from under the tick that opened it, so
-              the loop can't start; the tick's own onMouseLeave is still
-              what closes it. Clicks still reach the full-screen backdrop
-              behind it (z-40 vs the panel's z-50) since there's nothing
-              inside the panel to click anyway. */}
+          {/* Month-strip popup — a small centered modal listing the
+              maintenance tasks for whichever tick was clicked (see
+              monthPopup state above). Click-only, same
+              backdrop-click-to-close pattern as showSettings/showAdjustModal
+              below — deliberately NOT a hover-following tooltip (an earlier
+              version was, and a tooltip rendered close enough to the cursor
+              ended up stealing the mouseleave/mouseenter pair from the tick
+              underneath it, looping open→close→open fast enough to crash
+              the tab). A modal has no hover state to fight over. */}
           {monthPopup && (
-            <>
-              {monthPopup.pinned && (
-                <div className="fixed inset-0 z-40" onClick={() => setMonthPopup(null)} role="presentation" />
-              )}
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+              onClick={() => setMonthPopup(null)}
+              role="presentation"
+            >
               <div
-                className="pointer-events-none fixed z-50 w-64 max-w-[calc(100vw-1rem)] rounded-xl border border-zinc-200 bg-white p-3 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
-                style={{
-                  top: monthPopup.rect.bottom + 6,
-                  left: Math.min(Math.max(8, monthPopup.rect.left - 100), window.innerWidth - 8 - 256),
-                }}
+                className={`${CARD} flex max-h-[70vh] w-full max-w-sm flex-col overflow-hidden`}
+                onClick={(e) => e.stopPropagation()}
               >
-                <p className="mb-1.5 font-semibold text-zinc-800 dark:text-zinc-100">
-                  {THAI_MONTHS_FULL[monthPopup.month]} {maintenanceYearFilter || String(new Date().getFullYear() + 543)}
-                </p>
-                {(monthlyTasks[monthPopup.rowNumber]?.[monthPopup.month] ?? []).length === 0 ? (
-                  <p className="text-zinc-400">ไม่มีการบำรุงรักษาในเดือนนี้</p>
-                ) : (
-                  <ul className="flex flex-col gap-1.5">
-                    {(monthlyTasks[monthPopup.rowNumber]?.[monthPopup.month] ?? []).map((t, i) => (
-                      <li key={i} className="flex items-start gap-1.5">
-                        {t.status === "in_progress" ? (
-                          <Wrench size={11} strokeWidth={2} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
-                        ) : (
-                          <CheckCircle2 size={11} strokeWidth={2} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
-                        )}
-                        <span className="text-zinc-700 dark:text-zinc-300">
-                          {formatThaiDate((t.status === "in_progress" ? t.createdAt : t.completedAt || t.createdAt).slice(0, 10))} — {t.displayName}
-                          {t.status === "in_progress" && " (กำลังดำเนินการ)"}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <div className="flex items-center justify-between gap-3 border-b border-emerald-900/10 px-4 py-3 dark:border-emerald-400/10">
+                  <div>
+                    <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                      {THAI_MONTHS_FULL[monthPopup.month]} {maintenanceYearFilter || String(new Date().getFullYear() + 543)}
+                    </p>
+                    {(() => {
+                      const item = items.find((it) => it.rowNumber === monthPopup.rowNumber);
+                      return item ? (
+                        <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                          {[item.equipmentType, item.assetNumber].filter(Boolean).join(" · ") || "—"}
+                        </p>
+                      ) : null;
+                    })()}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMonthPopup(null)}
+                    className="rounded-full p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+                    aria-label="ปิด"
+                  >
+                    <X size={16} strokeWidth={2} aria-hidden="true" />
+                  </button>
+                </div>
+                <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-4 text-sm">
+                  {(monthlyTasks[monthPopup.rowNumber]?.[monthPopup.month] ?? []).length === 0 ? (
+                    <p className="text-zinc-400">ไม่มีการบำรุงรักษาในเดือนนี้</p>
+                  ) : (
+                    <ul className="flex flex-col gap-2">
+                      {(monthlyTasks[monthPopup.rowNumber]?.[monthPopup.month] ?? []).map((t, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          {t.status === "in_progress" ? (
+                            <Wrench size={13} strokeWidth={2} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                          ) : (
+                            <CheckCircle2 size={13} strokeWidth={2} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                          )}
+                          <span className="text-zinc-700 dark:text-zinc-300">
+                            {formatThaiDate((t.status === "in_progress" ? t.createdAt : t.completedAt || t.createdAt).slice(0, 10))} — {t.displayName}
+                            {t.status === "in_progress" && " (กำลังดำเนินการ)"}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
-            </>
+            </div>
           )}
 
           {showAdjustModal && selectedRows.length > 0 && (
