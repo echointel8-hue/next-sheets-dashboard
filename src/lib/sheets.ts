@@ -936,7 +936,13 @@ export async function updateMaintenanceTask(
  * deleteDimension batchUpdate, so it disappears from every list immediately
  * and never leaves a blank row behind. Same find-by-taskId scan as
  * updateMaintenanceTask, for the same reason (another account's task could
- * have shifted the physical row in between). */
+ * have shifted the physical row in between).
+ *
+ * A "done" task can never be deleted this way — it's the completed record
+ * of work IT actually did, kept for the หัวหน้า tracking view/history, so
+ * only a fresh "in_progress" mistake is eligible. The API route also
+ * enforces this server-side (never trust the client alone), but the check
+ * lives here too so any other caller gets the same guarantee. */
 export async function deleteMaintenanceTask(taskId: string): Promise<void> {
   const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
   const tab = getMaintenanceTasksTab();
@@ -958,6 +964,9 @@ export async function deleteMaintenanceTask(taskId: string): Promise<void> {
   const idx = rows.findIndex((row) => (row[0] ?? "").toString().trim() === taskId);
   if (idx === -1) {
     throw new Error("ไม่พบงานนี้ในระบบ — อาจถูกลบไปแล้ว");
+  }
+  if (rowToMaintenanceTask(rows[idx]).status === "done") {
+    throw new Error("งานนี้เสร็จสิ้นแล้ว ไม่สามารถลบได้");
   }
   const sheetRow = idx + 2; // 1-based sheet row — matches updateMaintenanceTask's own math
 

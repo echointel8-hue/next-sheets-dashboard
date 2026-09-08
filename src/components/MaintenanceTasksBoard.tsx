@@ -27,6 +27,20 @@ const THAI_MONTHS_SHORT = [
   "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
 ];
 
+const THAI_MONTHS_FULL = [
+  "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
+];
+
+/** ISO timestamp -> { year: พ.ศ. (as string), month: "1".."12" } for the
+ * ปี/เดือน period filter below — null when the timestamp doesn't parse
+ * (never happens for a machine-generated createdAt, but guards anyway). */
+function buddhistYearMonth(iso: string): { year: string; month: string } | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return { year: String(d.getFullYear() + 543), month: String(d.getMonth() + 1) };
+}
+
 /** ISO timestamp -> "8 ก.ย. 2569 14:15" (Buddhist calendar, matching every
  * other Thai date on this site). Falls back to the raw string for anything
  * that doesn't parse, rather than showing "Invalid Date". */
@@ -61,20 +75,48 @@ export default function MaintenanceTasksBoard({
   const [statusFilter, setStatusFilter] = useState<"all" | MaintenanceTaskStatus>("in_progress");
   const [assigneeFilter, setAssigneeFilter] = useState<string[]>([]);
   const [search, setSearch] = useState("");
+  const [monthFilter, setMonthFilter] = useState(""); // "" = ทุกเดือน, else "1".."12"
+  const [yearFilter, setYearFilter] = useState(""); // "" = ทุกปี, else พ.ศ. as string
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [fetchError] = useState<string | null>(loadError);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // Every task's created-on (พ.ศ.) year, newest first — lets the ปี dropdown
+  // only ever offer years that actually have data, plus the current year so
+  // it's always selectable even before any task has been created in it.
+  const yearOptions = useMemo(() => {
+    const set = new Set<string>([String(new Date().getFullYear() + 543)]);
+    for (const t of tasks) {
+      const ym = buddhistYearMonth(t.createdAt);
+      if (ym) set.add(ym.year);
+    }
+    return [...set].sort((a, b) => Number(b) - Number(a));
+  }, [tasks]);
+
+  // ช่วงเวลา (ปี/เดือน) filter — applied on "เริ่มเมื่อ" (createdAt), before
+  // every other filter below, so the stat tiles / per-staff summary / table
+  // all reflect the same selected period, not just the visible table rows.
+  const periodFilteredTasks = useMemo(() => {
+    if (!monthFilter && !yearFilter) return tasks;
+    return tasks.filter((t) => {
+      const ym = buddhistYearMonth(t.createdAt);
+      if (!ym) return false;
+      if (yearFilter && ym.year !== yearFilter) return false;
+      if (monthFilter && ym.month !== monthFilter) return false;
+      return true;
+    });
+  }, [tasks, monthFilter, yearFilter]);
+
   const assigneeOptions = useMemo(() => {
     const set = new Set<string>();
-    for (const t of tasks) if (t.assignedToDisplayName || t.assignedToUsername) set.add(t.assignedToDisplayName || t.assignedToUsername);
+    for (const t of periodFilteredTasks) if (t.assignedToDisplayName || t.assignedToUsername) set.add(t.assignedToDisplayName || t.assignedToUsername);
     return [...set].sort((a, b) => a.localeCompare(b, "th")).map((value) => ({ value }));
-  }, [tasks]);
+  }, [periodFilteredTasks]);
 
   const filteredTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return tasks
+    return periodFilteredTasks
       .filter((t) => statusFilter === "all" || t.status === statusFilter)
       .filter((t) => {
         if (assigneeFilter.length === 0) return true;
@@ -87,19 +129,21 @@ export default function MaintenanceTasksBoard({
         return hay.includes(q);
       })
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
-  }, [tasks, statusFilter, assigneeFilter, search]);
+  }, [periodFilteredTasks, statusFilter, assigneeFilter, search]);
 
   // The stat tiles + per-staff breakdown are the "หัวหน้าติดตามงาน" part of
   // this page — every IT-dashboard account (this hospital's whole IT team,
   // per canAccessItDashboard) sees the same view, so whoever leads the team
   // doesn't need a separate elevated role to check on everyone's progress.
+  // All computed from periodFilteredTasks, so picking a ปี/เดือน here also
+  // narrows these down to that period, not just the table below.
   const stats = useMemo(() => {
-    const inProgress = tasks.filter((t) => t.status === "in_progress").length;
-    const done = tasks.filter((t) => t.status === "done").length;
+    const inProgress = periodFilteredTasks.filter((t) => t.status === "in_progress").length;
+    const done = periodFilteredTasks.filter((t) => t.status === "done").length;
     const today = todayIso();
-    const doneToday = tasks.filter((t) => t.status === "done" && t.completedAt.slice(0, 10) === today).length;
+    const doneToday = periodFilteredTasks.filter((t) => t.status === "done" && t.completedAt.slice(0, 10) === today).length;
     const byAssignee = new Map<string, { inProgress: number; done: number }>();
-    for (const t of tasks) {
+    for (const t of periodFilteredTasks) {
       const name = t.assignedToDisplayName || t.assignedToUsername || "ไม่ระบุ";
       const entry = byAssignee.get(name) ?? { inProgress: 0, done: 0 };
       if (t.status === "in_progress") entry.inProgress += 1;
@@ -107,13 +151,13 @@ export default function MaintenanceTasksBoard({
       byAssignee.set(name, entry);
     }
     return {
-      total: tasks.length,
+      total: periodFilteredTasks.length,
       inProgress,
       done,
       doneToday,
       byAssignee: [...byAssignee.entries()].sort((a, b) => a[0].localeCompare(b[0], "th")),
     };
-  }, [tasks]);
+  }, [periodFilteredTasks]);
 
   const activeTask = tasks.find((t) => t.taskId === activeTaskId) ?? null;
 
@@ -131,8 +175,12 @@ export default function MaintenanceTasksBoard({
 
   /** Deletes a mistakenly-created task outright (wrong equipment selected,
    * duplicate print) — not the normal "close this task" flow, which is the
-   * "เสร็จสิ้น" button inside the update modal instead. */
+   * "เสร็จสิ้น" button inside the update modal instead. A "done" task is
+   * kept as a completed record and can never be deleted this way — the
+   * delete button is already disabled for it, but this guard covers any
+   * other caller too (the API/lib layer enforces it again server-side). */
   async function deleteTask(task: MaintenanceTask) {
+    if (task.status === "done") return;
     const label = [task.assetNumber, task.equipmentType].filter(Boolean).join(" — ") || "งานนี้";
     const confirmed = window.confirm(`ยืนยันลบรายการ "${label}" ใช่หรือไม่?\n\nรายการนี้จะหายไปจากตารางทันทีและกู้คืนไม่ได้`);
     if (!confirmed) return;
@@ -262,6 +310,51 @@ export default function MaintenanceTasksBoard({
                 ))}
               </div>
             </div>
+            <div className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+              ช่วงเวลา
+              <div className="flex items-center gap-2">
+                <select
+                  value={monthFilter}
+                  onChange={(e) => setMonthFilter(e.target.value)}
+                  aria-label="กรองตามเดือน"
+                  className={`${INPUT_CLASS} pr-1`}
+                >
+                  <option value="">ทุกเดือน</option>
+                  {THAI_MONTHS_FULL.map((label, i) => (
+                    <option key={label} value={String(i + 1)}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={yearFilter}
+                  onChange={(e) => setYearFilter(e.target.value)}
+                  aria-label="กรองตามปี"
+                  className={`${INPUT_CLASS} pr-1`}
+                >
+                  <option value="">ทุกปี</option>
+                  {yearOptions.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+                {(monthFilter || yearFilter) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMonthFilter("");
+                      setYearFilter("");
+                    }}
+                    aria-label="ล้างตัวกรองช่วงเวลา"
+                    title="ล้างตัวกรองช่วงเวลา"
+                    className="rounded-full p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+                  >
+                    <X size={14} strokeWidth={2} aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+            </div>
             <MultiSelect
               label="กรองตามผู้ดำเนินการ"
               options={assigneeOptions}
@@ -337,10 +430,10 @@ export default function MaintenanceTasksBoard({
                         <button
                           type="button"
                           onClick={() => deleteTask(t)}
-                          disabled={deletingTaskId === t.taskId}
-                          title="ลบรายการนี้"
-                          aria-label="ลบรายการนี้"
-                          className="inline-flex items-center justify-center rounded-full border border-zinc-200 p-1.5 text-zinc-400 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:hover:border-red-900/50 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                          disabled={t.status === "done" || deletingTaskId === t.taskId}
+                          title={t.status === "done" ? "งานที่เสร็จสิ้นแล้วไม่สามารถลบได้" : "ลบรายการนี้"}
+                          aria-label={t.status === "done" ? "งานที่เสร็จสิ้นแล้วไม่สามารถลบได้" : "ลบรายการนี้"}
+                          className="inline-flex items-center justify-center rounded-full border border-zinc-200 p-1.5 text-zinc-400 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-zinc-200 disabled:hover:bg-transparent disabled:hover:text-zinc-400 dark:border-zinc-700 dark:hover:border-red-900/50 dark:hover:bg-red-950/40 dark:hover:text-red-400 dark:disabled:hover:border-zinc-700 dark:disabled:hover:bg-transparent dark:disabled:hover:text-zinc-400"
                         >
                           {deletingTaskId === t.taskId ? (
                             <Loader2 size={13} strokeWidth={2} className="animate-spin" aria-hidden="true" />
