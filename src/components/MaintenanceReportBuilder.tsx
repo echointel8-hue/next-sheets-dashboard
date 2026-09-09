@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -118,6 +118,38 @@ const THAI_MONTHS_SHORT = [
   "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
   "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
 ];
+
+/** Fixed, colorblind-validated categorical order (8 hues) for coloring each
+ * distinct "การดำเนินการ" (action-taken) text in the month-strip and its
+ * legend — assigned automatically by first-appearance order (see
+ * actionColorMap below), never picked by hand and never re-cycled, so a
+ * color always means the same action everywhere it appears. A 9th-and-later
+ * distinct action folds into ACTION_OTHER_COLOR instead of generating a new
+ * hue, since a 9th hue can no longer be kept distinguishable from the rest
+ * (colorblind-safe categorical palettes top out around 8). */
+const ACTION_COLOR_PALETTE: { light: string; dark: string }[] = [
+  { light: "#2a78d6", dark: "#3987e5" }, // blue
+  { light: "#eb6834", dark: "#d95926" }, // orange
+  { light: "#1baf7a", dark: "#199e70" }, // aqua
+  { light: "#eda100", dark: "#c98500" }, // yellow
+  { light: "#e87ba4", dark: "#d55181" }, // magenta
+  { light: "#008300", dark: "#008300" }, // green
+  { light: "#4a3aa7", dark: "#9085e9" }, // violet
+  { light: "#e34948", dark: "#e66767" }, // red
+];
+/** Deliberately neutral/gray — never impersonates one of the 8 real
+ * categorical colors above — used once a 9th distinct action text shows up. */
+const ACTION_OTHER_COLOR = { light: "#a1a1aa", dark: "#71717a" };
+
+type ActionColor = { light: string; dark: string };
+
+/** CSS custom properties for one action-color segment — applied via
+ * className="bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]" so the two
+ * static Tailwind arbitrary-value classes stay the same for every segment
+ * while the actual color comes from the inline variables per element. */
+function actionColorStyle(color: ActionColor): CSSProperties {
+  return { "--seg-c": color.light, "--seg-c-dark": color.dark } as CSSProperties;
+}
 
 /** Full names, in the same index order as THAI_MONTHS_SHORT — used only for
  * the month-strip popup heading below (e.g. "สิงหาคม 2569"), where the
@@ -287,6 +319,48 @@ export default function MaintenanceReportBuilder({
     }
     return [...set].sort((a, b) => Number(b) - Number(a));
   }, [taskHistory]);
+
+  // Assigns each distinct "การดำเนินการ" text a fixed color from
+  // ACTION_COLOR_PALETTE, in first-ever-recorded order across the WHOLE task
+  // history (not scoped by the ปี/เดือน filters) — so a color stays the same
+  // for a given action no matter which year/month is being viewed. Capped at
+  // the 8 palette slots; anything beyond that shares ACTION_OTHER_COLOR
+  // rather than generating a new, no-longer-distinguishable hue.
+  const actionColorMap = useMemo(() => {
+    const seen: string[] = [];
+    const sorted = [...taskHistory].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
+    for (const t of sorted) {
+      for (const raw of t.actionsTaken) {
+        const name = raw.trim();
+        if (name && !seen.includes(name)) seen.push(name);
+      }
+    }
+    const map = new Map<string, ActionColor>();
+    seen.forEach((name, idx) => {
+      map.set(name, ACTION_COLOR_PALETTE[idx] ?? ACTION_OTHER_COLOR);
+    });
+    return map;
+  }, [taskHistory]);
+
+  const colorForAction = (name: string): ActionColor =>
+    actionColorMap.get(name.trim()) ?? ACTION_OTHER_COLOR;
+
+  // Legend shown above the picker table — every action that got its own
+  // palette color, plus a single "อื่นๆ" entry standing in for however many
+  // additional distinct actions overflowed into ACTION_OTHER_COLOR (never
+  // one legend row per overflowing action — that would just repeat the same
+  // gray swatch over and over).
+  const actionLegend = useMemo(() => {
+    const primary: { name: string; color: ActionColor }[] = [];
+    let hasOther = false;
+    for (const [name, color] of actionColorMap.entries()) {
+      if (color === ACTION_OTHER_COLOR) hasOther = true;
+      else primary.push({ name, color });
+    }
+    return { primary, hasOther };
+  }, [actionColorMap]);
 
   // Re-derives the "กำลังบำรุงรักษาโดย ..." / "เสร็จสิ้นล่าสุดโดย ..." badge
   // lookups, plus a plain per-equipment visit count (visitCounts — every
@@ -955,6 +1029,34 @@ export default function MaintenanceReportBuilder({
             <p className="text-xs text-zinc-400">
               &quot;เดือน/ปีที่บำรุงรักษา&quot; กรองป้ายสถานะและจำนวนครั้งด้านล่างให้ตรงกับเดือนนั้นโดยเฉพาะ (ค่าเริ่มต้นคือเดือน/ปีปัจจุบันเสมอ — สถานะจึงรีเซ็ตใหม่ทุกเดือน) — &quot;กรองสถานะ&quot; ใช้ผลจากเดือนเดียวกันนี้มาซ่อนรายการที่ไม่ตรงเงื่อนไขออกจากตารางด้านล่างด้วย แถบ 12 เดือนในตารางยังแสดงประวัติทั้งปีให้ย้อนดูได้เสมอ ไม่ถูกซ่อนตามตัวกรองนี้
             </p>
+            {(actionLegend.primary.length > 0 || actionLegend.hasOther) && (
+              <div
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500 dark:text-zinc-400"
+                aria-label="คำอธิบายสีของรายการที่ดำเนินการในแถบ 12 เดือน"
+              >
+                <span className="text-zinc-400 dark:text-zinc-500">สีในแถบเดือน:</span>
+                {actionLegend.primary.map(({ name, color }) => (
+                  <span key={name} className="inline-flex items-center gap-1">
+                    <span
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                      style={actionColorStyle(color)}
+                      aria-hidden="true"
+                    />
+                    {name}
+                  </span>
+                ))}
+                {actionLegend.hasOther && (
+                  <span className="inline-flex items-center gap-1">
+                    <span
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                      style={actionColorStyle(ACTION_OTHER_COLOR)}
+                      aria-hidden="true"
+                    />
+                    อื่นๆ
+                  </span>
+                )}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -980,7 +1082,19 @@ export default function MaintenanceReportBuilder({
               </span>
             </div>
             <div className="max-h-80 overflow-y-auto rounded-lg border border-zinc-100 dark:border-zinc-800">
-              <table className="w-full text-left text-xs sm:text-sm">
+              <table className="w-full table-fixed text-left text-xs sm:text-sm">
+                {/* Explicit column widths — เดือนที่บำรุงรักษา gets the extra
+                    room freed up from ผู้รับผิดชอบครุภัณฑ์, whose content
+                    (a name) rarely needs as much width as an unconstrained
+                    table would otherwise give it (see the user's screenshot
+                    pointing at that dead space). */}
+                <colgroup>
+                  <col className="w-10" />
+                  <col className="w-[30%]" />
+                  <col className="w-[24%]" />
+                  <col className="w-[20%]" />
+                  <col className="w-[18%]" />
+                </colgroup>
                 <thead className="sticky top-0 bg-white dark:bg-zinc-900">
                   <tr className="border-b border-zinc-100 text-[10px] uppercase tracking-wide text-zinc-400 dark:border-zinc-800">
                     <th scope="col" className="px-2 py-2 font-medium">เลือก</th>
@@ -1003,7 +1117,7 @@ export default function MaintenanceReportBuilder({
                       </td>
                       <td className="px-2 py-1.5 align-top">
                         <div
-                          className="flex items-center gap-[3px]"
+                          className="flex items-start gap-[3px]"
                           role="group"
                           aria-label={`เดือนที่บำรุงรักษาในปี ${maintenanceYearFilter || "ทุกปี"}`}
                         >
@@ -1012,41 +1126,63 @@ export default function MaintenanceReportBuilder({
                             const hasInProgress = monthTasks.some((t) => t.status === "in_progress");
                             const isFilteredMonth = String(monthIdx + 1) === maintenanceMonthFilter;
                             const isEmpty = monthTasks.length === 0;
-                            // De-dotted ("ม.ค." -> "มค") so the 2-3 character
-                            // abbreviation fits inside the tick without
-                            // wrapping — the full-dotted form is still used
+                            // Every "การดำเนินการ" item logged by any visit
+                            // that month, combined — a month with 2+ visits
+                            // (each with its own actionsTaken list) shows all
+                            // of them together, flattened in order, per the
+                            // hospital's request to see the whole month's
+                            // work at a glance rather than only the latest
+                            // visit.
+                            const allActions = hasInProgress
+                              ? []
+                              : monthTasks.flatMap((t) =>
+                                  t.actionsTaken.map((a) => a.trim()).filter(Boolean)
+                                );
+                            // De-dotted ("ม.ค." -> "มค") so the abbreviation
+                            // reads cleanly as its own small label under the
+                            // bar — the full-dotted form is still used
                             // everywhere else (title/aria-label, dates, the
                             // popup heading).
                             const shortLabel = label.replace(/\./g, "");
                             return (
-                              <button
-                                key={monthIdx}
-                                type="button"
-                                onClick={() => setMonthPopup({ rowNumber: it.rowNumber, month: monthIdx })}
-                                title={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง — คลิกเพื่อดูรายละเอียด`}
-                                aria-label={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง — คลิกเพื่อดูรายละเอียด`}
-                                className={`flex h-6 w-4 shrink-0 items-center justify-center rounded-[3px] transition-colors ${
-                                  isEmpty
-                                    ? "bg-zinc-200 dark:bg-zinc-700"
-                                    : hasInProgress
-                                      ? "bg-amber-500 dark:bg-amber-400"
-                                      : "bg-emerald-500 dark:bg-emerald-400"
-                                } ${
-                                  isFilteredMonth
-                                    ? "ring-2 ring-[var(--brand)] ring-offset-1 ring-offset-white dark:ring-offset-zinc-900"
-                                    : ""
-                                }`}
-                              >
-                                <span
-                                  className={`text-[6px] leading-none font-medium select-none ${
-                                    isEmpty
-                                      ? "text-zinc-500 dark:text-zinc-400"
-                                      : "text-white dark:text-zinc-950"
+                              <div key={monthIdx} className="flex shrink-0 flex-col items-center gap-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setMonthPopup({ rowNumber: it.rowNumber, month: monthIdx })}
+                                  title={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง${
+                                    allActions.length > 0 ? ` — ${allActions.join(", ")}` : ""
+                                  } — คลิกเพื่อดูรายละเอียด`}
+                                  aria-label={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง${
+                                    allActions.length > 0 ? ` — ${allActions.join(", ")}` : ""
+                                  } — คลิกเพื่อดูรายละเอียด`}
+                                  className={`flex h-7 w-3.5 flex-col overflow-hidden rounded-[3px] transition-colors ${
+                                    isFilteredMonth
+                                      ? "ring-2 ring-[var(--brand)] ring-offset-1 ring-offset-white dark:ring-offset-zinc-900"
+                                      : ""
                                   }`}
                                 >
+                                  {isEmpty ? (
+                                    <span className="h-full w-full bg-zinc-200 dark:bg-zinc-700" />
+                                  ) : hasInProgress ? (
+                                    <span className="h-full w-full bg-amber-500 dark:bg-amber-400" />
+                                  ) : allActions.length === 0 ? (
+                                    <span className="h-full w-full bg-emerald-500 dark:bg-emerald-400" />
+                                  ) : (
+                                    <span className="flex h-full w-full flex-col gap-px bg-white dark:bg-zinc-900">
+                                      {allActions.map((name, i) => (
+                                        <span
+                                          key={i}
+                                          className="min-h-0 flex-1 bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                                          style={actionColorStyle(colorForAction(name))}
+                                        />
+                                      ))}
+                                    </span>
+                                  )}
+                                </button>
+                                <span className="text-[7px] leading-none font-medium text-zinc-400 select-none dark:text-zinc-500">
                                   {shortLabel}
                                 </span>
-                              </button>
+                              </div>
                             );
                           })}
                         </div>
@@ -1056,6 +1192,40 @@ export default function MaintenanceReportBuilder({
                             {THAI_MONTHS_SHORT[Number(maintenanceMonthFilter) - 1] ?? ""})
                           </p>
                         )}
+                        {(() => {
+                          // Chip list of the currently-filtered month's
+                          // distinct actions, color-matched to the segments
+                          // above — lets the hospital see what was done
+                          // without clicking into the popup, for whichever
+                          // month "เดือนที่บำรุงรักษา" is currently set to.
+                          const filteredMonthIdx = Number(maintenanceMonthFilter) - 1;
+                          const filteredMonthTasks = monthlyTasks[it.rowNumber]?.[filteredMonthIdx] ?? [];
+                          const names = [
+                            ...new Set(
+                              filteredMonthTasks.flatMap((t) =>
+                                t.actionsTaken.map((a) => a.trim()).filter(Boolean)
+                              )
+                            ),
+                          ];
+                          if (names.length === 0) return null;
+                          return (
+                            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                              {names.map((name) => (
+                                <span
+                                  key={name}
+                                  className="inline-flex items-center gap-1 text-[9px] text-zinc-500 dark:text-zinc-400"
+                                >
+                                  <span
+                                    className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                                    style={actionColorStyle(colorForAction(name))}
+                                    aria-hidden="true"
+                                  />
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="px-2 py-1.5 text-zinc-700 dark:text-zinc-300 align-top">
                         <div className="font-medium">{it.equipmentType || "—"}</div>
@@ -1166,10 +1336,19 @@ export default function MaintenanceReportBuilder({
                           ) : (
                             <>
                               {t.actionsTaken.length > 0 && (
-                                <p className="pl-[19px] text-xs text-zinc-500 dark:text-zinc-400">
-                                  <span className="font-medium text-zinc-600 dark:text-zinc-300">การดำเนินการ:</span>{" "}
-                                  {t.actionsTaken.join(", ")}
-                                </p>
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[19px] text-xs text-zinc-500 dark:text-zinc-400">
+                                  <span className="font-medium text-zinc-600 dark:text-zinc-300">การดำเนินการ:</span>
+                                  {t.actionsTaken.map((name, actionIdx) => (
+                                    <span key={actionIdx} className="inline-flex items-center gap-1">
+                                      <span
+                                        className="inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                                        style={actionColorStyle(colorForAction(name))}
+                                        aria-hidden="true"
+                                      />
+                                      {name.trim()}
+                                    </span>
+                                  ))}
+                                </div>
                               )}
                               {t.inspectionChecks.length > 0 && (
                                 <p className="pl-[19px] text-xs text-zinc-500 dark:text-zinc-400">
