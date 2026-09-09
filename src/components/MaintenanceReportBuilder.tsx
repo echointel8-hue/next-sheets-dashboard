@@ -408,7 +408,7 @@ export default function MaintenanceReportBuilder({
         const location = o?.location ?? it.installLocation;
         const titlePrefix = o?.titlePrefix ?? it.titlePrefix;
         const nameOnly = o?.nameOnly ?? it.nameOnly;
-        const responsiblePerson = [titlePrefix, nameOnly].filter(Boolean).join(" ");
+        const responsiblePerson = [titlePrefix, nameOnly].filter(Boolean).join("");
         return {
           rowNumber: it.rowNumber,
           assetNumber: it.assetNumber,
@@ -1011,6 +1011,13 @@ export default function MaintenanceReportBuilder({
                             const monthTasks = monthlyTasks[it.rowNumber]?.[monthIdx] ?? [];
                             const hasInProgress = monthTasks.some((t) => t.status === "in_progress");
                             const isFilteredMonth = String(monthIdx + 1) === maintenanceMonthFilter;
+                            const isEmpty = monthTasks.length === 0;
+                            // De-dotted ("ม.ค." -> "มค") so the 2-3 character
+                            // abbreviation fits inside the tick without
+                            // wrapping — the full-dotted form is still used
+                            // everywhere else (title/aria-label, dates, the
+                            // popup heading).
+                            const shortLabel = label.replace(/\./g, "");
                             return (
                               <button
                                 key={monthIdx}
@@ -1018,8 +1025,8 @@ export default function MaintenanceReportBuilder({
                                 onClick={() => setMonthPopup({ rowNumber: it.rowNumber, month: monthIdx })}
                                 title={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง — คลิกเพื่อดูรายละเอียด`}
                                 aria-label={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง — คลิกเพื่อดูรายละเอียด`}
-                                className={`h-6 w-2 shrink-0 rounded-[3px] transition-colors ${
-                                  monthTasks.length === 0
+                                className={`flex h-6 w-4 shrink-0 items-center justify-center rounded-[3px] transition-colors ${
+                                  isEmpty
                                     ? "bg-zinc-200 dark:bg-zinc-700"
                                     : hasInProgress
                                       ? "bg-amber-500 dark:bg-amber-400"
@@ -1029,7 +1036,17 @@ export default function MaintenanceReportBuilder({
                                     ? "ring-2 ring-[var(--brand)] ring-offset-1 ring-offset-white dark:ring-offset-zinc-900"
                                     : ""
                                 }`}
-                              />
+                              >
+                                <span
+                                  className={`text-[6px] leading-none font-medium select-none ${
+                                    isEmpty
+                                      ? "text-zinc-500 dark:text-zinc-400"
+                                      : "text-white dark:text-zinc-950"
+                                  }`}
+                                >
+                                  {shortLabel}
+                                </span>
+                              </button>
                             );
                           })}
                         </div>

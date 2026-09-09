@@ -81,7 +81,7 @@ export default async function ManageItReportPage() {
           titlePrefix = f.titlePrefixHeader ? (r.data[f.titlePrefixHeader] ?? "").trim() : "";
           nameOnly = f.nameHeader ? (r.data[f.nameHeader] ?? "").trim() : "";
         }
-        const fullName = [titlePrefix, nameOnly].filter(Boolean).join(" ");
+        const fullName = [titlePrefix, nameOnly].filter(Boolean).join("");
         return {
           rowNumber: r.rowNumber,
           assetNumber: f.assetNumber ? (r.data[f.assetNumber] ?? "").trim() : "",

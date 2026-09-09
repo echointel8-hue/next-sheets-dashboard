@@ -137,7 +137,7 @@ export async function PATCH(
       if (snapshot.fields.fullNameHeader) {
         const header = snapshot.fields.fullNameHeader;
         const oldValue = record.data[header] ?? "";
-        const newValue = [titlePrefix, name].filter(Boolean).join(" ");
+        const newValue = [titlePrefix, name].filter(Boolean).join("");
         nextValues[header] = newValue;
         if (oldValue !== newValue) changes.push({ header, oldValue, newValue });
       } else if (snapshot.fields.titlePrefixHeader && snapshot.fields.nameHeader) {
