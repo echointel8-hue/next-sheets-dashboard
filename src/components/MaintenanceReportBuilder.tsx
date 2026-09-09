@@ -770,11 +770,11 @@ export default function MaintenanceReportBuilder({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Link
-                href="/manage/it"
+                href="/manage/it/tasks"
                 className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
               >
                 <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
-                กลับไปแดชบอร์ด IT
+                กลับไปหน้างานบำรุงรักษา
               </Link>
               <button
                 type="button"
@@ -1086,9 +1086,6 @@ export default function MaintenanceReportBuilder({
                 />
               </label>
             </div>
-            <p className="text-xs text-zinc-400">
-              &quot;เดือน/ปีที่บำรุงรักษา&quot; กรองป้ายสถานะและจำนวนครั้งด้านล่างให้ตรงกับเดือนนั้นโดยเฉพาะ (ค่าเริ่มต้นคือเดือน/ปีปัจจุบันเสมอ — สถานะจึงรีเซ็ตใหม่ทุกเดือน) — &quot;กรองสถานะ&quot; ใช้ผลจากเดือนเดียวกันนี้มาซ่อนรายการที่ไม่ตรงเงื่อนไขออกจากตารางด้านล่างด้วย แถบ 12 เดือนในตารางยังแสดงประวัติทั้งปีให้ย้อนดูได้เสมอ ไม่ถูกซ่อนตามตัวกรองนี้
-            </p>
             {(actionLegend.primary.length > 0 || actionLegend.hasOther) && (
               <div
                 className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500 dark:text-zinc-400"
