@@ -198,7 +198,11 @@ export function resolveFields(headers: string[]): FieldMap {
   };
 }
 
-/** Renders the display name from whichever shape the sheet uses. */
+/** Renders the display name from whichever shape the sheet uses. คำนำหน้า
+ * and ชื่อ are joined with no space (e.g. "นางขนันธ์...") to match the
+ * convention used everywhere else this app renders a name — the printed
+ * maintenance report, the report-page picker table, and the
+ * combined-column-sheet write path in /api/manage/it/records. */
 export function getFullName(row: EquipmentRow, fields: FieldMap): string {
   if (fields.fullNameHeader) {
     return (row[fields.fullNameHeader] ?? "").trim();
@@ -209,7 +213,7 @@ export function getFullName(row: EquipmentRow, fields: FieldMap): string {
   ]
     .map((s) => (s ?? "").trim())
     .filter(Boolean);
-  return parts.join(" ");
+  return parts.join("");
 }
 
 /** Picks the first non-empty value across a set of headers that all mean

@@ -77,6 +77,21 @@ interface SpecColumn {
   header: string | null;
 }
 
+// Short-value spec columns get a fixed, modest width so table-layout:auto
+// doesn't stretch them to fill the table's min-width — that stretching is
+// what created the large empty gap the hospital flagged around "ประเภท
+// RAM" (a 4-character value like "DDR4" doesn't need 150px). Any label not
+// listed here (e.g. "หน่วยประมวลผล", "ประเภทเครื่องพิมพ์") is left
+// unset/flexible so it naturally absorbs the width freed up from the
+// columns above.
+const SPEC_COLUMN_WIDTH_CLASS: Record<string, string> = {
+  "ประเภท RAM": "w-[56px]",
+  "ความจุ RAM": "w-[64px]",
+  "ความเร็ว RAM": "w-[76px]",
+  "ประเภทหน่วยจัดเก็บ": "w-[68px]",
+  "ความจุจัดเก็บ": "w-[72px]",
+};
+
 export default function ITDashboard({
   session,
   initial,
@@ -656,7 +671,7 @@ function SpecTable({
   actionOptions: string[];
   statusYear: string;
 }) {
-  const columnCount = 5 + specColumns.length + (showSpecStatus ? 1 : 0);
+  const columnCount = 6 + specColumns.length + (showSpecStatus ? 1 : 0);
   return (
     <div className={CARD}>
       <div className="flex items-center gap-2 border-b border-emerald-900/10 px-4 py-3 text-sm font-semibold text-zinc-800 dark:border-emerald-400/10 dark:text-zinc-100">
@@ -668,6 +683,18 @@ function SpecTable({
       </div>
       <div className="max-w-full overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-[10px] sm:text-[11px]">
+          <colgroup>
+            <col className="w-[108px]" />
+            <col />
+            <col />
+            {specColumns.map((c) => (
+              <col key={c.label} className={SPEC_COLUMN_WIDTH_CLASS[c.label] ?? undefined} />
+            ))}
+            <col />
+            <col />
+            <col className="w-[60px]" />
+            {showSpecStatus && <col />}
+          </colgroup>
           <thead>
             <tr className="border-b border-emerald-900/15 text-[9px] uppercase tracking-wide text-zinc-400 dark:border-emerald-400/15">
               <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">เดือนบำรุงรักษา</th>
@@ -680,7 +707,7 @@ function SpecTable({
               ))}
               <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">สถานที่ / จุดติดตั้ง</th>
               <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">ผู้ใช้งาน</th>
-              <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">สถานะ</th>
+              <th scope="col" className="whitespace-nowrap px-1.5 py-1.5 font-medium sm:px-2">สถานะ</th>
               {showSpecStatus && <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">สถานะสเปก</th>}
             </tr>
           </thead>
@@ -697,25 +724,21 @@ function SpecTable({
                   className="border-b border-zinc-100 transition-colors last:border-0 hover:bg-emerald-50/70 dark:border-zinc-800/60 dark:hover:bg-emerald-900/10"
                 >
                   <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
-                    {rowTasks.length > 0 ? (
-                      <MaintenanceStatusStrip
-                        tasks={rowTasks.map((t) => ({
-                          status: t.status,
-                          createdAt: t.createdAt,
-                          completedAt: t.completedAt,
-                          displayName: t.assignedToDisplayName || t.assignedToUsername || "ไม่ทราบผู้ดำเนินการ",
-                          actionsTaken: t.actionsTaken,
-                          inspectionChecks: t.inspectionChecks,
-                          partsChanged: t.partsChanged,
-                          otherDetail: t.otherDetail,
-                        }))}
-                        actionOptions={actionOptions}
-                        year={statusYear}
-                        assetLabel={assetNumber || undefined}
-                      />
-                    ) : (
-                      "—"
-                    )}
+                    <MaintenanceStatusStrip
+                      tasks={rowTasks.map((t) => ({
+                        status: t.status,
+                        createdAt: t.createdAt,
+                        completedAt: t.completedAt,
+                        displayName: t.assignedToDisplayName || t.assignedToUsername || "ไม่ทราบผู้ดำเนินการ",
+                        actionsTaken: t.actionsTaken,
+                        inspectionChecks: t.inspectionChecks,
+                        partsChanged: t.partsChanged,
+                        otherDetail: t.otherDetail,
+                      }))}
+                      actionOptions={actionOptions}
+                      year={statusYear}
+                      assetLabel={assetNumber || undefined}
+                    />
                   </td>
                   <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
                     {(fields && cell(r.values, fields.department)) || "—"}
@@ -739,11 +762,11 @@ function SpecTable({
                   </td>
                   <td className="px-1.5 py-1.5 align-top sm:px-2">
                     {disposed ? (
-                      <span className="inline-flex items-center rounded-full border border-zinc-300 bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                      <span className="inline-flex items-center whitespace-nowrap rounded-full border border-zinc-300 bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
                         จำหน่ายแล้ว
                       </span>
                     ) : (
-                      <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      <span className="inline-flex items-center whitespace-nowrap rounded-full border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
                         ใช้งาน
                       </span>
                     )}
