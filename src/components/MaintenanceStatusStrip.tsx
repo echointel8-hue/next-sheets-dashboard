@@ -110,10 +110,17 @@ export default function MaintenanceStatusStrip({
 
   const hasAnyThisYear = monthlyTasks.some((m) => m.length > 0);
 
+  // "ปัจจุบัน" ring highlight — no month/year filter exists on this read-only
+  // component (unlike the report page's isFilteredMonth), so "current" here
+  // just means today's real-world เดือน/ปี.
+  const now = new Date();
+  const currentMonthIdx = now.getMonth();
+  const currentYearBE = String(now.getFullYear() + 543);
+
   return (
     <div className="flex flex-col gap-0.5">
       <div
-        className="flex flex-nowrap items-center gap-[2px]"
+        className="flex flex-nowrap items-start gap-[3px]"
         role="group"
         aria-label={`สถานะบำรุงรักษาในปี ${year}${assetLabel ? ` — ${assetLabel}` : ""}`}
       >
@@ -124,35 +131,45 @@ export default function MaintenanceStatusStrip({
           const allActions = hasInProgress
             ? []
             : monthTasks.flatMap((t) => t.actionsTaken.map((a) => a.trim()).filter(Boolean));
+          const shortLabel = label.replace(/\./g, "");
+          const isCurrentMonth = monthIdx === currentMonthIdx && year === currentYearBE;
           return (
-            <button
-              key={monthIdx}
-              type="button"
-              onClick={() => setOpenMonth(monthIdx)}
-              title={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง${
-                allActions.length > 0 ? ` — ${allActions.join(", ")}` : ""
-              } — คลิกเพื่อดูรายละเอียด`}
-              aria-label={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง — คลิกเพื่อดูรายละเอียด`}
-              className="flex h-4 w-[7px] shrink-0 flex-col overflow-hidden rounded-[2px] transition-opacity hover:opacity-80"
-            >
-              {isEmpty ? (
-                <span className="h-full w-full bg-zinc-200 dark:bg-zinc-700" />
-              ) : hasInProgress ? (
-                <span className="h-full w-full bg-amber-500 dark:bg-amber-400" />
-              ) : allActions.length === 0 ? (
-                <span className="h-full w-full bg-emerald-500 dark:bg-emerald-400" />
-              ) : (
-                <span className="flex h-full w-full flex-col gap-px bg-white dark:bg-zinc-900">
-                  {allActions.map((name, i) => (
-                    <span
-                      key={i}
-                      className="min-h-0 flex-1 bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
-                      style={actionColorStyle(colorForAction(actionColorMap, name))}
-                    />
-                  ))}
-                </span>
-              )}
-            </button>
+            <div key={monthIdx} className="flex shrink-0 flex-col items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => setOpenMonth(monthIdx)}
+                title={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง${
+                  allActions.length > 0 ? ` — ${allActions.join(", ")}` : ""
+                } — คลิกเพื่อดูรายละเอียด`}
+                aria-label={`${label}: บำรุงรักษา ${monthTasks.length.toLocaleString("th-TH")} ครั้ง — คลิกเพื่อดูรายละเอียด`}
+                className={`flex h-7 w-3.5 shrink-0 flex-col overflow-hidden rounded-[2px] transition-opacity hover:opacity-80 ${
+                  isCurrentMonth
+                    ? "ring-2 ring-[var(--brand)] ring-offset-1 ring-offset-white dark:ring-offset-zinc-900"
+                    : ""
+                }`}
+              >
+                {isEmpty ? (
+                  <span className="h-full w-full bg-zinc-200 dark:bg-zinc-700" />
+                ) : hasInProgress ? (
+                  <span className="h-full w-full bg-amber-500 dark:bg-amber-400" />
+                ) : allActions.length === 0 ? (
+                  <span className="h-full w-full bg-emerald-500 dark:bg-emerald-400" />
+                ) : (
+                  <span className="flex h-full w-full flex-col gap-px bg-white dark:bg-zinc-900">
+                    {allActions.map((name, i) => (
+                      <span
+                        key={i}
+                        className="min-h-0 flex-1 bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                        style={actionColorStyle(colorForAction(actionColorMap, name))}
+                      />
+                    ))}
+                  </span>
+                )}
+              </button>
+              <span className="text-[7px] leading-none font-medium text-zinc-400 select-none dark:text-zinc-500">
+                {shortLabel}
+              </span>
+            </div>
           );
         })}
       </div>

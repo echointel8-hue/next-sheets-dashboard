@@ -428,7 +428,7 @@ export default function MaintenanceTasksBoard({
           <div className="overflow-x-auto rounded-lg border border-zinc-100 dark:border-zinc-800">
             <table className="w-full min-w-[54rem] text-left text-xs">
               <colgroup>
-                <col className="w-[136px]" />
+                <col className="w-[224px]" />
                 <col />
                 <col />
                 <col />
@@ -455,22 +455,30 @@ export default function MaintenanceTasksBoard({
                   return (
                   <tr key={t.taskId} className="border-b border-zinc-50 last:border-0 dark:border-zinc-800/60">
                     <td className="px-3 py-2 align-top text-zinc-700 dark:text-zinc-300">
+                      <MaintenanceStatusStrip
+                        tasks={rowTasks.map((rt) => ({
+                          status: rt.status,
+                          createdAt: rt.createdAt,
+                          completedAt: rt.completedAt,
+                          displayName: rt.assignedToDisplayName || rt.assignedToUsername || "ไม่ทราบผู้ดำเนินการ",
+                          actionsTaken: rt.actionsTaken,
+                          inspectionChecks: rt.inspectionChecks,
+                          partsChanged: rt.partsChanged,
+                          otherDetail: rt.otherDetail,
+                        }))}
+                        actionOptions={actionOptions}
+                        year={currentYear}
+                        assetLabel={t.assetNumber || undefined}
+                      />
+                    </td>
+                    <td className="px-3 py-2 align-top text-zinc-700 dark:text-zinc-300">
                       <div className="flex flex-col gap-1">
-                        <MaintenanceStatusStrip
-                          tasks={rowTasks.map((rt) => ({
-                            status: rt.status,
-                            createdAt: rt.createdAt,
-                            completedAt: rt.completedAt,
-                            displayName: rt.assignedToDisplayName || rt.assignedToUsername || "ไม่ทราบผู้ดำเนินการ",
-                            actionsTaken: rt.actionsTaken,
-                            inspectionChecks: rt.inspectionChecks,
-                            partsChanged: rt.partsChanged,
-                            otherDetail: rt.otherDetail,
-                          }))}
-                          actionOptions={actionOptions}
-                          year={currentYear}
-                          assetLabel={t.assetNumber || undefined}
-                        />
+                        <div>
+                          <div className="font-medium text-zinc-900 dark:text-zinc-100">{t.assetNumber || "—"}</div>
+                          <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                            {[t.equipmentType, t.brandModel].filter(Boolean).join(" — ") || "—"}
+                          </div>
+                        </div>
                         {inProgressTask ? (
                           <span className="inline-flex w-fit items-center gap-1 whitespace-nowrap rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium leading-tight text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                             <Wrench size={9} strokeWidth={2} className="shrink-0" aria-hidden="true" />
@@ -487,12 +495,6 @@ export default function MaintenanceTasksBoard({
                             </span>
                           )
                         )}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 align-top text-zinc-700 dark:text-zinc-300">
-                      <div className="font-medium text-zinc-900 dark:text-zinc-100">{t.assetNumber || "—"}</div>
-                      <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                        {[t.equipmentType, t.brandModel].filter(Boolean).join(" — ") || "—"}
                       </div>
                     </td>
                     <td className="px-3 py-2 align-top text-zinc-700 dark:text-zinc-300">

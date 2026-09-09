@@ -707,7 +707,7 @@ function SpecTable({
       <div className="max-w-full overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-[10px] sm:text-[11px]">
           <colgroup>
-            <col className="w-[136px]" />
+            <col className="w-[224px]" />
             <col />
             <col />
             {specColumns.map((c) => (
@@ -749,22 +749,28 @@ function SpecTable({
                   className="border-b border-zinc-100 transition-colors last:border-0 hover:bg-emerald-50/70 dark:border-zinc-800/60 dark:hover:bg-emerald-900/10"
                 >
                   <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
+                    <MaintenanceStatusStrip
+                      tasks={rowTasks.map((t) => ({
+                        status: t.status,
+                        createdAt: t.createdAt,
+                        completedAt: t.completedAt,
+                        displayName: t.assignedToDisplayName || t.assignedToUsername || "ไม่ทราบผู้ดำเนินการ",
+                        actionsTaken: t.actionsTaken,
+                        inspectionChecks: t.inspectionChecks,
+                        partsChanged: t.partsChanged,
+                        otherDetail: t.otherDetail,
+                      }))}
+                      actionOptions={actionOptions}
+                      year={statusYear}
+                      assetLabel={assetNumber || undefined}
+                    />
+                  </td>
+                  <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
+                    {(fields && cell(r.values, fields.department)) || "—"}
+                  </td>
+                  <td className="break-words px-1.5 py-1.5 align-top leading-snug font-medium text-zinc-900 dark:text-zinc-100 sm:px-2">
                     <div className="flex flex-col gap-1">
-                      <MaintenanceStatusStrip
-                        tasks={rowTasks.map((t) => ({
-                          status: t.status,
-                          createdAt: t.createdAt,
-                          completedAt: t.completedAt,
-                          displayName: t.assignedToDisplayName || t.assignedToUsername || "ไม่ทราบผู้ดำเนินการ",
-                          actionsTaken: t.actionsTaken,
-                          inspectionChecks: t.inspectionChecks,
-                          partsChanged: t.partsChanged,
-                          otherDetail: t.otherDetail,
-                        }))}
-                        actionOptions={actionOptions}
-                        year={statusYear}
-                        assetLabel={assetNumber || undefined}
-                      />
+                      <span>{brandModel || "—"}</span>
                       {inProgressTask ? (
                         <span className="inline-flex w-fit items-center gap-1 whitespace-nowrap rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium leading-tight text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                           <Wrench size={9} strokeWidth={2} className="shrink-0" aria-hidden="true" />
@@ -782,12 +788,6 @@ function SpecTable({
                         )
                       )}
                     </div>
-                  </td>
-                  <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
-                    {(fields && cell(r.values, fields.department)) || "—"}
-                  </td>
-                  <td className="break-words px-1.5 py-1.5 align-top leading-snug font-medium text-zinc-900 dark:text-zinc-100 sm:px-2">
-                    {brandModel || "—"}
                   </td>
                   {specColumns.map((c) => (
                     <td
