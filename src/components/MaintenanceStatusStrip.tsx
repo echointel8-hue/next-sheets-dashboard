@@ -86,10 +86,21 @@ export default function MaintenanceStatusStrip({
   const actionColorMap = useMemo(() => buildActionColorMap(actionOptions), [actionOptions]);
   const [openMonth, setOpenMonth] = useState<number | null>(null);
 
+  // Buckets by the task's *effective* เดือน, not เดือนที่เปิดเคส (createdAt):
+  // a "done" task anchors permanently to the เดือน it actually finished in
+  // (completedAt) — that never moves again once set. A still-open task
+  // instead rolls forward to the current real-world เดือน every time this
+  // renders, for as long as it stays open — opened in ส.ค., still open when
+  // ก.ย. arrives, the amber tick "moves" to ก.ย. (ส.ค. is now considered a
+  // month it was NOT finished in), and keeps moving forward like that until
+  // it's finally marked done. Matches MaintenanceReportBuilder's own
+  // (deliberately duplicated, not shared) month-strip bucketing.
   const monthlyTasks = useMemo(() => {
     const buckets: StripTask[][] = Array.from({ length: 12 }, () => []);
+    const nowIso = new Date().toISOString();
     for (const t of tasks) {
-      const d = new Date(t.createdAt);
+      const effectiveIso = t.status === "done" ? t.completedAt || t.createdAt : nowIso;
+      const d = new Date(effectiveIso);
       if (String(d.getFullYear() + 543) !== year) continue;
       const m = d.getMonth();
       if (!Number.isNaN(m)) buckets[m].push(t);

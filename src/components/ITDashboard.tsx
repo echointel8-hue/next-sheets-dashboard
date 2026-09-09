@@ -766,22 +766,18 @@ function SpecTable({
                         assetLabel={assetNumber || undefined}
                       />
                       {inProgressTask ? (
-                        <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium leading-tight text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                        <span className="inline-flex w-fit items-center gap-1 whitespace-nowrap rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium leading-tight text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                           <Wrench size={9} strokeWidth={2} className="shrink-0" aria-hidden="true" />
-                          <span className="break-words">
-                            กำลังบำรุงรักษาโดย {inProgressTask.assignedToDisplayName || inProgressTask.assignedToUsername || "ไม่ทราบผู้ดำเนินการ"}
-                          </span>
+                          กำลังบำรุงรักษาโดย {inProgressTask.assignedToDisplayName || inProgressTask.assignedToUsername || "ไม่ทราบผู้ดำเนินการ"}
                         </span>
                       ) : (
                         lastCompletedTask && (
-                          <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-medium leading-tight text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                          <span className="inline-flex w-fit items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-medium leading-tight text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                             <CheckCircle2 size={9} strokeWidth={2} className="shrink-0" aria-hidden="true" />
-                            <span className="break-words">
-                              เสร็จสิ้นล่าสุดโดย{" "}
-                              {lastCompletedTask.assignedToDisplayName || lastCompletedTask.assignedToUsername || "ไม่ทราบผู้ดำเนินการ"}
-                              {lastCompletedTask.completedAt &&
-                                ` เมื่อ ${new Date(lastCompletedTask.completedAt).toLocaleDateString("th-TH")}`}
-                            </span>
+                            เสร็จสิ้นล่าสุดโดย{" "}
+                            {lastCompletedTask.assignedToDisplayName || lastCompletedTask.assignedToUsername || "ไม่ทราบผู้ดำเนินการ"}
+                            {lastCompletedTask.completedAt &&
+                              ` เมื่อ ${new Date(lastCompletedTask.completedAt).toLocaleDateString("th-TH")}`}
                           </span>
                         )
                       )}

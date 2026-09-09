@@ -384,31 +384,51 @@ export default function MaintenanceReportBuilder({
   // task counts once regardless of status, since printing the report is
   // itself the visit; see the badge below), restricted to the selected ปี
   // (created year) AND เดือน — per the hospital's request this is what
-  // "resets" the badge every month, not just every year. monthlyTasks is
-  // the same data grouped one step further, by เดือน (0 = ม.ค. ... 11 =
-  // ธ.ค.) — it drives the 12-month strip in the picker table below (and its
-  // click popup) and is deliberately restricted by ปี ONLY, never by เดือน,
-  // so the strip always shows the whole selected year's history regardless
-  // of which single เดือน the badge above is currently focused on — nothing
-  // about a past month's color/detail is ever hidden, only what counts as
-  // "current status" for the badge.
+  // "resets" the badge every month, not just every year. Both are still
+  // keyed off createdAt (เดือนที่เปิดเคส) — unrelated to the roll-forward
+  // rule below, unchanged from before.
+  //
+  // monthlyTasks is the same data grouped one step further, by เดือน (0 =
+  // ม.ค. ... 11 = ธ.ค.), and drives the 12-month strip in the picker table
+  // below (and its click popup) — but per the hospital's request, an
+  // เดือนที่เปิดเคส (createdAt) is no longer what buckets a task there. A
+  // "done" task anchors permanently to the เดือน it was actually finished
+  // in (completedAt) — that never changes again once set. A still-open
+  // ("in_progress") task instead rolls forward to the current real-world
+  // เดือน every time this renders: opened in ส.ค., still open when ก.ย.
+  // arrives — the amber tick "moves" to ก.ย., because ส.ค. is now
+  // considered a month it was NOT finished in, and it keeps moving forward
+  // like that for as long as it stays open. This bucket is restricted by
+  // effective ปี only (never by เดือน), same "never hide a past month's
+  // detail" rule as before — only what counts as "current status" changes.
   const { inProgress, lastCompleted, visitCounts, monthlyTasks } = useMemo(() => {
     const inProgress: Record<number, { displayName: string; createdAt: string }> = {};
     const lastCompleted: Record<number, { displayName: string; completedAt: string }> = {};
     const visitCounts: Record<number, number> = {};
     const monthlyTasks: Record<number, ReportTaskEntry[][]> = {};
+    const nowIso = new Date().toISOString();
     for (const t of taskHistory) {
+      // Strip bucket — effective เดือน/ปี, per the roll-forward rule above.
+      const effectiveIso = t.status === "done" ? t.completedAt || t.createdAt : nowIso;
+      const effectiveDate = new Date(effectiveIso);
+      const effectiveYear = effectiveDate.getFullYear() + 543;
+      const effectiveMonthIdx = effectiveDate.getMonth();
+      if (
+        (!maintenanceYearFilter || String(effectiveYear) === maintenanceYearFilter) &&
+        !Number.isNaN(effectiveMonthIdx)
+      ) {
+        if (!monthlyTasks[t.equipmentRowNumber]) {
+          monthlyTasks[t.equipmentRowNumber] = Array.from({ length: 12 }, () => []);
+        }
+        monthlyTasks[t.equipmentRowNumber][effectiveMonthIdx].push(t);
+      }
+
+      // Badge + visit count — still keyed off เดือนที่เปิดเคส (createdAt).
       if (maintenanceYearFilter) {
         const y = new Date(t.createdAt).getFullYear() + 543;
         if (String(y) !== maintenanceYearFilter) continue;
       }
       const monthIdx = new Date(t.createdAt).getMonth();
-      if (!Number.isNaN(monthIdx)) {
-        if (!monthlyTasks[t.equipmentRowNumber]) {
-          monthlyTasks[t.equipmentRowNumber] = Array.from({ length: 12 }, () => []);
-        }
-        monthlyTasks[t.equipmentRowNumber][monthIdx].push(t);
-      }
       if (maintenanceMonthFilter && String(monthIdx + 1) !== maintenanceMonthFilter) continue;
       visitCounts[t.equipmentRowNumber] = (visitCounts[t.equipmentRowNumber] ?? 0) + 1;
       if (t.status === "in_progress") {
@@ -1290,13 +1310,13 @@ export default function MaintenanceReportBuilder({
                           {[it.assetNumber, it.brandModel].filter(Boolean).join(" · ") || "—"}
                         </div>
                         {inProgress[it.rowNumber] ? (
-                          <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                          <span className="mt-1 inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                             <Wrench size={10} strokeWidth={2} aria-hidden="true" />
                             กำลังบำรุงรักษาโดย {inProgress[it.rowNumber].displayName}
                           </span>
                         ) : (
                           lastCompleted[it.rowNumber] && (
-                            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                            <span className="mt-1 inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                               <CheckCircle2 size={10} strokeWidth={2} aria-hidden="true" />
                               เสร็จสิ้นล่าสุดโดย {lastCompleted[it.rowNumber].displayName}
                               {lastCompleted[it.rowNumber].completedAt &&
