@@ -84,6 +84,29 @@ interface SpecColumn {
 // listed here (e.g. "หน่วยประมวลผล", "ประเภทเครื่องพิมพ์") is left
 // unset/flexible so it naturally absorbs the width freed up from the
 // columns above.
+/** The at-a-glance status badge shown under the 12-month strip — same idea
+ * (and same "กำลังบำรุงรักษาโดย .../เสร็จสิ้นล่าสุดโดย ..." wording) as the
+ * badges in the /manage/it/report equipment picker, except this one isn't
+ * scoped to any เดือน/ปี filter (the dashboard has none, per the "ดูได้
+ * อย่างเดียว" ask) — it just reflects the row's live status: any
+ * still-open task wins outright (createMaintenanceTasks only ever leaves
+ * at most one in_progress task per equipment at a time), otherwise the
+ * most recently completed one, if any. */
+function pickInProgressTask(tasks: MaintenanceTask[]): MaintenanceTask | undefined {
+  return tasks.find((t) => t.status === "in_progress");
+}
+
+function pickLastCompletedTask(tasks: MaintenanceTask[]): MaintenanceTask | undefined {
+  let best: MaintenanceTask | undefined;
+  for (const t of tasks) {
+    if (t.status !== "done") continue;
+    const at = t.completedAt || t.createdAt;
+    const bestAt = best ? best.completedAt || best.createdAt : "";
+    if (!best || at > bestAt) best = t;
+  }
+  return best;
+}
+
 const SPEC_COLUMN_WIDTH_CLASS: Record<string, string> = {
   "ประเภท RAM": "w-[56px]",
   "ความจุ RAM": "w-[64px]",
@@ -684,7 +707,7 @@ function SpecTable({
       <div className="max-w-full overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-[10px] sm:text-[11px]">
           <colgroup>
-            <col className="w-[108px]" />
+            <col className="w-[136px]" />
             <col />
             <col />
             {specColumns.map((c) => (
@@ -718,27 +741,51 @@ function SpecTable({
               const latest = assetNumber ? latestMaintenanceByAsset.get(assetNumber) : undefined;
               const brandModel = fields ? getBrandModel(r.values, fields) : "";
               const rowTasks = tasksByRowNumber.get(r.rowNumber) ?? [];
+              const inProgressTask = pickInProgressTask(rowTasks);
+              const lastCompletedTask = inProgressTask ? undefined : pickLastCompletedTask(rowTasks);
               return (
                 <tr
                   key={r.rowNumber}
                   className="border-b border-zinc-100 transition-colors last:border-0 hover:bg-emerald-50/70 dark:border-zinc-800/60 dark:hover:bg-emerald-900/10"
                 >
                   <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
-                    <MaintenanceStatusStrip
-                      tasks={rowTasks.map((t) => ({
-                        status: t.status,
-                        createdAt: t.createdAt,
-                        completedAt: t.completedAt,
-                        displayName: t.assignedToDisplayName || t.assignedToUsername || "ไม่ทราบผู้ดำเนินการ",
-                        actionsTaken: t.actionsTaken,
-                        inspectionChecks: t.inspectionChecks,
-                        partsChanged: t.partsChanged,
-                        otherDetail: t.otherDetail,
-                      }))}
-                      actionOptions={actionOptions}
-                      year={statusYear}
-                      assetLabel={assetNumber || undefined}
-                    />
+                    <div className="flex flex-col gap-1">
+                      <MaintenanceStatusStrip
+                        tasks={rowTasks.map((t) => ({
+                          status: t.status,
+                          createdAt: t.createdAt,
+                          completedAt: t.completedAt,
+                          displayName: t.assignedToDisplayName || t.assignedToUsername || "ไม่ทราบผู้ดำเนินการ",
+                          actionsTaken: t.actionsTaken,
+                          inspectionChecks: t.inspectionChecks,
+                          partsChanged: t.partsChanged,
+                          otherDetail: t.otherDetail,
+                        }))}
+                        actionOptions={actionOptions}
+                        year={statusYear}
+                        assetLabel={assetNumber || undefined}
+                      />
+                      {inProgressTask ? (
+                        <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium leading-tight text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                          <Wrench size={9} strokeWidth={2} className="shrink-0" aria-hidden="true" />
+                          <span className="break-words">
+                            กำลังบำรุงรักษาโดย {inProgressTask.assignedToDisplayName || inProgressTask.assignedToUsername || "ไม่ทราบผู้ดำเนินการ"}
+                          </span>
+                        </span>
+                      ) : (
+                        lastCompletedTask && (
+                          <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-medium leading-tight text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                            <CheckCircle2 size={9} strokeWidth={2} className="shrink-0" aria-hidden="true" />
+                            <span className="break-words">
+                              เสร็จสิ้นล่าสุดโดย{" "}
+                              {lastCompletedTask.assignedToDisplayName || lastCompletedTask.assignedToUsername || "ไม่ทราบผู้ดำเนินการ"}
+                              {lastCompletedTask.completedAt &&
+                                ` เมื่อ ${new Date(lastCompletedTask.completedAt).toLocaleDateString("th-TH")}`}
+                            </span>
+                          </span>
+                        )
+                      )}
+                    </div>
                   </td>
                   <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
                     {(fields && cell(r.values, fields.department)) || "—"}

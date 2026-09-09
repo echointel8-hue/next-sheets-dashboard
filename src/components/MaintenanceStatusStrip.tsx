@@ -102,7 +102,7 @@ export default function MaintenanceStatusStrip({
   return (
     <div className="flex flex-col gap-0.5">
       <div
-        className="flex flex-wrap items-center gap-[2px]"
+        className="flex flex-nowrap items-center gap-[2px]"
         role="group"
         aria-label={`สถานะบำรุงรักษาในปี ${year}${assetLabel ? ` — ${assetLabel}` : ""}`}
       >
@@ -145,7 +145,9 @@ export default function MaintenanceStatusStrip({
           );
         })}
       </div>
-      {!hasAnyThisYear && <span className="text-[9px] text-zinc-300 dark:text-zinc-600">ยังไม่มีข้อมูลปีนี้</span>}
+      {!hasAnyThisYear && (
+        <span className="whitespace-nowrap text-[9px] text-zinc-300 dark:text-zinc-600">ยังไม่มีข้อมูลปีนี้</span>
+      )}
 
       {openMonth !== null && (
         <div

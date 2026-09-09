@@ -18,6 +18,7 @@ import {
 import type { InspectionCheck, MaintenanceTask, MaintenanceTaskStatus } from "@/lib/sheets";
 import { actionColorVars, buildActionColorMap, colorForAction } from "@/lib/actionColors";
 import MultiSelect from "@/components/MultiSelect";
+import MaintenanceStatusStrip from "@/components/MaintenanceStatusStrip";
 
 const CARD = "rounded-2xl border border-emerald-900/10 bg-white shadow-sm dark:border-emerald-400/10 dark:bg-zinc-900";
 const INPUT_CLASS =
@@ -62,6 +63,28 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Same at-a-glance "กำลังบำรุงรักษาโดย .../เสร็จสิ้นล่าสุดโดย ..." badge as
+ * on /manage/it — not scoped to this table's own filters (period/status/
+ * assignee), just the equipment's live status, so it reads the same
+ * wherever it's shown. Duplicated locally rather than imported from
+ * ITDashboard.tsx (not exported from there, and this table has its own
+ * task list already in scope) — same "small stable logic, copied rather
+ * than shared" call as MaintenanceStatusStrip's own header comment. */
+function pickInProgressTask(tasks: MaintenanceTask[]): MaintenanceTask | undefined {
+  return tasks.find((t) => t.status === "in_progress");
+}
+
+function pickLastCompletedTask(tasks: MaintenanceTask[]): MaintenanceTask | undefined {
+  let best: MaintenanceTask | undefined;
+  for (const t of tasks) {
+    if (t.status !== "done") continue;
+    const at = t.completedAt || t.createdAt;
+    const bestAt = best ? best.completedAt || best.createdAt : "";
+    if (!best || at > bestAt) best = t;
+  }
+  return best;
+}
+
 export default function MaintenanceTasksBoard({
   session,
   initialTasks,
@@ -83,6 +106,25 @@ export default function MaintenanceTasksBoard({
   const [fetchError] = useState<string | null>(loadError);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Groups every task (not periodFilteredTasks/filteredTasks — the strip
+  // and badge below always show the equipment's full-year history and live
+  // status, regardless of whatever ปี/เดือน/สถานะ/ผู้ดำเนินการ filter is
+  // active on the table itself) by equipmentRowNumber, same pattern as
+  // ITDashboard.tsx's tasksByRowNumber.
+  const tasksByRowNumber = useMemo(() => {
+    const map = new Map<number, MaintenanceTask[]>();
+    for (const t of tasks) {
+      const list = map.get(t.equipmentRowNumber);
+      if (list) list.push(t);
+      else map.set(t.equipmentRowNumber, [t]);
+    }
+    return map;
+  }, [tasks]);
+
+  // Current พ.ศ. year — the strip always shows this one ปี here too, same
+  // as /manage/it (no year picker on the strip itself).
+  const currentYear = useMemo(() => String(new Date().getFullYear() + 543), []);
 
   // Every task's created-on (พ.ศ.) year, newest first — lets the ปี dropdown
   // only ever offer years that actually have data, plus the current year so
@@ -384,9 +426,19 @@ export default function MaintenanceTasksBoard({
           </div>
 
           <div className="overflow-x-auto rounded-lg border border-zinc-100 dark:border-zinc-800">
-            <table className="w-full min-w-[48rem] text-left text-xs">
+            <table className="w-full min-w-[54rem] text-left text-xs">
+              <colgroup>
+                <col className="w-[136px]" />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+              </colgroup>
               <thead className="bg-zinc-50 dark:bg-zinc-800/60">
                 <tr className="border-b border-zinc-100 text-[10px] uppercase tracking-wide text-zinc-400 dark:border-zinc-800">
+                  <th scope="col" className="px-3 py-2 font-medium">เดือนบำรุงรักษา</th>
                   <th scope="col" className="px-3 py-2 font-medium">ครุภัณฑ์</th>
                   <th scope="col" className="px-3 py-2 font-medium">สถานที่ / กลุ่มงาน</th>
                   <th scope="col" className="px-3 py-2 font-medium">ผู้ดำเนินการ</th>
@@ -396,8 +448,51 @@ export default function MaintenanceTasksBoard({
                 </tr>
               </thead>
               <tbody>
-                {filteredTasks.map((t) => (
+                {filteredTasks.map((t) => {
+                  const rowTasks = tasksByRowNumber.get(t.equipmentRowNumber) ?? [];
+                  const inProgressTask = pickInProgressTask(rowTasks);
+                  const lastCompletedTask = inProgressTask ? undefined : pickLastCompletedTask(rowTasks);
+                  return (
                   <tr key={t.taskId} className="border-b border-zinc-50 last:border-0 dark:border-zinc-800/60">
+                    <td className="px-3 py-2 align-top text-zinc-700 dark:text-zinc-300">
+                      <div className="flex flex-col gap-1">
+                        <MaintenanceStatusStrip
+                          tasks={rowTasks.map((rt) => ({
+                            status: rt.status,
+                            createdAt: rt.createdAt,
+                            completedAt: rt.completedAt,
+                            displayName: rt.assignedToDisplayName || rt.assignedToUsername || "ไม่ทราบผู้ดำเนินการ",
+                            actionsTaken: rt.actionsTaken,
+                            inspectionChecks: rt.inspectionChecks,
+                            partsChanged: rt.partsChanged,
+                            otherDetail: rt.otherDetail,
+                          }))}
+                          actionOptions={actionOptions}
+                          year={currentYear}
+                          assetLabel={t.assetNumber || undefined}
+                        />
+                        {inProgressTask ? (
+                          <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium leading-tight text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                            <Wrench size={9} strokeWidth={2} className="shrink-0" aria-hidden="true" />
+                            <span className="break-words">
+                              กำลังบำรุงรักษาโดย {inProgressTask.assignedToDisplayName || inProgressTask.assignedToUsername || "ไม่ทราบผู้ดำเนินการ"}
+                            </span>
+                          </span>
+                        ) : (
+                          lastCompletedTask && (
+                            <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-medium leading-tight text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                              <CheckCircle2 size={9} strokeWidth={2} className="shrink-0" aria-hidden="true" />
+                              <span className="break-words">
+                                เสร็จสิ้นล่าสุดโดย{" "}
+                                {lastCompletedTask.assignedToDisplayName || lastCompletedTask.assignedToUsername || "ไม่ทราบผู้ดำเนินการ"}
+                                {lastCompletedTask.completedAt &&
+                                  ` เมื่อ ${new Date(lastCompletedTask.completedAt).toLocaleDateString("th-TH")}`}
+                              </span>
+                            </span>
+                          )
+                        )}
+                      </div>
+                    </td>
                     <td className="px-3 py-2 align-top text-zinc-700 dark:text-zinc-300">
                       <div className="font-medium text-zinc-900 dark:text-zinc-100">{t.assetNumber || "—"}</div>
                       <div className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -453,10 +548,11 @@ export default function MaintenanceTasksBoard({
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {filteredTasks.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-3 py-8 text-center text-zinc-400">
+                    <td colSpan={7} className="px-3 py-8 text-center text-zinc-400">
                       <ClipboardList size={20} strokeWidth={1.5} className="mx-auto mb-1" aria-hidden="true" />
                       ไม่พบงานที่ตรงกับตัวกรอง
                     </td>
