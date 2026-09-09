@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Check, ChevronDown } from "lucide-react";
 
 export interface MultiSelectOption {
@@ -8,6 +8,12 @@ export interface MultiSelectOption {
   /** Display text — defaults to `value` when omitted. */
   label?: string;
   count?: number;
+  /** Optional small color dot shown before the label (e.g. the
+   * "การดำเนินการ" categorical colors on /manage/it/report and
+   * /manage/it/tasks) — CSS custom properties from actionColorVars
+   * (lib/actionColors), paired with the matching bg-[var(...)] classes
+   * below. Omitted entirely for options with no color concept. */
+  colorVars?: Record<string, string>;
 }
 
 /**
@@ -141,6 +147,13 @@ export default function MultiSelect({
                   checked={isSelected}
                   onChange={() => toggle(opt.value)}
                 />
+                {opt.colorVars && (
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                    style={opt.colorVars as CSSProperties}
+                    aria-hidden="true"
+                  />
+                )}
                 <span className="flex-1 break-words">{opt.label ?? opt.value}</span>
                 {typeof opt.count === "number" && (
                   <span className="shrink-0 text-xs text-zinc-400">({opt.count.toLocaleString("th-TH")})</span>

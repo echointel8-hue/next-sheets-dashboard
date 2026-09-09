@@ -160,7 +160,7 @@ export default async function ManageItReportPage() {
       items={items}
       loadError={loadError}
       settings={settings}
-      currentUser={{ username: session.username, displayName }}
+      currentUser={{ username: session.username, displayName, isBootstrap: session.isBootstrap }}
       taskHistory={taskHistory}
     />
   );

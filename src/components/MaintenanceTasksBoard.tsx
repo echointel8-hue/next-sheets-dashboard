@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import type { InspectionCheck, MaintenanceTask, MaintenanceTaskStatus } from "@/lib/sheets";
+import { actionColorVars, buildActionColorMap, colorForAction } from "@/lib/actionColors";
 import MultiSelect from "@/components/MultiSelect";
 
 const CARD = "rounded-2xl border border-emerald-900/10 bg-white shadow-sm dark:border-emerald-400/10 dark:bg-zinc-900";
@@ -491,6 +492,11 @@ function TaskUpdateModal({
   onPatch: (updates: Record<string, unknown>) => Promise<MaintenanceTask>;
 }) {
   const readOnly = task.status === "done";
+  // Same index-based categorical color as /manage/it/report's month-strip
+  // and legend (see lib/actionColors) — actionOptions here is the exact
+  // same ReportSettings list, so a given action always renders in the same
+  // color in both places.
+  const actionColorMap = useMemo(() => buildActionColorMap(actionOptions), [actionOptions]);
   const [actionsTaken, setActionsTaken] = useState<string[]>(task.actionsTaken);
   const [inspectionChecks, setInspectionChecks] = useState<InspectionCheck[]>(task.inspectionChecks);
   const [partsChanged, setPartsChanged] = useState(task.partsChanged);
@@ -499,9 +505,6 @@ function TaskUpdateModal({
   const [saving, setSaving] = useState<"draft" | "done" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  function toggleAction(v: string) {
-    setActionsTaken((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
-  }
   function toggleCheck(v: InspectionCheck) {
     setInspectionChecks((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
   }
@@ -578,24 +581,21 @@ function TaskUpdateModal({
 
           <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
             <p className="text-sm font-bold text-zinc-800 dark:text-zinc-100">การดำเนินการ</p>
-            {actionOptions.length === 0 && <p className="text-sm text-zinc-400">ยังไม่มีรายการ — ตั้งค่าได้ที่หน้าออกรายงาน</p>}
-            <div className="flex flex-col gap-1.5">
-              {actionOptions.map((opt) => (
-                <label
-                  key={opt}
-                  className={`flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-200 ${readOnly ? "" : "cursor-pointer"}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={actionsTaken.includes(opt)}
-                    onChange={() => toggleAction(opt)}
-                    disabled={readOnly}
-                    className={CHECKBOX_CLASS}
-                  />
-                  {opt}
-                </label>
-              ))}
-            </div>
+            {actionOptions.length === 0 ? (
+              <p className="text-sm text-zinc-400">ยังไม่มีรายการ — ตั้งค่าได้ที่หน้าออกรายงาน</p>
+            ) : (
+              <MultiSelect
+                label=""
+                options={actionOptions.map((opt) => ({
+                  value: opt,
+                  colorVars: actionColorVars(colorForAction(actionColorMap, opt)),
+                }))}
+                selected={actionsTaken}
+                onChange={setActionsTaken}
+                allLabel="ยังไม่ได้เลือก"
+                disabled={readOnly}
+              />
+            )}
           </div>
 
           <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">

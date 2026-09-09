@@ -7,6 +7,7 @@ import {
   Check,
   CheckCircle2,
   Loader2,
+  Lock,
   MapPin,
   Plus,
   Printer as PrinterIcon,
@@ -20,6 +21,13 @@ import {
 } from "lucide-react";
 import type { InspectionCheck, MaintenanceTaskStatus, ReportSettings } from "@/lib/sheets";
 import { TITLE_PREFIX_OPTIONS } from "@/lib/fields";
+import {
+  ACTION_OTHER_COLOR,
+  actionColorVars,
+  buildActionColorMap,
+  colorForAction as colorForActionShared,
+  type ActionColor,
+} from "@/lib/actionColors";
 import MultiSelect from "@/components/MultiSelect";
 
 /** One selectable equipment item — already flattened/redaction-free by
@@ -119,36 +127,14 @@ const THAI_MONTHS_SHORT = [
   "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
 ];
 
-/** Fixed, colorblind-validated categorical order (8 hues) for coloring each
- * distinct "การดำเนินการ" (action-taken) text in the month-strip and its
- * legend — assigned automatically by first-appearance order (see
- * actionColorMap below), never picked by hand and never re-cycled, so a
- * color always means the same action everywhere it appears. A 9th-and-later
- * distinct action folds into ACTION_OTHER_COLOR instead of generating a new
- * hue, since a 9th hue can no longer be kept distinguishable from the rest
- * (colorblind-safe categorical palettes top out around 8). */
-const ACTION_COLOR_PALETTE: { light: string; dark: string }[] = [
-  { light: "#2a78d6", dark: "#3987e5" }, // blue
-  { light: "#eb6834", dark: "#d95926" }, // orange
-  { light: "#1baf7a", dark: "#199e70" }, // aqua
-  { light: "#eda100", dark: "#c98500" }, // yellow
-  { light: "#e87ba4", dark: "#d55181" }, // magenta
-  { light: "#008300", dark: "#008300" }, // green
-  { light: "#4a3aa7", dark: "#9085e9" }, // violet
-  { light: "#e34948", dark: "#e66767" }, // red
-];
-/** Deliberately neutral/gray — never impersonates one of the 8 real
- * categorical colors above — used once a 9th distinct action text shows up. */
-const ACTION_OTHER_COLOR = { light: "#a1a1aa", dark: "#71717a" };
-
-type ActionColor = { light: string; dark: string };
-
 /** CSS custom properties for one action-color segment — applied via
  * className="bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]" so the two
  * static Tailwind arbitrary-value classes stay the same for every segment
- * while the actual color comes from the inline variables per element. */
+ * while the actual color comes from the inline variables per element. Thin
+ * wrapper around the shared actionColorVars (lib/actionColors) that just
+ * adds the CSSProperties cast for JSX's style prop. */
 function actionColorStyle(color: ActionColor): CSSProperties {
-  return { "--seg-c": color.light, "--seg-c-dark": color.dark } as CSSProperties;
+  return actionColorVars(color) as CSSProperties;
 }
 
 /** Full names, in the same index order as THAI_MONTHS_SHORT — used only for
@@ -199,8 +185,12 @@ export default function MaintenanceReportBuilder({
   /** The logged-in IT account — auto-fills "ผู้ดำเนินการ" on the printed
    * form (see the print-area date/time line below) and attributes any
    * maintenance tasks created when this report is printed (see
-   * createTasksForSelection / the print button's onClick). */
-  currentUser: { username: string; displayName: string };
+   * createTasksForSelection / the print button's onClick). isBootstrap
+   * drives canManageActionOptions below — only the single env-configured
+   * bootstrap account may reorder/edit/delete an existing รายการ
+   * "การดำเนินการ" entry; every other account (it, or a superadmin created
+   * later through /manage/users) may only append new ones. */
+  currentUser: { username: string; displayName: string; isBootstrap: boolean };
   /** Every maintenance task ever created (any equipment, any year) — the
    * source for the "กำลังบำรุงรักษาโดย ..." / "เสร็จสิ้นล่าสุดโดย ..."
    * badges in the picker table below. Kept as the raw list (not
@@ -294,6 +284,24 @@ export default function MaintenanceReportBuilder({
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  // Only the single env-configured bootstrap account may reorder, rename, or
+  // delete an already-saved รายการ "การดำเนินการ" entry (or, by extension,
+  // change the color that entry's list position implies) — see
+  // canAccessItDashboard's isBootstrap comment in lib/auth.ts for why this
+  // is a narrower check than "any superadmin". Everyone else who can reach
+  // this page (it, or a superadmin created later through /manage/users) may
+  // only append new entries; already-saved ones render read-only. Enforced
+  // again server-side in /api/manage/it/settings — this is a UI convenience,
+  // not the actual security boundary.
+  const canManageActionOptions = currentUser.isBootstrap;
+  // How many รายการ "การดำเนินการ" entries are already saved (and therefore
+  // locked for non-bootstrap accounts) — starts at however many the page
+  // loaded with, and grows whenever a save succeeds (see
+  // saveSettingsAsDefault), so a non-bootstrap account's own just-appended
+  // entries lock immediately after they save, same as anyone else's.
+  const [lockedActionOptionsCount, setLockedActionOptionsCount] = useState(
+    initialSettings.actionOptions.length
+  );
 
   const departmentOptions = useMemo(() => {
     const set = new Set<string>();
@@ -320,32 +328,23 @@ export default function MaintenanceReportBuilder({
     return [...set].sort((a, b) => Number(b) - Number(a));
   }, [taskHistory]);
 
-  // Assigns each distinct "การดำเนินการ" text a fixed color from
-  // ACTION_COLOR_PALETTE, in first-ever-recorded order across the WHOLE task
-  // history (not scoped by the ปี/เดือน filters) — so a color stays the same
-  // for a given action no matter which year/month is being viewed. Capped at
-  // the 8 palette slots; anything beyond that shares ACTION_OTHER_COLOR
-  // rather than generating a new, no-longer-distinguishable hue.
-  const actionColorMap = useMemo(() => {
-    const seen: string[] = [];
-    const sorted = [...taskHistory].sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
-    for (const t of sorted) {
-      for (const raw of t.actionsTaken) {
-        const name = raw.trim();
-        if (name && !seen.includes(name)) seen.push(name);
-      }
-    }
-    const map = new Map<string, ActionColor>();
-    seen.forEach((name, idx) => {
-      map.set(name, ACTION_COLOR_PALETTE[idx] ?? ACTION_OTHER_COLOR);
-    });
-    return map;
-  }, [taskHistory]);
+  // Assigns each distinct "การดำเนินการ" text a fixed color, by its
+  // position in the canonical, ordered รายการ "การดำเนินการ" list (see the
+  // settings modal below) rather than by when it happens to first show up
+  // in task history — so the color a person sees in the settings list
+  // matches the color used everywhere else (month-strip, legend, popup) even
+  // before that action has ever been recorded on a real task. Only the
+  // bootstrap account can reorder or remove entries from that list (see
+  // canManageActionOptions below), so a color is effectively "set" by
+  // controlling list order/membership rather than picked by hand per item —
+  // see buildActionColorMap (lib/actionColors) for the actual index -> color
+  // assignment and its 8-color cap.
+  const actionColorMap = useMemo(
+    () => buildActionColorMap(formSettings.actionOptions),
+    [formSettings.actionOptions]
+  );
 
-  const colorForAction = (name: string): ActionColor =>
-    actionColorMap.get(name.trim()) ?? ACTION_OTHER_COLOR;
+  const colorForAction = (name: string): ActionColor => colorForActionShared(actionColorMap, name);
 
   // Legend shown above the picker table — every action that got its own
   // palette color, plus a single "อื่นๆ" entry standing in for however many
@@ -603,7 +602,12 @@ export default function MaintenanceReportBuilder({
   // section in the settings modal below. Blank rows are allowed while
   // editing (so a freshly-added row isn't yanked away before anyone can
   // type into it); cleanActionOptions strips them out at save/print time.
+  // An index below lockedActionOptionsCount is an already-saved entry — off
+  // limits to update/remove for anyone but the bootstrap account (see
+  // canManageActionOptions); the UI never renders an input/delete button for
+  // one anyway, but these guards keep it true even if that ever drifts.
   function updateActionOption(index: number, value: string) {
+    if (!canManageActionOptions && index < lockedActionOptionsCount) return;
     setFormSettings((prev) => ({
       ...prev,
       actionOptions: prev.actionOptions.map((v, i) => (i === index ? value : v)),
@@ -617,6 +621,7 @@ export default function MaintenanceReportBuilder({
   }
 
   function removeActionOption(index: number) {
+    if (!canManageActionOptions && index < lockedActionOptionsCount) return;
     setFormSettings((prev) =>
       prev.actionOptions.length <= 1 ? prev : { ...prev, actionOptions: prev.actionOptions.filter((_, i) => i !== index) }
     );
@@ -640,6 +645,10 @@ export default function MaintenanceReportBuilder({
         return;
       }
       setFormSettings(json.settings);
+      // Whatever just got saved is now permanent for non-bootstrap accounts
+      // (their own just-appended entries included) — see
+      // lockedActionOptionsCount's declaration.
+      setLockedActionOptionsCount((json.settings as ReportSettings).actionOptions.length);
       setSettingsSaved(true);
     } catch {
       setSettingsError("บันทึกไม่สำเร็จ กรุณาลองใหม่");
@@ -854,28 +863,57 @@ export default function MaintenanceReportBuilder({
 
                   <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
                     <p className="text-sm font-bold text-zinc-800 dark:text-zinc-100">รายการ &quot;การดำเนินการ&quot;</p>
+                    <p className="text-xs text-zinc-400">
+                      สีของแต่ละรายการกำหนดอัตโนมัติตามลำดับในรายการนี้ (ใช้สีเดียวกันทั้งในแถบ 12 เดือนและตอนเลือกงานที่ทำ)
+                      {!canManageActionOptions &&
+                        " — รายการที่บันทึกแล้วแก้ไข/ลบไม่ได้ เพิ่มรายการใหม่ต่อท้ายได้เท่านั้น (เฉพาะบัญชีผู้ดูแลระบบหลักเท่านั้นที่แก้ไข/ลบรายการเดิมได้)"}
+                    </p>
                     <div className="flex flex-col gap-2">
-                      {formSettings.actionOptions.map((opt, idx) => (
-                        <div key={idx} className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={opt}
-                            onChange={(e) => updateActionOption(idx, e.target.value)}
-                            placeholder="เช่น อัพเดทโปรแกรม Hosxp 3 เป็นเวอร์ชัน ...."
-                            className={`${INPUT_CLASS} flex-1`}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeActionOption(idx)}
-                            disabled={formSettings.actionOptions.length <= 1}
-                            title={formSettings.actionOptions.length <= 1 ? "ต้องมีอย่างน้อย 1 รายการ" : "ลบรายการนี้"}
-                            aria-label="ลบรายการนี้"
-                            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-zinc-200 disabled:hover:bg-transparent disabled:hover:text-zinc-500 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-red-900/50 dark:hover:bg-red-950/40 dark:hover:text-red-300"
-                          >
-                            <Trash2 size={16} strokeWidth={2} aria-hidden="true" />
-                          </button>
-                        </div>
-                      ))}
+                      {formSettings.actionOptions.map((opt, idx) => {
+                        const locked = !canManageActionOptions && idx < lockedActionOptionsCount;
+                        const color = opt.trim() ? colorForAction(opt) : null;
+                        return (
+                          <div key={idx} className="flex items-center gap-2">
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                              style={color ? actionColorStyle(color) : actionColorStyle(ACTION_OTHER_COLOR)}
+                              aria-hidden="true"
+                            />
+                            {locked ? (
+                              <span className="flex h-10 flex-1 items-center rounded-lg border border-transparent px-3 text-sm text-zinc-700 dark:text-zinc-300">
+                                {opt}
+                              </span>
+                            ) : (
+                              <input
+                                type="text"
+                                value={opt}
+                                onChange={(e) => updateActionOption(idx, e.target.value)}
+                                placeholder="เช่น อัพเดทโปรแกรม Hosxp 3 เป็นเวอร์ชัน ...."
+                                className={`${INPUT_CLASS} flex-1`}
+                              />
+                            )}
+                            {locked ? (
+                              <Lock
+                                size={16}
+                                strokeWidth={2}
+                                className="shrink-0 text-zinc-300 dark:text-zinc-600"
+                                aria-label="รายการนี้บันทึกแล้ว แก้ไข/ลบไม่ได้"
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => removeActionOption(idx)}
+                                disabled={formSettings.actionOptions.length <= 1}
+                                title={formSettings.actionOptions.length <= 1 ? "ต้องมีอย่างน้อย 1 รายการ" : "ลบรายการนี้"}
+                                aria-label="ลบรายการนี้"
+                                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-zinc-200 disabled:hover:bg-transparent disabled:hover:text-zinc-500 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-red-900/50 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+                              >
+                                <Trash2 size={16} strokeWidth={2} aria-hidden="true" />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                     <button
                       type="button"
