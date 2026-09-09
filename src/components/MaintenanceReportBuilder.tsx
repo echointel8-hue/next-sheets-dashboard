@@ -302,6 +302,24 @@ export default function MaintenanceReportBuilder({
   const [lockedActionOptionsCount, setLockedActionOptionsCount] = useState(
     initialSettings.actionOptions.length
   );
+  // Which รายการ "การดำเนินการ" entries are turned OFF for THIS printing
+  // round only — separate from the master list above (formSettings.
+  // actionOptions), per the hospital's request to grow the master catalog
+  // over time without every past entry having to appear on every single
+  // printout. Tracked as an exclude-list rather than an include-list so a
+  // newly-added master entry is "on" by default with no extra syncing —
+  // it's simply never in this list until someone turns it off. Not
+  // persisted anywhere (resets to "everything on" on reload) — the whole
+  // point is this can be freely re-toggled every time a form is printed,
+  // with zero effect on the master list or its colors. See the "เลือก
+  // รายการที่จะดำเนินการ" card below and printActionOptions further down.
+  const [excludedActionOptions, setExcludedActionOptions] = useState<string[]>([]);
+
+  function toggleActiveAction(name: string) {
+    setExcludedActionOptions((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+    );
+  }
 
   const departmentOptions = useMemo(() => {
     const set = new Set<string>();
@@ -697,8 +715,12 @@ export default function MaintenanceReportBuilder({
   const displayDate = visitDate ? formatThaiDate(visitDate) : "";
   const timeRangeLabel = timeFrom && timeTo ? `${timeFrom} - ${timeTo}` : timeFrom || timeTo || "";
   // Blank rows mid-edit in the settings modal never leak into the printed
-  // table — see cleanActionOptions.
-  const printActionOptions = cleanActionOptions(formSettings.actionOptions);
+  // table (cleanActionOptions), and anything toggled off for this round
+  // (excludedActionOptions, see the "เลือกรายการที่จะดำเนินการ" card) is
+  // dropped too — the master list stays untouched either way.
+  const printActionOptions = cleanActionOptions(formSettings.actionOptions).filter(
+    (name) => !excludedActionOptions.includes(name)
+  );
   // One ผู้ตรวจสอบ block per department, then ผู้รับทราบ last — all rendered
   // from a single grid below so they pair up left/right instead of
   // ผู้รับทราบ always getting shoved onto its own row. See that grid's
@@ -1307,6 +1329,83 @@ export default function MaintenanceReportBuilder({
                 </tbody>
               </table>
             </div>
+          </div>
+
+          {/* Step 3 in the intended top-to-bottom flow (กรอกหน่วยงาน →
+              กรองประเภทครุภัณฑ์/เลือกรายการ → เลือกรายการที่จะดำเนินการ →
+              preview → พิมพ์): which of the master รายการ "การดำเนินการ"
+              entries actually show up as checkboxes on THIS printout. A
+              plain toggle over the always-visible master list — not a
+              second CRUD editor — so switching what's relevant this round
+              never touches (and never requires deleting from) the master
+              list in "ตั้งค่าแบบฟอร์มรายงาน". */}
+          <div className={`${CARD} flex flex-col gap-3 p-4`}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  เลือกรายการที่จะดำเนินการ (แสดงในแบบฟอร์มที่พิมพ์รอบนี้)
+                </p>
+                <p className="text-xs text-zinc-400">
+                  สลับเปิด/ปิดได้ทุกครั้งที่พิมพ์ ไม่กระทบรายการทั้งหมดที่ตั้งไว้ — จัดการ/เพิ่มรายการทั้งหมดได้ที่ &quot;ตั้งค่าแบบฟอร์มรายงาน&quot;
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setExcludedActionOptions([])}
+                  disabled={excludedActionOptions.length === 0}
+                  className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  <Check size={13} strokeWidth={2} aria-hidden="true" />
+                  เลือกทั้งหมด
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExcludedActionOptions(cleanActionOptions(formSettings.actionOptions))}
+                  disabled={printActionOptions.length === 0}
+                  className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  <X size={13} strokeWidth={2} aria-hidden="true" />
+                  ล้างที่เลือก
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {cleanActionOptions(formSettings.actionOptions).map((name) => {
+                const active = !excludedActionOptions.includes(name);
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => toggleActiveAction(name)}
+                    aria-pressed={active}
+                    title={active ? "คลิกเพื่อไม่ใช้รายการนี้ในรอบนี้" : "คลิกเพื่อใช้รายการนี้ในรอบนี้"}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                      active
+                        ? "border-zinc-200 bg-white text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+                        : "border-dashed border-zinc-200 bg-transparent text-zinc-400 line-through dark:border-zinc-700 dark:text-zinc-500"
+                    }`}
+                  >
+                    <span
+                      className={`h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)] ${active ? "" : "opacity-30"}`}
+                      style={actionColorStyle(colorForAction(name))}
+                      aria-hidden="true"
+                    />
+                    {name}
+                    {active ? (
+                      <Check size={12} strokeWidth={2.5} aria-hidden="true" />
+                    ) : (
+                      <X size={12} strokeWidth={2.5} aria-hidden="true" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {printActionOptions.length === 0 && (
+              <p role="alert" className="text-xs text-amber-600 dark:text-amber-400">
+                ยังไม่ได้เลือกรายการดำเนินการสำหรับรอบนี้เลย — แบบฟอร์มที่พิมพ์จะไม่มีช่องติ๊กการดำเนินการ
+              </p>
+            )}
           </div>
 
           {/* Month-strip popup — a small centered modal listing the
