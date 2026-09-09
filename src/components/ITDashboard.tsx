@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Building2,
+  CheckCircle2,
   ClipboardCheck,
   Cpu,
   Filter,
@@ -15,6 +16,8 @@ import {
   Package,
   Printer,
   Save,
+  Users,
+  Wrench,
   X,
 } from "lucide-react";
 import {
@@ -28,10 +31,11 @@ import {
   type EquipmentRow,
   type FieldMap,
 } from "@/lib/fields";
-import type { SpecStandards } from "@/lib/sheets";
+import type { MaintenanceTask, SpecStandards } from "@/lib/sheets";
 import { getLatestMaintenanceLogByAsset, type MaintenanceLogEntry } from "@/lib/maintenanceLog";
 import { DEFAULT_SPEC_STANDARDS, evaluateRowSpec } from "@/lib/specEvaluation";
 import MultiSelect from "@/components/MultiSelect";
+import MaintenanceStatusStrip from "@/components/MaintenanceStatusStrip";
 
 export interface ITRecord {
   rowNumber: number;
@@ -77,11 +81,23 @@ export default function ITDashboard({
   session,
   initial,
   initialMaintenanceLog,
+  initialMaintenanceTasks,
+  actionOptions,
   initialSpecStandards,
 }: {
   session: { username: string; isBootstrap: boolean };
   initial: ITLoadResult;
   initialMaintenanceLog: MaintenanceLogEntry[];
+  /** Every MaintenanceTask ever created (any equipment, any ปี) — feeds the
+   * "แดชบอร์ดงานบำรุงรักษา" per-account summary below and the read-only
+   * MaintenanceStatusStrip embedded in each spec table's เลขครุภัณฑ์ cell.
+   * Kept as the raw list (not pre-aggregated) so both can be derived
+   * client-side without a second round-trip. */
+  initialMaintenanceTasks: MaintenanceTask[];
+  /** รายการ "การดำเนินการ" (ReportSettings.actionOptions) — only needed here
+   * so MaintenanceStatusStrip colors each action exactly the same as
+   * /manage/it/report does (see lib/actionColors' index-based assignment). */
+  actionOptions: string[];
   initialSpecStandards: SpecStandards | null;
 }) {
   const router = useRouter();
@@ -91,11 +107,69 @@ export default function ITDashboard({
   const [search, setSearch] = useState("");
   const [showSpecSettings, setShowSpecSettings] = useState(false);
   const [maintenanceLog] = useState<MaintenanceLogEntry[]>(initialMaintenanceLog);
+  const [maintenanceTasks] = useState<MaintenanceTask[]>(initialMaintenanceTasks);
   const [specStandards, setSpecStandards] = useState<SpecStandards>(initialSpecStandards ?? DEFAULT_SPEC_STANDARDS);
 
   const latestMaintenanceByAsset = useMemo(
     () => getLatestMaintenanceLogByAsset(maintenanceLog),
     [maintenanceLog]
+  );
+
+  // Groups every task by its equipmentRowNumber once, so each spec-table row
+  // below can look up its own history in O(1) instead of re-filtering the
+  // whole list per row (MaintenanceStatusStrip only needs the slice for the
+  // one row it's rendering).
+  const tasksByRowNumber = useMemo(() => {
+    const map = new Map<number, MaintenanceTask[]>();
+    for (const t of maintenanceTasks) {
+      const list = map.get(t.equipmentRowNumber);
+      if (list) list.push(t);
+      else map.set(t.equipmentRowNumber, [t]);
+    }
+    return map;
+  }, [maintenanceTasks]);
+
+  // Current พ.ศ. year — MaintenanceStatusStrip always shows this one ปี
+  // (view-only here, no year picker, matching the "ดูได้อย่างเดียว" ask).
+  const currentYear = useMemo(() => String(new Date().getFullYear() + 543), []);
+
+  // Per-account maintenance workload — "รายงานการดำเนินการของ IT แต่ละท่าน"
+  // requested alongside the new dashboard section below. All-time totals
+  // (no ปี/เดือน scoping) since this is a running tally of who's done what,
+  // not a period report — /manage/it/tasks already covers period filtering
+  // in detail for anyone who needs that.
+  const technicianStats = useMemo(() => {
+    const byUser = new Map<
+      string,
+      { username: string; displayName: string; total: number; done: number; inProgress: number; lastActivity: string }
+    >();
+    for (const t of maintenanceTasks) {
+      const key = t.assignedToUsername || t.assignedToDisplayName || "ไม่ทราบผู้ดำเนินการ";
+      const entry = byUser.get(key) ?? {
+        username: t.assignedToUsername,
+        displayName: t.assignedToDisplayName || t.assignedToUsername || "ไม่ทราบผู้ดำเนินการ",
+        total: 0,
+        done: 0,
+        inProgress: 0,
+        lastActivity: "",
+      };
+      entry.total += 1;
+      if (t.status === "done") entry.done += 1;
+      else entry.inProgress += 1;
+      const activity = t.status === "done" ? t.completedAt || t.createdAt : t.createdAt;
+      if (activity > entry.lastActivity) entry.lastActivity = activity;
+      byUser.set(key, entry);
+    }
+    return [...byUser.values()].sort((a, b) => b.total - a.total);
+  }, [maintenanceTasks]);
+
+  const maintenanceTotals = useMemo(
+    () => ({
+      total: maintenanceTasks.length,
+      inProgress: maintenanceTasks.filter((t) => t.status === "in_progress").length,
+      done: maintenanceTasks.filter((t) => t.status === "done").length,
+    }),
+    [maintenanceTasks]
   );
 
   const rows = useMemo(() => (!isError(data) ? data.rows : []), [data]);
@@ -206,9 +280,7 @@ export default function ITDashboard({
             <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">
               แดชบอร์ดงาน IT
             </h1>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              {session.username} · ดูข้อมูล + ออกรายงาน (ไม่สามารถเพิ่ม/แก้ไข/จำหน่ายครุภัณฑ์จากหน้านี้ได้)
-            </p>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{session.username}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link
@@ -297,6 +369,81 @@ export default function ITDashboard({
               </div>
             </div>
 
+            {/* แดชบอร์ดงานบำรุงรักษา — a running (all-time) summary of
+                MaintenanceTask activity: overall totals plus one row per IT
+                account, so anyone glancing at this page sees who's been
+                doing the maintenance rounds without a trip to
+                /manage/it/tasks (still linked below for the full,
+                filterable board). */}
+            <div className={`${CARD} flex flex-col gap-3 p-4`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                  <Wrench size={15} strokeWidth={2} aria-hidden="true" />
+                  แดชบอร์ดงานบำรุงรักษา
+                </div>
+                <Link
+                  href="/manage/it/tasks"
+                  className="text-xs font-medium text-[var(--brand)] hover:underline"
+                >
+                  ดูรายละเอียดทั้งหมด →
+                </Link>
+              </div>
+
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                  งานทั้งหมด {maintenanceTotals.total.toLocaleString("th-TH")}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-medium text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">
+                  <Wrench size={11} strokeWidth={2} aria-hidden="true" />
+                  กำลังดำเนินการ {maintenanceTotals.inProgress.toLocaleString("th-TH")}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                  <CheckCircle2 size={11} strokeWidth={2} aria-hidden="true" />
+                  เสร็จสิ้นแล้ว {maintenanceTotals.done.toLocaleString("th-TH")}
+                </span>
+              </div>
+
+              {technicianStats.length === 0 ? (
+                <p className="text-xs text-zinc-400">ยังไม่มีข้อมูลงานบำรุงรักษา</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[420px] text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-emerald-900/15 text-[10px] uppercase tracking-wide text-zinc-400 dark:border-emerald-400/15">
+                        <th scope="col" className="flex items-center gap-1 py-1.5 pr-2 font-medium">
+                          <Users size={12} strokeWidth={2} aria-hidden="true" />
+                          ผู้ดำเนินการ
+                        </th>
+                        <th scope="col" className="px-2 py-1.5 text-right font-medium">ทั้งหมด</th>
+                        <th scope="col" className="px-2 py-1.5 text-right font-medium">เสร็จสิ้น</th>
+                        <th scope="col" className="px-2 py-1.5 text-right font-medium">กำลังทำ</th>
+                        <th scope="col" className="px-2 py-1.5 text-right font-medium">ล่าสุด</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {technicianStats.map((t) => (
+                        <tr key={t.username || t.displayName} className="border-b border-zinc-50 last:border-0 dark:border-zinc-800/60">
+                          <td className="py-1.5 pr-2 font-medium text-zinc-700 dark:text-zinc-200">{t.displayName}</td>
+                          <td className="px-2 py-1.5 text-right text-zinc-600 dark:text-zinc-300">
+                            {t.total.toLocaleString("th-TH")}
+                          </td>
+                          <td className="px-2 py-1.5 text-right text-emerald-700 dark:text-emerald-400">
+                            {t.done.toLocaleString("th-TH")}
+                          </td>
+                          <td className="px-2 py-1.5 text-right text-amber-700 dark:text-amber-400">
+                            {t.inProgress.toLocaleString("th-TH")}
+                          </td>
+                          <td className="px-2 py-1.5 text-right text-zinc-400 dark:text-zinc-500">
+                            {t.lastActivity ? new Date(t.lastActivity).toLocaleDateString("th-TH") : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
             {/* Filters */}
             <div className={`${CARD} flex flex-col gap-3 p-4`}>
               <div className="flex items-center justify-between gap-3">
@@ -377,6 +524,9 @@ export default function ITDashboard({
               latestMaintenanceByAsset={latestMaintenanceByAsset}
               specStandards={specStandards}
               showSpecStatus
+              tasksByRowNumber={tasksByRowNumber}
+              actionOptions={actionOptions}
+              statusYear={currentYear}
             />
 
             <SpecTable
@@ -389,6 +539,9 @@ export default function ITDashboard({
               latestMaintenanceByAsset={latestMaintenanceByAsset}
               specStandards={specStandards}
               showSpecStatus={false}
+              tasksByRowNumber={tasksByRowNumber}
+              actionOptions={actionOptions}
+              statusYear={currentYear}
             />
           </>
         )}
@@ -484,6 +637,9 @@ function SpecTable({
   latestMaintenanceByAsset,
   specStandards,
   showSpecStatus,
+  tasksByRowNumber,
+  actionOptions,
+  statusYear,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -494,8 +650,13 @@ function SpecTable({
   latestMaintenanceByAsset: Map<string, MaintenanceLogEntry>;
   specStandards: SpecStandards;
   showSpecStatus: boolean;
+  /** This row's maintenance history, keyed by equipmentRowNumber — feeds the
+   * read-only MaintenanceStatusStrip embedded under เลขครุภัณฑ์. */
+  tasksByRowNumber: Map<number, MaintenanceTask[]>;
+  actionOptions: string[];
+  statusYear: string;
 }) {
-  const columnCount = 6 + specColumns.length + 2 + (showSpecStatus ? 1 : 0);
+  const columnCount = 6 + specColumns.length + 1 + (showSpecStatus ? 1 : 0);
   return (
     <div className={CARD}>
       <div className="flex items-center gap-2 border-b border-emerald-900/10 px-4 py-3 text-sm font-semibold text-zinc-800 dark:border-emerald-400/10 dark:text-zinc-100">
@@ -506,23 +667,22 @@ function SpecTable({
         </span>
       </div>
       <div className="max-w-full overflow-x-auto">
-        <table className="w-full min-w-[900px] text-left text-[11px] sm:text-xs lg:text-sm">
+        <table className="w-full min-w-[720px] text-left text-[10px] sm:text-[11px]">
           <thead>
-            <tr className="border-b border-emerald-900/15 text-[10px] uppercase tracking-wide text-zinc-400 dark:border-emerald-400/15">
-              <th scope="col" className="px-2 py-2 font-medium sm:px-3">เลขครุภัณฑ์</th>
-              <th scope="col" className="px-2 py-2 font-medium sm:px-3">กลุ่มงาน</th>
-              <th scope="col" className="px-2 py-2 font-medium sm:px-3">ยี่ห้อ / รุ่น</th>
+            <tr className="border-b border-emerald-900/15 text-[9px] uppercase tracking-wide text-zinc-400 dark:border-emerald-400/15">
+              <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">เลขครุภัณฑ์</th>
+              <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">กลุ่มงาน</th>
+              <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">ยี่ห้อ / รุ่น</th>
               {specColumns.map((c) => (
-                <th key={c.label} scope="col" className="px-2 py-2 font-medium sm:px-3">
+                <th key={c.label} scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">
                   {c.label}
                 </th>
               ))}
-              <th scope="col" className="px-2 py-2 font-medium sm:px-3">สถานที่ / จุดติดตั้ง</th>
-              <th scope="col" className="px-2 py-2 font-medium sm:px-3">ผู้ใช้งาน</th>
-              <th scope="col" className="px-2 py-2 font-medium sm:px-3">สถานะ</th>
-              <th scope="col" className="px-2 py-2 font-medium sm:px-3">ซอฟต์แวร์ล่าสุด</th>
-              <th scope="col" className="px-2 py-2 font-medium sm:px-3">เป่าฝุ่นล่าสุด</th>
-              {showSpecStatus && <th scope="col" className="px-2 py-2 font-medium sm:px-3">สถานะสเปก</th>}
+              <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">สถานที่ / จุดติดตั้ง</th>
+              <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">ผู้ใช้งาน</th>
+              <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">สถานะ</th>
+              <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">ล่าสุด (ซอฟต์แวร์ / เป่าฝุ่น)</th>
+              {showSpecStatus && <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">สถานะสเปก</th>}
             </tr>
           </thead>
           <tbody>
@@ -531,53 +691,73 @@ function SpecTable({
               const assetNumber = fields ? getAssetNumber(r.values, fields) : "";
               const latest = assetNumber ? latestMaintenanceByAsset.get(assetNumber) : undefined;
               const brandModel = fields ? getBrandModel(r.values, fields) : "";
+              const rowTasks = tasksByRowNumber.get(r.rowNumber) ?? [];
               return (
                 <tr
                   key={r.rowNumber}
                   className="border-b border-zinc-100 transition-colors last:border-0 hover:bg-emerald-50/70 dark:border-zinc-800/60 dark:hover:bg-emerald-900/10"
                 >
-                  <td className="break-words px-2 py-2 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-3">
-                    {assetNumber || "—"}
+                  <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
+                    <div className="flex flex-col gap-1">
+                      <span>{assetNumber || "—"}</span>
+                      {rowTasks.length > 0 && (
+                        <MaintenanceStatusStrip
+                          tasks={rowTasks.map((t) => ({
+                            status: t.status,
+                            createdAt: t.createdAt,
+                            completedAt: t.completedAt,
+                            displayName: t.assignedToDisplayName || t.assignedToUsername || "ไม่ทราบผู้ดำเนินการ",
+                            actionsTaken: t.actionsTaken,
+                            inspectionChecks: t.inspectionChecks,
+                            partsChanged: t.partsChanged,
+                            otherDetail: t.otherDetail,
+                          }))}
+                          actionOptions={actionOptions}
+                          year={statusYear}
+                          assetLabel={assetNumber || undefined}
+                        />
+                      )}
+                    </div>
                   </td>
-                  <td className="break-words px-2 py-2 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-3">
+                  <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
                     {(fields && cell(r.values, fields.department)) || "—"}
                   </td>
-                  <td className="break-words px-2 py-2 align-top leading-snug font-medium text-zinc-900 dark:text-zinc-100 sm:px-3">
+                  <td className="break-words px-1.5 py-1.5 align-top leading-snug font-medium text-zinc-900 dark:text-zinc-100 sm:px-2">
                     {brandModel || "—"}
                   </td>
                   {specColumns.map((c) => (
                     <td
                       key={c.label}
-                      className="break-words px-2 py-2 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-3"
+                      className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2"
                     >
                       {cell(r.values, c.header) || "—"}
                     </td>
                   ))}
-                  <td className="break-words px-2 py-2 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-3">
+                  <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
                     {(fields && cell(r.values, fields.installLocation)) || "—"}
                   </td>
-                  <td className="break-words px-2 py-2 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-3">
+                  <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
                     {(fields && getFullName(r.values, fields)) || "—"}
                   </td>
-                  <td className="px-2 py-2 align-top sm:px-3">
+                  <td className="px-1.5 py-1.5 align-top sm:px-2">
                     {disposed ? (
-                      <span className="inline-flex items-center rounded-full border border-zinc-300 bg-zinc-50 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                      <span className="inline-flex items-center rounded-full border border-zinc-300 bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
                         จำหน่ายแล้ว
                       </span>
                     ) : (
-                      <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
                         ใช้งาน
                       </span>
                     )}
                   </td>
-                  <td className="break-words px-2 py-2 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-3">
-                    {latest?.software || "—"}
-                  </td>
-                  <td className="break-words px-2 py-2 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-3">
-                    {latest?.maintenanceDate || "—"}
+                  <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
+                    <div className="flex flex-col gap-0.5">
+                      <span>{latest?.software || "—"}</span>
+                      <span className="text-zinc-400 dark:text-zinc-500">{latest?.maintenanceDate || "—"}</span>
+                    </div>
                   </td>
                   {showSpecStatus && (
-                    <td className="px-2 py-2 align-top sm:px-3">
+                    <td className="px-1.5 py-1.5 align-top sm:px-2">
                       {fields ? (
                         <SpecStatusBadge
                           row={r.values}

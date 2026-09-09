@@ -4,8 +4,11 @@ import { SESSION_COOKIE, canAccessItDashboard, verifySessionToken } from "@/lib/
 import {
   getEquipmentDataUnredacted,
   getMaintenanceLog,
+  getMaintenanceTasks,
+  getReportSettings,
   getSpecStandards,
   type MaintenanceLogEntry,
+  type MaintenanceTask,
   type SpecStandards,
 } from "@/lib/sheets";
 import { isDeleted } from "@/lib/fields";
@@ -35,6 +38,8 @@ export default async function ManageItPage() {
   let initial: ITDashboardData | { error: string };
   let maintenanceLog: MaintenanceLogEntry[] = [];
   let specStandards: SpecStandards | null = null;
+  let maintenanceTasks: MaintenanceTask[] = [];
+  let actionOptions: string[] = [];
   try {
     const snapshot = await getEquipmentDataUnredacted();
     // Deleted rows never reach any /manage view, IT included — same rule
@@ -65,11 +70,31 @@ export default async function ManageItPage() {
     // Fall back to empty history + defaults, same rationale as above.
   }
 
+  // Feeds the new "แดชบอร์ดงานบำรุงรักษา" summary (per-IT-account totals)
+  // and the read-only status strip embedded in each spec table's
+  // เลขครุภัณฑ์ cell (see MaintenanceStatusStrip) — both best-effort, same
+  // as maintenanceLog/specStandards above: a missing/unreachable
+  // MaintenanceTasks or ReportSettings tab just means an empty dashboard
+  // section and colorless strips, not a broken page.
+  try {
+    maintenanceTasks = await getMaintenanceTasks();
+  } catch {
+    // Fall through with an empty list.
+  }
+  try {
+    actionOptions = (await getReportSettings()).actionOptions;
+  } catch {
+    // Fall through with no colors — MaintenanceStatusStrip still renders
+    // fine (everything just falls into ACTION_OTHER_COLOR).
+  }
+
   return (
     <ITDashboard
       session={{ username: session.username, isBootstrap: session.isBootstrap }}
       initial={initial}
       initialMaintenanceLog={maintenanceLog}
+      initialMaintenanceTasks={maintenanceTasks}
+      actionOptions={actionOptions}
       initialSpecStandards={specStandards}
     />
   );
