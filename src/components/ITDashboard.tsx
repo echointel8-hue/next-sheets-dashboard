@@ -656,7 +656,7 @@ function SpecTable({
   actionOptions: string[];
   statusYear: string;
 }) {
-  const columnCount = 6 + specColumns.length + 1 + (showSpecStatus ? 1 : 0);
+  const columnCount = 5 + specColumns.length + (showSpecStatus ? 1 : 0);
   return (
     <div className={CARD}>
       <div className="flex items-center gap-2 border-b border-emerald-900/10 px-4 py-3 text-sm font-semibold text-zinc-800 dark:border-emerald-400/10 dark:text-zinc-100">
@@ -670,7 +670,7 @@ function SpecTable({
         <table className="w-full min-w-[720px] text-left text-[10px] sm:text-[11px]">
           <thead>
             <tr className="border-b border-emerald-900/15 text-[9px] uppercase tracking-wide text-zinc-400 dark:border-emerald-400/15">
-              <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">เลขครุภัณฑ์</th>
+              <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">เดือนบำรุงรักษา</th>
               <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">กลุ่มงาน</th>
               <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">ยี่ห้อ / รุ่น</th>
               {specColumns.map((c) => (
@@ -681,7 +681,6 @@ function SpecTable({
               <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">สถานที่ / จุดติดตั้ง</th>
               <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">ผู้ใช้งาน</th>
               <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">สถานะ</th>
-              <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">ล่าสุด (ซอฟต์แวร์ / เป่าฝุ่น)</th>
               {showSpecStatus && <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">สถานะสเปก</th>}
             </tr>
           </thead>
@@ -698,26 +697,25 @@ function SpecTable({
                   className="border-b border-zinc-100 transition-colors last:border-0 hover:bg-emerald-50/70 dark:border-zinc-800/60 dark:hover:bg-emerald-900/10"
                 >
                   <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
-                    <div className="flex flex-col gap-1">
-                      <span>{assetNumber || "—"}</span>
-                      {rowTasks.length > 0 && (
-                        <MaintenanceStatusStrip
-                          tasks={rowTasks.map((t) => ({
-                            status: t.status,
-                            createdAt: t.createdAt,
-                            completedAt: t.completedAt,
-                            displayName: t.assignedToDisplayName || t.assignedToUsername || "ไม่ทราบผู้ดำเนินการ",
-                            actionsTaken: t.actionsTaken,
-                            inspectionChecks: t.inspectionChecks,
-                            partsChanged: t.partsChanged,
-                            otherDetail: t.otherDetail,
-                          }))}
-                          actionOptions={actionOptions}
-                          year={statusYear}
-                          assetLabel={assetNumber || undefined}
-                        />
-                      )}
-                    </div>
+                    {rowTasks.length > 0 ? (
+                      <MaintenanceStatusStrip
+                        tasks={rowTasks.map((t) => ({
+                          status: t.status,
+                          createdAt: t.createdAt,
+                          completedAt: t.completedAt,
+                          displayName: t.assignedToDisplayName || t.assignedToUsername || "ไม่ทราบผู้ดำเนินการ",
+                          actionsTaken: t.actionsTaken,
+                          inspectionChecks: t.inspectionChecks,
+                          partsChanged: t.partsChanged,
+                          otherDetail: t.otherDetail,
+                        }))}
+                        actionOptions={actionOptions}
+                        year={statusYear}
+                        assetLabel={assetNumber || undefined}
+                      />
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
                     {(fields && cell(r.values, fields.department)) || "—"}
@@ -749,12 +747,6 @@ function SpecTable({
                         ใช้งาน
                       </span>
                     )}
-                  </td>
-                  <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
-                    <div className="flex flex-col gap-0.5">
-                      <span>{latest?.software || "—"}</span>
-                      <span className="text-zinc-400 dark:text-zinc-500">{latest?.maintenanceDate || "—"}</span>
-                    </div>
                   </td>
                   {showSpecStatus && (
                     <td className="px-1.5 py-1.5 align-top sm:px-2">
