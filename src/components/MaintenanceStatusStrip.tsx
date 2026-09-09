@@ -177,6 +177,47 @@ export default function MaintenanceStatusStrip({
         <span className="whitespace-nowrap text-[9px] text-zinc-300 dark:text-zinc-600">ยังไม่มีข้อมูลปีนี้</span>
       )}
 
+      {/* Inline "X ครั้ง (เดือนย่อ)" + action-chip legend for the current
+          เดือน — mirrors the report page's own legend under its strip (see
+          MaintenanceReportBuilder's filteredMonthTasks block), so the action(s)
+          taken are visible without clicking into the popup. Scoped to today's
+          real เดือน/ปี since this read-only component has no month filter of
+          its own (unlike the report page's maintenanceMonthFilter). */}
+      {year === currentYearBE &&
+        monthlyTasks[currentMonthIdx].length > 0 &&
+        (() => {
+          const currentMonthTasks = monthlyTasks[currentMonthIdx];
+          const names = [
+            ...new Set(
+              currentMonthTasks.flatMap((t) => t.actionsTaken.map((a) => a.trim()).filter(Boolean))
+            ),
+          ];
+          return (
+            <>
+              <p className="text-[9px] text-zinc-400 dark:text-zinc-500">
+                {currentMonthTasks.length.toLocaleString("th-TH")} ครั้ง ({THAI_MONTHS_SHORT[currentMonthIdx]})
+              </p>
+              {names.length > 0 && (
+                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                  {names.map((name) => (
+                    <span
+                      key={name}
+                      className="inline-flex items-center gap-1 text-[9px] text-zinc-500 dark:text-zinc-400"
+                    >
+                      <span
+                        className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                        style={actionColorStyle(colorForAction(actionColorMap, name))}
+                        aria-hidden="true"
+                      />
+                      {name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </>
+          );
+        })()}
+
       {openMonth !== null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
