@@ -1128,10 +1128,10 @@ export default function MaintenanceReportBuilder({
                     pointing at that dead space). */}
                 <colgroup>
                   <col className="w-10" />
-                  <col className="w-[30%]" />
-                  <col className="w-[24%]" />
-                  <col className="w-[20%]" />
-                  <col className="w-[18%]" />
+                  <col className="w-[21%]" />
+                  <col className="w-[26%]" />
+                  <col className="w-[27%]" />
+                  <col className="w-[26%]" />
                 </colgroup>
                 <thead className="sticky top-0 bg-white dark:bg-zinc-900">
                   <tr className="border-b border-zinc-100 text-[10px] uppercase tracking-wide text-zinc-400 dark:border-zinc-800">
@@ -1155,7 +1155,7 @@ export default function MaintenanceReportBuilder({
                       </td>
                       <td className="px-2 py-1.5 align-top">
                         <div
-                          className="flex items-start gap-[3px]"
+                          className="flex flex-wrap items-start gap-[3px]"
                           role="group"
                           aria-label={`เดือนที่บำรุงรักษาในปี ${maintenanceYearFilter || "ทุกปี"}`}
                         >
