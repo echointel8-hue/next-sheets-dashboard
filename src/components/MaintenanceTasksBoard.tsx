@@ -384,7 +384,7 @@ export default function MaintenanceTasksBoard({
           </div>
 
           <div className="overflow-x-auto rounded-lg border border-zinc-100 dark:border-zinc-800">
-            <table className="w-full min-w-[48rem] text-left text-sm">
+            <table className="w-full min-w-[48rem] text-left text-xs">
               <thead className="bg-zinc-50 dark:bg-zinc-800/60">
                 <tr className="border-b border-zinc-100 text-[10px] uppercase tracking-wide text-zinc-400 dark:border-zinc-800">
                   <th scope="col" className="px-3 py-2 font-medium">ครุภัณฑ์</th>
@@ -408,7 +408,7 @@ export default function MaintenanceTasksBoard({
                       <div>{t.location || "—"}</div>
                       <div className="text-xs text-zinc-500 dark:text-zinc-400">{t.department}</div>
                     </td>
-                    <td className="px-3 py-2 align-top text-zinc-700 dark:text-zinc-300">
+                    <td className="whitespace-nowrap px-3 py-2 align-top text-zinc-700 dark:text-zinc-300">
                       {t.assignedToDisplayName || t.assignedToUsername || "—"}
                     </td>
                     <td className="px-3 py-2 align-top whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-400">
@@ -416,11 +416,11 @@ export default function MaintenanceTasksBoard({
                     </td>
                     <td className="px-3 py-2 align-top">
                       {t.status === "in_progress" ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                        <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                           กำลังดำเนินการ
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                        <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                           <CheckCircle2 size={12} strokeWidth={2} aria-hidden="true" />
                           เสร็จสิ้น
                         </span>
@@ -431,7 +431,7 @@ export default function MaintenanceTasksBoard({
                         <button
                           type="button"
                           onClick={() => setActiveTaskId(t.taskId)}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                         >
                           <Wrench size={13} strokeWidth={2} aria-hidden="true" />
                           {t.status === "in_progress" ? "อัปเดตสถานะ" : "ดูรายละเอียด"}
