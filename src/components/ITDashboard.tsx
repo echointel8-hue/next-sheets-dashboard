@@ -14,6 +14,7 @@ import {
   Loader2,
   LogOut,
   Package,
+  Pencil,
   Printer,
   Save,
   Users,
@@ -23,6 +24,7 @@ import {
 import {
   PC_ONLY_FIELD_HEADERS,
   PRINTER_ONLY_FIELD_HEADERS,
+  STATUS_ACTIVE,
   STATUS_DISPOSED,
   classifyEquipmentType,
   getAssetNumber,
@@ -36,6 +38,7 @@ import { getLatestMaintenanceLogByAsset, type MaintenanceLogEntry } from "@/lib/
 import { DEFAULT_SPEC_STANDARDS, evaluateRowSpec } from "@/lib/specEvaluation";
 import MultiSelect from "@/components/MultiSelect";
 import MaintenanceStatusStrip from "@/components/MaintenanceStatusStrip";
+import BulkEditSpecModal, { type BulkEditResult } from "@/components/BulkEditSpecModal";
 
 export interface ITRecord {
   rowNumber: number;
@@ -107,6 +110,25 @@ function pickLastCompletedTask(tasks: MaintenanceTask[]): MaintenanceTask | unde
   return best;
 }
 
+const THAI_MONTHS_FULL = [
+  "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
+];
+
+/** Same "effective เดือน/ปี" rule as MaintenanceStatusStrip's own
+ * monthlyTasks bucketing (deliberately duplicated, not shared — see that
+ * component's header comment): a "done" task anchors to when it actually
+ * finished (completedAt), a still-open one always counts as "happening
+ * right now" (today's real date) so it keeps matching the current
+ * เดือน/ปี filter for as long as it stays open. Used only by the new
+ * "เดือน/ปีบำรุงรักษา" row filter below, so a filtered result always
+ * agrees with whichever month the strip itself highlights for that row. */
+function taskEffectiveYearMonth(t: MaintenanceTask): { yearBE: number; month1: number } {
+  const iso = t.status === "done" ? t.completedAt || t.createdAt : new Date().toISOString();
+  const d = new Date(iso);
+  return { yearBE: d.getFullYear() + 543, month1: d.getMonth() + 1 };
+}
+
 const SPEC_COLUMN_WIDTH_CLASS: Record<string, string> = {
   "ประเภท RAM": "w-[56px]",
   "ความจุ RAM": "w-[64px]",
@@ -139,14 +161,29 @@ export default function ITDashboard({
   initialSpecStandards: SpecStandards | null;
 }) {
   const router = useRouter();
-  const [data] = useState<ITLoadResult>(initial);
+  // Not a plain const — a successful bulk edit (see applyBulkEditResult
+  // below) patches the affected rows' values in place so the table reflects
+  // the save immediately, without a full page reload.
+  const [data, setData] = useState<ITLoadResult>(initial);
   const [departmentFilter, setDepartmentFilter] = useState<string[]>([]);
   const [equipmentTypeFilter, setEquipmentTypeFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [maintenanceMonthFilter, setMaintenanceMonthFilter] = useState("");
+  const [maintenanceYearFilter, setMaintenanceYearFilter] = useState("");
+  const [ramTypeFilter, setRamTypeFilter] = useState<string[]>([]);
+  const [ramCapacityFilter, setRamCapacityFilter] = useState<string[]>([]);
+  const [ramSpeedFilter, setRamSpeedFilter] = useState<string[]>([]);
+  const [storageTypeFilter, setStorageTypeFilter] = useState<string[]>([]);
+  const [storageCapacityFilter, setStorageCapacityFilter] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [showSpecSettings, setShowSpecSettings] = useState(false);
   const [maintenanceLog] = useState<MaintenanceLogEntry[]>(initialMaintenanceLog);
   const [maintenanceTasks] = useState<MaintenanceTask[]>(initialMaintenanceTasks);
   const [specStandards, setSpecStandards] = useState<SpecStandards>(initialSpecStandards ?? DEFAULT_SPEC_STANDARDS);
+  // เลือกหลายรายการ (เฉพาะตารางคอมพิวเตอร์/โน้ตบุ๊ก/All-in-One) เพื่อแก้ไข
+  // ยี่ห้อ/รุ่น/สเปกพร้อมกัน — see BulkEditSpecModal.
+  const [selectedRowNumbers, setSelectedRowNumbers] = useState<Set<number>>(new Set());
+  const [showBulkEdit, setShowBulkEdit] = useState(false);
 
   const latestMaintenanceByAsset = useMemo(
     () => getLatestMaintenanceLogByAsset(maintenanceLog),
@@ -170,6 +207,16 @@ export default function ITDashboard({
   // Current พ.ศ. year — MaintenanceStatusStrip always shows this one ปี
   // (view-only here, no year picker, matching the "ดูได้อย่างเดียว" ask).
   const currentYear = useMemo(() => String(new Date().getFullYear() + 543), []);
+
+  // ตัวเลือกปีของตัวกรอง "ปีบำรุงรักษา" — ทุกปี (พ.ศ.) ที่มีงานบำรุงรักษาจริง
+  // อยู่แล้ว บวกปีปัจจุบันเสมอ (แม้ยังไม่มีงานเลยในปีนี้) เรียงใหม่ไปเก่า.
+  const maintenanceYearOptions = useMemo(() => {
+    const set = new Set<string>([currentYear]);
+    for (const t of maintenanceTasks) {
+      set.add(String(taskEffectiveYearMonth(t).yearBE));
+    }
+    return [...set].sort((a, b) => Number(b) - Number(a));
+  }, [maintenanceTasks, currentYear]);
 
   // Per-account maintenance workload — "รายงานการดำเนินการของ IT แต่ละท่าน"
   // requested alongside the new dashboard section below. All-time totals
@@ -234,11 +281,30 @@ export default function ITDashboard({
     return [...set].sort((a, b) => a.localeCompare(b, "th")).map((value) => ({ value }));
   }, [rows, fields]);
 
-  const hasActiveFilters = departmentFilter.length > 0 || equipmentTypeFilter.length > 0 || search.trim() !== "";
+  const hasActiveFilters =
+    departmentFilter.length > 0 ||
+    equipmentTypeFilter.length > 0 ||
+    statusFilter.length > 0 ||
+    maintenanceMonthFilter !== "" ||
+    maintenanceYearFilter !== "" ||
+    ramTypeFilter.length > 0 ||
+    ramCapacityFilter.length > 0 ||
+    ramSpeedFilter.length > 0 ||
+    storageTypeFilter.length > 0 ||
+    storageCapacityFilter.length > 0 ||
+    search.trim() !== "";
 
   function clearFilters() {
     setDepartmentFilter([]);
     setEquipmentTypeFilter([]);
+    setStatusFilter([]);
+    setMaintenanceMonthFilter("");
+    setMaintenanceYearFilter("");
+    setRamTypeFilter([]);
+    setRamCapacityFilter([]);
+    setRamSpeedFilter([]);
+    setStorageTypeFilter([]);
+    setStorageCapacityFilter([]);
     setSearch("");
   }
 
@@ -254,6 +320,20 @@ export default function ITDashboard({
         const v = cell(r.values, fields.equipmentType);
         if (!equipmentTypeFilter.includes(v)) return false;
       }
+      if (statusFilter.length > 0) {
+        const label = cell(r.values, fields.status) === STATUS_DISPOSED ? STATUS_DISPOSED : STATUS_ACTIVE;
+        if (!statusFilter.includes(label)) return false;
+      }
+      if (maintenanceMonthFilter || maintenanceYearFilter) {
+        const rowTasks = tasksByRowNumber.get(r.rowNumber) ?? [];
+        const matches = rowTasks.some((t) => {
+          const eff = taskEffectiveYearMonth(t);
+          if (maintenanceMonthFilter && String(eff.month1) !== maintenanceMonthFilter) return false;
+          if (maintenanceYearFilter && String(eff.yearBE) !== maintenanceYearFilter) return false;
+          return true;
+        });
+        if (!matches) return false;
+      }
       if (q) {
         const haystack = [
           getAssetNumber(r.values, fields),
@@ -267,9 +347,19 @@ export default function ITDashboard({
       }
       return true;
     });
-  }, [rows, fields, departmentFilter, equipmentTypeFilter, search]);
+  }, [
+    rows,
+    fields,
+    departmentFilter,
+    equipmentTypeFilter,
+    statusFilter,
+    maintenanceMonthFilter,
+    maintenanceYearFilter,
+    tasksByRowNumber,
+    search,
+  ]);
 
-  const pcRows = useMemo(
+  const pcRowsAll = useMemo(
     () => (fields ? visibleRows.filter((r) => classifyEquipmentType(cell(r.values, fields.equipmentType)) === "pc") : []),
     [visibleRows, fields]
   );
@@ -300,6 +390,125 @@ export default function ITDashboard({
     () => [{ label: "ประเภทเครื่องพิมพ์", header: resolveHeader(headers, PRINTER_ONLY_FIELD_HEADERS[2]) }],
     [headers]
   );
+
+  // สเปกคอมพิวเตอร์ที่ใช้กรอง — มีผลเฉพาะตารางคอมพิวเตอร์/โน้ตบุ๊ก/All-in-One
+  // (ตารางเครื่องพิมพ์ไม่มีคอลัมน์เหล่านี้ จึงไม่ถูกกรองไปด้วย) ตัวเลือกแต่ละ
+  // ช่องดึงจากค่าจริงที่มีอยู่ในข้อมูล (หลังกรองตัวกรองอื่นๆ แล้ว แต่ก่อนกรอง
+  // ด้วยตัวมันเอง) เพื่อไม่ให้เสนอตัวเลือกที่ไม่มีอยู่จริงในระบบ.
+  const specHeaderByLabel = useMemo(() => {
+    const map: Record<string, string | null> = {};
+    for (const c of pcSpecColumns) map[c.label] = c.header;
+    return map;
+  }, [pcSpecColumns]);
+
+  // One combined useMemo (rather than 5 separate ones each calling a local
+  // helper) so the eslint-plugin-react-hooks exhaustive-deps check has a
+  // single, simple dependency list — pcRowsAll and specHeaderByLabel are
+  // the only two things any of these 5 option lists actually reads.
+  const specFilterOptions = useMemo(() => {
+    function optionsFor(label: string) {
+      const header = specHeaderByLabel[label];
+      if (!header) return [];
+      const set = new Set<string>();
+      for (const r of pcRowsAll) {
+        const v = cell(r.values, header);
+        if (v) set.add(v);
+      }
+      return [...set].sort((a, b) => a.localeCompare(b, "th")).map((value) => ({ value }));
+    }
+    return {
+      ramType: optionsFor("ประเภท RAM"),
+      ramCapacity: optionsFor("ความจุ RAM"),
+      ramSpeed: optionsFor("ความเร็ว RAM"),
+      storageType: optionsFor("ประเภทหน่วยจัดเก็บ"),
+      storageCapacity: optionsFor("ความจุจัดเก็บ"),
+    };
+  }, [pcRowsAll, specHeaderByLabel]);
+  const {
+    ramType: ramTypeOptions,
+    ramCapacity: ramCapacityOptions,
+    ramSpeed: ramSpeedOptions,
+    storageType: storageTypeOptions,
+    storageCapacity: storageCapacityOptions,
+  } = specFilterOptions;
+
+  const pcRows = useMemo(() => {
+    const ramTypeHeader = specHeaderByLabel["ประเภท RAM"];
+    const ramCapacityHeader = specHeaderByLabel["ความจุ RAM"];
+    const ramSpeedHeader = specHeaderByLabel["ความเร็ว RAM"];
+    const storageTypeHeader = specHeaderByLabel["ประเภทหน่วยจัดเก็บ"];
+    const storageCapacityHeader = specHeaderByLabel["ความจุจัดเก็บ"];
+    return pcRowsAll.filter((r) => {
+      if (ramTypeFilter.length > 0 && !ramTypeFilter.includes(cell(r.values, ramTypeHeader))) return false;
+      if (ramCapacityFilter.length > 0 && !ramCapacityFilter.includes(cell(r.values, ramCapacityHeader))) return false;
+      if (ramSpeedFilter.length > 0 && !ramSpeedFilter.includes(cell(r.values, ramSpeedHeader))) return false;
+      if (storageTypeFilter.length > 0 && !storageTypeFilter.includes(cell(r.values, storageTypeHeader))) return false;
+      if (
+        storageCapacityFilter.length > 0 &&
+        !storageCapacityFilter.includes(cell(r.values, storageCapacityHeader))
+      )
+        return false;
+      return true;
+    });
+  }, [
+    pcRowsAll,
+    specHeaderByLabel,
+    ramTypeFilter,
+    ramCapacityFilter,
+    ramSpeedFilter,
+    storageTypeFilter,
+    storageCapacityFilter,
+  ]);
+
+  // Bulk edit ตัดจากรายการที่เลือกไว้แล้วถ้าไม่อยู่ใน pcRows ที่มองเห็นอยู่ตอนนี้
+  // อีกต่อไป (เช่น ถูกกรองออกไปหลังแก้ไข) — ไม่บังคับ แค่กันไม่ให้ตัวนับ
+  // "เลือกแล้ว N รายการ" ค้างรวมแถวที่มองไม่เห็นแล้วจนสับสน
+  const selectablePcRowNumbers = useMemo(() => {
+    if (!fields) return new Set<number>();
+    const set = new Set<number>();
+    for (const r of pcRows) {
+      if (cell(r.values, fields.status) !== STATUS_DISPOSED) set.add(r.rowNumber);
+    }
+    return set;
+  }, [pcRows, fields]);
+
+  function toggleRowSelected(rowNumber: number) {
+    setSelectedRowNumbers((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowNumber)) next.delete(rowNumber);
+      else next.add(rowNumber);
+      return next;
+    });
+  }
+
+  function toggleSelectAllVisible(rowNumbers: number[], checked: boolean) {
+    setSelectedRowNumbers((prev) => {
+      const next = new Set(prev);
+      for (const rn of rowNumbers) {
+        if (checked) next.add(rn);
+        else next.delete(rn);
+      }
+      return next;
+    });
+  }
+
+  function applyBulkEditResult(result: BulkEditResult) {
+    setData((prev) => {
+      if (isError(prev)) return prev;
+      const byRow = new Map(result.updated.map((u) => [u.rowNumber, u.values]));
+      return {
+        ...prev,
+        rows: prev.rows.map((r) =>
+          byRow.has(r.rowNumber) ? { ...r, values: byRow.get(r.rowNumber) as EquipmentRow } : r
+        ),
+      };
+    });
+    setSelectedRowNumbers((prev) => {
+      const next = new Set(prev);
+      for (const u of result.updated) next.delete(u.rowNumber);
+      return next;
+    });
+  }
 
   async function logout() {
     try {
@@ -518,6 +727,43 @@ export default function ITDashboard({
                   onChange={setEquipmentTypeFilter}
                   className="sm:max-w-xs sm:flex-1"
                 />
+                <MultiSelect
+                  label="สถานะ"
+                  options={[{ value: STATUS_ACTIVE }, { value: STATUS_DISPOSED }]}
+                  selected={statusFilter}
+                  onChange={setStatusFilter}
+                  className="sm:max-w-[9rem] sm:flex-1"
+                />
+                <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-[9rem] sm:flex-1">
+                  เดือนบำรุงรักษา
+                  <select
+                    value={maintenanceMonthFilter}
+                    onChange={(e) => setMaintenanceMonthFilter(e.target.value)}
+                    className="h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                  >
+                    <option value="">ทั้งหมด</option>
+                    {THAI_MONTHS_FULL.map((label, i) => (
+                      <option key={label} value={String(i + 1)}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-[7rem] sm:flex-1">
+                  ปีบำรุงรักษา
+                  <select
+                    value={maintenanceYearFilter}
+                    onChange={(e) => setMaintenanceYearFilter(e.target.value)}
+                    className="h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                  >
+                    <option value="">ทั้งหมด</option>
+                    {maintenanceYearOptions.map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-xs sm:flex-1">
                   ค้นหา
                   <input
@@ -542,6 +788,52 @@ export default function ITDashboard({
                   {visibleRows.length.toLocaleString("th-TH")} / {rows.length.toLocaleString("th-TH")} รายการ
                 </span>
               </div>
+
+              {/* สเปกคอมพิวเตอร์ — มีผลเฉพาะตารางคอมพิวเตอร์/โน้ตบุ๊ก/All-in-One
+                  ด้านล่างเท่านั้น ตารางเครื่องพิมพ์ไม่มีคอลัมน์เหล่านี้จึงไม่ถูก
+                  กรองไปด้วย */}
+              <div className="flex flex-col gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                <p className="text-xs font-medium text-zinc-400 dark:text-zinc-500">
+                  ตัวกรองสเปกคอมพิวเตอร์ (เฉพาะตารางคอมพิวเตอร์ / โน้ตบุ๊ก)
+                </p>
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+                  <MultiSelect
+                    label="ประเภท RAM"
+                    options={ramTypeOptions}
+                    selected={ramTypeFilter}
+                    onChange={setRamTypeFilter}
+                    className="sm:max-w-[8rem] sm:flex-1"
+                  />
+                  <MultiSelect
+                    label="ความจุ RAM"
+                    options={ramCapacityOptions}
+                    selected={ramCapacityFilter}
+                    onChange={setRamCapacityFilter}
+                    className="sm:max-w-[8rem] sm:flex-1"
+                  />
+                  <MultiSelect
+                    label="ความเร็ว RAM"
+                    options={ramSpeedOptions}
+                    selected={ramSpeedFilter}
+                    onChange={setRamSpeedFilter}
+                    className="sm:max-w-[8rem] sm:flex-1"
+                  />
+                  <MultiSelect
+                    label="ประเภทหน่วยจัดเก็บ"
+                    options={storageTypeOptions}
+                    selected={storageTypeFilter}
+                    onChange={setStorageTypeFilter}
+                    className="sm:max-w-[9rem] sm:flex-1"
+                  />
+                  <MultiSelect
+                    label="ความจุจัดเก็บ"
+                    options={storageCapacityOptions}
+                    selected={storageCapacityFilter}
+                    onChange={setStorageCapacityFilter}
+                    className="sm:max-w-[9rem] sm:flex-1"
+                  />
+                </div>
+              </div>
             </div>
 
             {showSpecSettings && (
@@ -549,6 +841,40 @@ export default function ITDashboard({
                 initialStandards={specStandards}
                 onClose={() => setShowSpecSettings(false)}
                 onSaved={setSpecStandards}
+              />
+            )}
+
+            {selectedRowNumbers.size > 0 && (
+              <div className={`${CARD} flex flex-wrap items-center justify-between gap-3 p-3`}>
+                <span className="text-sm text-zinc-600 dark:text-zinc-300">
+                  เลือกแล้ว {selectedRowNumbers.size.toLocaleString("th-TH")} รายการ (ตารางคอมพิวเตอร์ / โน้ตบุ๊ก)
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRowNumbers(new Set())}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    <X size={13} strokeWidth={2} aria-hidden="true" />
+                    ล้างการเลือก
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowBulkEdit(true)}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-3 py-1.5 text-xs font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)]"
+                  >
+                    <Pencil size={13} strokeWidth={2} aria-hidden="true" />
+                    แก้ไขที่เลือก ({selectedRowNumbers.size.toLocaleString("th-TH")})
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {showBulkEdit && (
+              <BulkEditSpecModal
+                rowNumbers={[...selectedRowNumbers]}
+                onClose={() => setShowBulkEdit(false)}
+                onSaved={applyBulkEditResult}
               />
             )}
 
@@ -565,6 +891,11 @@ export default function ITDashboard({
               tasksByRowNumber={tasksByRowNumber}
               actionOptions={actionOptions}
               statusYear={currentYear}
+              selectable
+              selectedRowNumbers={selectedRowNumbers}
+              onToggleRow={toggleRowSelected}
+              onToggleAllVisible={toggleSelectAllVisible}
+              selectableRowNumbers={selectablePcRowNumbers}
             />
 
             <SpecTable
@@ -678,6 +1009,11 @@ function SpecTable({
   tasksByRowNumber,
   actionOptions,
   statusYear,
+  selectable = false,
+  selectedRowNumbers,
+  onToggleRow,
+  onToggleAllVisible,
+  selectableRowNumbers,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -693,8 +1029,23 @@ function SpecTable({
   tasksByRowNumber: Map<number, MaintenanceTask[]>;
   actionOptions: string[];
   statusYear: string;
+  /** เพิ่มคอลัมน์ checkbox นำหน้าตาราง สำหรับ "แก้ไขพร้อมกันหลายรายการ" — ตอนนี้
+   * มีเฉพาะตารางคอมพิวเตอร์/โน้ตบุ๊ก/All-in-One เพราะฟิลด์ที่แก้ไขได้ (ยี่ห้อ
+   * รุ่น สเปก RAM/หน่วยจัดเก็บ) เป็นคอลัมน์เฉพาะของอุปกรณ์ประเภทนี้เท่านั้น —
+   * ดู BulkEditSpecModal. */
+  selectable?: boolean;
+  selectedRowNumbers?: Set<number>;
+  onToggleRow?: (rowNumber: number) => void;
+  onToggleAllVisible?: (rowNumbers: number[], checked: boolean) => void;
+  /** rowNumbers ที่ "เลือกได้" ในตารางนี้ตอนนี้ (ไม่รวมรายการจำหน่ายแล้ว) —
+   * ใช้ตัดสิน checked/indeterminate ของ checkbox "เลือกทั้งหมด" ในหัวตาราง. */
+  selectableRowNumbers?: Set<number>;
 }) {
-  const columnCount = 6 + specColumns.length + (showSpecStatus ? 1 : 0);
+  const columnCount = 6 + specColumns.length + (showSpecStatus ? 1 : 0) + (selectable ? 1 : 0);
+  const selectableList = selectableRowNumbers ? [...selectableRowNumbers] : [];
+  const allSelected =
+    selectable && selectableList.length > 0 && selectableList.every((rn) => selectedRowNumbers?.has(rn));
+  const someSelected = selectable && selectableList.some((rn) => selectedRowNumbers?.has(rn));
   return (
     <div className={CARD}>
       <div className="flex items-center gap-2 border-b border-emerald-900/10 px-4 py-3 text-sm font-semibold text-zinc-800 dark:border-emerald-400/10 dark:text-zinc-100">
@@ -707,6 +1058,7 @@ function SpecTable({
       <div className="max-w-full overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-[10px] sm:text-[11px]">
           <colgroup>
+            {selectable && <col className="w-[28px]" />}
             <col className="w-[224px]" />
             <col />
             <col />
@@ -720,6 +1072,21 @@ function SpecTable({
           </colgroup>
           <thead>
             <tr className="border-b border-emerald-900/15 text-[9px] uppercase tracking-wide text-zinc-400 dark:border-emerald-400/15">
+              {selectable && (
+                <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = !allSelected && someSelected;
+                    }}
+                    onChange={(e) => onToggleAllVisible?.(selectableList, e.target.checked)}
+                    disabled={selectableList.length === 0}
+                    aria-label="เลือกทั้งหมด"
+                    className="h-3.5 w-3.5 rounded border-zinc-300"
+                  />
+                </th>
+              )}
               <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">เดือนบำรุงรักษา</th>
               <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">กลุ่มงาน</th>
               <th scope="col" className="px-1.5 py-1.5 font-medium sm:px-2">ยี่ห้อ / รุ่น</th>
@@ -748,6 +1115,19 @@ function SpecTable({
                   key={r.rowNumber}
                   className="border-b border-zinc-100 transition-colors last:border-0 hover:bg-emerald-50/70 dark:border-zinc-800/60 dark:hover:bg-emerald-900/10"
                 >
+                  {selectable && (
+                    <td className="px-1.5 py-1.5 align-top sm:px-2">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selectedRowNumbers?.has(r.rowNumber))}
+                        onChange={() => onToggleRow?.(r.rowNumber)}
+                        disabled={disposed}
+                        title={disposed ? "รายการนี้จำหน่ายแล้ว ไม่สามารถเลือกแก้ไขได้" : undefined}
+                        aria-label={`เลือกแถวที่ ${r.rowNumber}`}
+                        className="h-3.5 w-3.5 rounded border-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
+                      />
+                    </td>
+                  )}
                   <td className="break-words px-1.5 py-1.5 align-top leading-snug text-zinc-700 dark:text-zinc-300 sm:px-2">
                     <MaintenanceStatusStrip
                       tasks={rowTasks.map((t) => ({
