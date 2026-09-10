@@ -2,16 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, canAccessItDashboard, verifySessionToken } from "@/lib/auth";
 import { getReportSettings, updateReportSettings, type ReportSettings } from "@/lib/sheets";
 
-/** True iff `next` only ever appends to `current` — same entries, same
- * order, for every index `current` already has. Used to enforce, server
- * side, that a non-bootstrap account (see the isBootstrap check below) can
- * grow รายการ "การดำเนินการ" but never reorder, rename, or remove an
- * already-saved entry — the UI already hides those controls (see
- * MaintenanceReportBuilder's canManageActionOptions), this is the actual
- * boundary in case that UI is ever bypassed. */
-function isAppendOnly(current: string[], next: string[]): boolean {
-  if (next.length < current.length) return false;
-  return current.every((v, i) => next[i] === v);
+/** True iff the two lists are identical, entry for entry. The client
+ * (MaintenanceReportBuilder's saveSettingsAsDefault) always sends the full
+ * ReportSettings object on every save — including actionOptions — even
+ * when someone only edited, say, orgName, so this route can't treat
+ * "actionOptions was present in the request" as "actionOptions was meant
+ * to change". Used below to let a non-bootstrap account's save through as
+ * long as it leaves รายการ "การดำเนินการ" exactly as it already was. */
+function sameActionOptions(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
 // Always live — never worth caching, and this is a low-traffic settings
@@ -93,15 +92,22 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    // Only the single env-configured bootstrap account may reorder, rename,
-    // or remove an already-saved รายการ "การดำเนินการ" entry — everyone else
-    // who can reach this route (it, or a superadmin created later through
-    // /manage/users) may only append new ones to the end.
+    // Only the single env-configured bootstrap account may touch รายการ
+    // "การดำเนินการ" at all — add a new one, or reorder/rename/remove an
+    // already-saved one. Everyone else who can reach this route (it, or a
+    // superadmin created later through /manage/users) may still update
+    // every other setting here (org name, form title, ผู้รับทราบ, ...) — the
+    // client always sends actionOptions along with those (see
+    // sameActionOptions above), so only reject when it would actually
+    // change; the UI already hides its "+ เพิ่มรายการ" button and renders
+    // every entry read-only for a non-bootstrap account (see
+    // MaintenanceReportBuilder's canManageActionOptions) — this is the
+    // actual boundary in case that UI is ever bypassed.
     if (updates.actionOptions !== undefined && !session.isBootstrap) {
       const current = await getReportSettings();
-      if (!isAppendOnly(current.actionOptions, updates.actionOptions)) {
+      if (!sameActionOptions(current.actionOptions, updates.actionOptions)) {
         return NextResponse.json(
-          { error: "แก้ไขหรือลบรายการ \"การดำเนินการ\" ที่บันทึกไว้แล้วได้เฉพาะบัญชีผู้ดูแลระบบหลักเท่านั้น — เพิ่มรายการใหม่ต่อท้ายได้ตามปกติ" },
+          { error: "จัดการรายการ \"การดำเนินการ\" ได้เฉพาะบัญชีผู้ดูแลระบบหลักเท่านั้น" },
           { status: 403 }
         );
       }

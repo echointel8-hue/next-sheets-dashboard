@@ -302,15 +302,18 @@ export default function MaintenanceReportBuilder({
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
-  // Only the single env-configured bootstrap account may reorder, rename, or
-  // delete an already-saved รายการ "การดำเนินการ" entry (or, by extension,
-  // change the color that entry's list position implies) — see
-  // canAccessItDashboard's isBootstrap comment in lib/auth.ts for why this
-  // is a narrower check than "any superadmin". Everyone else who can reach
-  // this page (it, or a superadmin created later through /manage/users) may
-  // only append new entries; already-saved ones render read-only. Enforced
-  // again server-side in /api/manage/it/settings — this is a UI convenience,
-  // not the actual security boundary.
+  // Only the single env-configured bootstrap account may touch รายการ
+  // "การดำเนินการ" at all — add a new entry, or reorder/rename/delete an
+  // already-saved one (or, by extension, the color that entry's list
+  // position implies) — see canAccessItDashboard's isBootstrap comment in
+  // lib/auth.ts for why this is a narrower check than "any superadmin".
+  // Everyone else who can reach this page (it, or a superadmin created
+  // later through /manage/users) sees the master list as plain read-only
+  // text with no "+ เพิ่มรายการ" button at all — per the hospital's
+  // request, this isn't a per-account catalog anyone can grow, only the
+  // bootstrap account's to manage. Enforced again server-side in
+  // /api/manage/it/settings — this is a UI convenience, not the actual
+  // security boundary.
   const canManageActionOptions = currentUser.isBootstrap;
   // How many รายการ "การดำเนินการ" entries are already saved (and therefore
   // locked for non-bootstrap accounts) — starts at however many the page
@@ -700,6 +703,7 @@ export default function MaintenanceReportBuilder({
   }
 
   function addActionOption() {
+    if (!canManageActionOptions) return;
     setFormSettings((prev) => ({ ...prev, actionOptions: [...prev.actionOptions, ""] }));
     setSettingsSaved(false);
   }
@@ -961,11 +965,6 @@ export default function MaintenanceReportBuilder({
 
                   <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
                     <p className="text-sm font-bold text-zinc-800 dark:text-zinc-100">รายการ &quot;การดำเนินการ&quot;</p>
-                    <p className="text-xs text-zinc-400">
-                      สีของแต่ละรายการกำหนดอัตโนมัติตามลำดับในรายการนี้ (ใช้สีเดียวกันทั้งในแถบ 12 เดือนและตอนเลือกงานที่ทำ)
-                      {!canManageActionOptions &&
-                        " — รายการที่บันทึกแล้วแก้ไข/ลบไม่ได้ เพิ่มรายการใหม่ต่อท้ายได้เท่านั้น (เฉพาะบัญชีผู้ดูแลระบบหลักเท่านั้นที่แก้ไข/ลบรายการเดิมได้)"}
-                    </p>
                     <div className="flex flex-col gap-2">
                       {formSettings.actionOptions.map((opt, idx) => {
                         const locked = !canManageActionOptions && idx < lockedActionOptionsCount;
@@ -1013,14 +1012,16 @@ export default function MaintenanceReportBuilder({
                         );
                       })}
                     </div>
-                    <button
-                      type="button"
-                      onClick={addActionOption}
-                      className="inline-flex w-fit items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                    >
-                      <Plus size={14} strokeWidth={2} aria-hidden="true" />
-                      เพิ่มรายการ
-                    </button>
+                    {canManageActionOptions && (
+                      <button
+                        type="button"
+                        onClick={addActionOption}
+                        className="inline-flex w-fit items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                      >
+                        <Plus size={14} strokeWidth={2} aria-hidden="true" />
+                        เพิ่มรายการ
+                      </button>
+                    )}
                   </div>
 
                   <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
