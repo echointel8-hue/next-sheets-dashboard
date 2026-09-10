@@ -7,6 +7,8 @@ import {
   ArrowLeft,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Eye,
   EyeOff,
   FileText,
@@ -958,6 +960,31 @@ export default function MaintenanceReportBuilder({
     setSettingsSaved(false);
   }
 
+  /** Bootstrap-only reorder for one รายการ "การดำเนินการ" entry — swaps it
+   * with its immediate neighbor (direction -1 = move up, +1 = move down).
+   * Reordering is deliberately restricted the same way add/remove already
+   * are (see canManageActionOptions above): this list's array position is
+   * also what buildActionColorMap (lib/actionColors) uses to assign each
+   * action's color, so moving an entry changes not just its own color but
+   * every entry between its old and new position too — everywhere that
+   * color shows up (month-strip segments, the legend, the printed form,
+   * already-saved task history) picks up the new mapping immediately, not
+   * just future printouts. That's an intentional, if occasionally
+   * surprising, consequence of controlling order — same trade-off the
+   * comment on actionColorMap already documents for add/remove — so this
+   * stays gated to the one account the hospital trusts to make that call. */
+  function moveActionOption(index: number, direction: -1 | 1) {
+    if (!canManageActionOptions) return;
+    setFormSettings((prev) => {
+      const target = index + direction;
+      if (target < 0 || target >= prev.actionOptions.length) return prev;
+      const next = [...prev.actionOptions];
+      [next[index], next[target]] = [next[target], next[index]];
+      return { ...prev, actionOptions: next };
+    });
+    setSettingsSaved(false);
+  }
+
   /** Bootstrap-only "ซ่อน/แสดง" (hide/show) toggle for one รายการ
    * "การดำเนินการ" entry. Unlike removeActionOption, this never touches
    * actionOptions itself — the entry stays at its exact array index (so
@@ -1410,6 +1437,30 @@ export default function MaintenanceReportBuilder({
                               style={color ? actionColorStyle(color) : actionColorStyle(ACTION_OTHER_COLOR)}
                               aria-hidden="true"
                             />
+                            {canManageActionOptions && (
+                              <div className="flex shrink-0 flex-col">
+                                <button
+                                  type="button"
+                                  onClick={() => moveActionOption(idx, -1)}
+                                  disabled={idx === 0}
+                                  title="เลื่อนรายการนี้ขึ้น — สลับตำแหน่งกับรายการก่อนหน้า"
+                                  aria-label="เลื่อนรายการนี้ขึ้น"
+                                  className="flex h-[19px] w-6 items-center justify-center rounded-t-md border border-b-0 border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-700 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                                >
+                                  <ChevronUp size={12} strokeWidth={2.5} aria-hidden="true" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => moveActionOption(idx, 1)}
+                                  disabled={idx === formSettings.actionOptions.length - 1}
+                                  title="เลื่อนรายการนี้ลง — สลับตำแหน่งกับรายการถัดไป"
+                                  aria-label="เลื่อนรายการนี้ลง"
+                                  className="flex h-[19px] w-6 items-center justify-center rounded-b-md border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-700 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                                >
+                                  <ChevronDown size={12} strokeWidth={2.5} aria-hidden="true" />
+                                </button>
+                              </div>
+                            )}
                             {locked ? (
                               <span className="flex h-10 flex-1 items-center gap-2 rounded-lg border border-transparent px-3 text-sm text-zinc-700 dark:text-zinc-300">
                                 {opt}
