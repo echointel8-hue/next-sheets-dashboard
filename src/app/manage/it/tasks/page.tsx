@@ -35,7 +35,14 @@ export default async function ManageItTasksPage() {
   let tasks: MaintenanceTask[] = [];
   let loadError: string | null = null;
   try {
-    tasks = await getMaintenanceTasks();
+    const allTasks = await getMaintenanceTasks();
+    // Per the hospital's request, a regular "it" account only ever sees its
+    // own tasks here — "งานบำรุงรักษา" of one's own, not the whole team's.
+    // The bootstrap superadmin account is the one exception, keeping the
+    // team-wide "หัวหน้าติดตามงาน" view (see MaintenanceTasksBoard's own
+    // stats/byAssignee comment) since that's still the only way anyone
+    // leads/oversees the team here — there's no separate "หัวหน้า" role.
+    tasks = session.isBootstrap ? allTasks : allTasks.filter((t) => t.assignedToUsername === session.username);
   } catch (err) {
     loadError = err instanceof Error ? err.message : String(err);
   }

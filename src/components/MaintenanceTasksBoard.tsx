@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Check,
@@ -104,9 +105,9 @@ export default function MaintenanceTasksBoard({
    * checklist offered in TaskUpdateModal is filtered by this. */
   hiddenActionOptions: string[];
 }) {
+  const router = useRouter();
   const [tasks, setTasks] = useState(initialTasks);
   const [statusFilter, setStatusFilter] = useState<"all" | MaintenanceTaskStatus>("in_progress");
-  const [assigneeFilter, setAssigneeFilter] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [monthFilter, setMonthFilter] = useState(""); // "" = ทุกเดือน, else "1".."12"
   const [yearFilter, setYearFilter] = useState(""); // "" = ทุกปี, else พ.ศ. as string
@@ -160,28 +161,35 @@ export default function MaintenanceTasksBoard({
     });
   }, [tasks, monthFilter, yearFilter]);
 
-  const assigneeOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const t of periodFilteredTasks) if (t.assignedToDisplayName || t.assignedToUsername) set.add(t.assignedToDisplayName || t.assignedToUsername);
-    return [...set].sort((a, b) => a.localeCompare(b, "th")).map((value) => ({ value }));
-  }, [periodFilteredTasks]);
-
   const filteredTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
     return periodFilteredTasks
       .filter((t) => statusFilter === "all" || t.status === statusFilter)
-      .filter((t) => {
-        if (assigneeFilter.length === 0) return true;
-        const name = t.assignedToDisplayName || t.assignedToUsername;
-        return assigneeFilter.includes(name);
-      })
       .filter((t) => {
         if (!q) return true;
         const hay = `${t.assetNumber} ${t.equipmentType} ${t.brandModel} ${t.location} ${t.department}`.toLowerCase();
         return hay.includes(q);
       })
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
-  }, [periodFilteredTasks, statusFilter, assigneeFilter, search]);
+  }, [periodFilteredTasks, statusFilter, search]);
+
+  // Backs the single central "พิมพ์ซ้ำ" button below (replacing a
+  // per-row button in every table row) — always the "กำลังดำเนินการ"
+  // subset of whatever's currently filtered (ช่วงเวลา/ค้นหา, and the
+  // สถานะ tab itself when it happens to be "กำลังดำเนินการ" already),
+  // regardless of which สถานะ tab is actually selected right now. Printing
+  // a reprint form only ever makes sense for work that's still open — a
+  // "done" task has nothing left to hand IT on a fresh paper form.
+  const reprintableTaskIds = useMemo(
+    () => filteredTasks.filter((t) => t.status === "in_progress").map((t) => t.taskId),
+    [filteredTasks]
+  );
+
+  function printReprintBatch() {
+    if (reprintableTaskIds.length === 0) return;
+    const query = reprintableTaskIds.map(encodeURIComponent).join(",");
+    router.push(`/manage/it/report?reprintTaskIds=${query}`);
+  }
 
   // The stat tiles + per-staff breakdown are the "หัวหน้าติดตามงาน" part of
   // this page — every IT-dashboard account (this hospital's whole IT team,
@@ -319,7 +327,12 @@ export default function MaintenanceTasksBoard({
           </div>
         </div>
 
-        {stats.byAssignee.length > 0 && (
+        {/* Only the bootstrap superadmin still gets this per-person
+            breakdown — a regular "it" account's own tasks/page.tsx query
+            already only ever returns that one account's own tasks (see
+            that page's own comment), so for anyone else this would just
+            repeat the stat tiles above under their own name. */}
+        {session.isBootstrap && stats.byAssignee.length > 0 && (
           <div className={`${CARD} flex flex-col gap-3 p-4`}>
             <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
               <Users size={15} strokeWidth={2} aria-hidden="true" />
@@ -414,13 +427,6 @@ export default function MaintenanceTasksBoard({
                 )}
               </div>
             </div>
-            <MultiSelect
-              label="กรองตามผู้ดำเนินการ"
-              options={assigneeOptions}
-              selected={assigneeFilter}
-              onChange={setAssigneeFilter}
-              className="sm:max-w-xs sm:flex-1"
-            />
             <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400 sm:max-w-xs sm:flex-1">
               ค้นหา
               <input
@@ -431,6 +437,25 @@ export default function MaintenanceTasksBoard({
                 className={INPUT_CLASS}
               />
             </label>
+            {/* Central "พิมพ์ซ้ำ" — replaces a per-row button in every
+                table row (see reprintableTaskIds above): one click bundles
+                every currently-filtered "กำลังดำเนินการ" item into a single
+                reprint form on /manage/it/report, ready to print, instead
+                of reprinting item by item. */}
+            <button
+              type="button"
+              onClick={printReprintBatch}
+              disabled={reprintableTaskIds.length === 0}
+              title={
+                reprintableTaskIds.length === 0
+                  ? "ไม่มีรายการที่กำลังดำเนินการตรงกับตัวกรองนี้"
+                  : `พิมพ์ซ้ำแบบฟอร์มรวม ${reprintableTaskIds.length.toLocaleString("th-TH")} รายการที่กำลังดำเนินการตามตัวกรองนี้ — จะไม่สร้างงานใหม่`
+              }
+              className="inline-flex h-10 shrink-0 items-center gap-1.5 self-end whitespace-nowrap rounded-lg border border-zinc-200 px-4 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              <Printer size={15} strokeWidth={2} aria-hidden="true" />
+              พิมพ์ซ้ำ ({reprintableTaskIds.length.toLocaleString("th-TH")})
+            </button>
           </div>
 
           <div className="overflow-x-auto rounded-lg border border-zinc-100 dark:border-zinc-800">
@@ -537,20 +562,6 @@ export default function MaintenanceTasksBoard({
                           <Wrench size={13} strokeWidth={2} aria-hidden="true" />
                           {t.status === "in_progress" ? "อัปเดตสถานะ" : "ดูรายละเอียด"}
                         </button>
-                        {/* For a lost/damaged original printout — reopens
-                            the report page pre-filled with this task's
-                            equipment/วันที่ and, per its own isReprint
-                            handling, prints again WITHOUT logging a second,
-                            brand-new maintenance round for it. See
-                            manage/it/report/page.tsx's reprintTaskId. */}
-                        <Link
-                          href={`/manage/it/report?reprintTaskId=${encodeURIComponent(t.taskId)}`}
-                          title="พิมพ์ซ้ำแบบฟอร์มของงานนี้ (เช่น กรณีเอกสารต้นฉบับสูญหาย) — จะไม่สร้างงานบำรุงรักษารายการใหม่"
-                          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                        >
-                          <Printer size={13} strokeWidth={2} aria-hidden="true" />
-                          พิมพ์ซ้ำ
-                        </Link>
                         <button
                           type="button"
                           onClick={() => deleteTask(t)}

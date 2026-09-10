@@ -49,12 +49,18 @@ function splitTitlePrefix(fullName: string): { titlePrefix: string; nameOnly: st
 export default async function ManageItReportPage({
   searchParams,
 }: {
-  /** ?reprintTaskId=... — set only when reached via the "พิมพ์ซ้ำ" button
-   * on /manage/it/tasks (see MaintenanceTasksBoard). Absent on every normal
-   * visit to this page. */
-  searchParams: Promise<{ reprintTaskId?: string }>;
+  /** ?reprintTaskIds=id1,id2,... — set only when reached via the central
+   * "พิมพ์ซ้ำ (N)" button on /manage/it/tasks (see MaintenanceTasksBoard's
+   * printReprintBatch). Absent on every normal visit to this page. */
+  searchParams: Promise<{ reprintTaskIds?: string }>;
 }) {
-  const { reprintTaskId } = await searchParams;
+  const { reprintTaskIds: reprintTaskIdsParam } = await searchParams;
+  const reprintTaskIdSet = new Set(
+    (reprintTaskIdsParam ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
   const cookieStore = await cookies();
   const session = verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
   if (!session) {
@@ -144,11 +150,11 @@ export default async function ManageItReportPage({
   // other read failure should just mean no badges this load, not break the
   // whole report page.
   let taskHistory: ReportTaskEntry[] = [];
-  // Set only when reprintTaskId names a task that still exists — see
+  // One entry per taskId named in reprintTaskIds that still exists — see
   // MaintenanceReportBuilder's ReprintTaskInfo/isReprint for what this
   // drives. Deliberately looked up from the very same getMaintenanceTasks()
   // call as taskHistory just below, rather than a second read.
-  let reprintTask: ReprintTaskInfo | null = null;
+  let reprintTasks: ReprintTaskInfo[] = [];
   try {
     const tasks = await getMaintenanceTasks();
     taskHistory = tasks.map((t) => ({
@@ -166,43 +172,42 @@ export default async function ManageItReportPage({
       otherDetail: t.otherDetail,
     }));
 
-    if (reprintTaskId) {
-      const found = tasks.find((t) => t.taskId === reprintTaskId);
-      if (found) {
-        reprintTask = {
-          taskId: found.taskId,
-          equipmentRowNumber: found.equipmentRowNumber,
-          department: found.department,
-          createdAt: found.createdAt,
-        };
-        // The equipment picker/print table only ever draws from `items`
-        // above, which already excludes disposed/deleted rows — normal for
-        // a fresh printout, but a reprint can easily point at equipment
-        // that's since been disposed (that's often *why* someone wants a
-        // reprint of an old record in the first place). Rather than let the
-        // reprint silently come up with nothing to select, splice in a
-        // best-effort stand-in row built from the task's own saved fields
-        // when the real one isn't in `items` anymore.
-        if (!items.some((it) => it.rowNumber === found.equipmentRowNumber)) {
-          items = [
-            ...items,
-            {
-              rowNumber: found.equipmentRowNumber,
-              assetNumber: found.assetNumber,
-              equipmentType: found.equipmentType,
-              brandModel: found.brandModel,
-              department: found.department,
-              installLocation: found.location,
-              responsiblePerson: "",
-              titlePrefix: "",
-              nameOnly: "",
-              snapshotHash: "",
-              // No live sheet row backs this stand-in, so there's nothing
-              // to save location/responsible-person edits back to.
-              canSaveResponsiblePerson: false,
-            },
-          ];
-        }
+    if (reprintTaskIdSet.size > 0) {
+      const found = tasks.filter((t) => reprintTaskIdSet.has(t.taskId));
+      reprintTasks = found.map((t) => ({
+        taskId: t.taskId,
+        equipmentRowNumber: t.equipmentRowNumber,
+        department: t.department,
+        createdAt: t.createdAt,
+      }));
+      // The equipment picker/print table only ever draws from `items`
+      // above, which already excludes disposed/deleted rows — normal for a
+      // fresh printout, but a reprint can easily point at equipment that's
+      // since been disposed (that's often *why* someone wants a reprint of
+      // an old record in the first place). Rather than let the reprint
+      // silently come up with nothing to select for that item, splice in a
+      // best-effort stand-in row built from the task's own saved fields for
+      // any that aren't in `items` anymore.
+      const missing = found.filter((t) => !items.some((it) => it.rowNumber === t.equipmentRowNumber));
+      if (missing.length > 0) {
+        items = [
+          ...items,
+          ...missing.map((t) => ({
+            rowNumber: t.equipmentRowNumber,
+            assetNumber: t.assetNumber,
+            equipmentType: t.equipmentType,
+            brandModel: t.brandModel,
+            department: t.department,
+            installLocation: t.location,
+            responsiblePerson: "",
+            titlePrefix: "",
+            nameOnly: "",
+            snapshotHash: "",
+            // No live sheet row backs this stand-in, so there's nothing to
+            // save location/responsible-person edits back to.
+            canSaveResponsiblePerson: false,
+          })),
+        ];
       }
     }
   } catch {
@@ -216,7 +221,7 @@ export default async function ManageItReportPage({
       settings={settings}
       currentUser={{ username: session.username, displayName, isBootstrap: session.isBootstrap }}
       taskHistory={taskHistory}
-      reprintTask={reprintTask}
+      reprintTasks={reprintTasks}
     />
   );
 }
