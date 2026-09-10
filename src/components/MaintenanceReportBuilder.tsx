@@ -1901,25 +1901,26 @@ export default function MaintenanceReportBuilder({
               (พิมพ์ซ้ำเมื่อ {formatThaiDate(new Date().toISOString().slice(0, 10))})
             </p>
           )}
-          {/* leading-tight (rather than each line's own default line-height
+          {/* leading-none (rather than each line's own default line-height
               from text-base/text-sm) is what actually tightens this up —
               the configured print font (see printFontFamily) can carry a
               taller default line-height than the browser's own sans-serif,
-              which read as too airy between these lines. gap-0.5 (down
-              from gap-1) trims the remaining space between the lines on
-              top of that. */}
-          <div className="flex flex-col items-center gap-0.5 text-center leading-tight">
+              which read as too airy between these lines even at
+              leading-tight. gap-0 removes the flex gap entirely so
+              leading-none is the only thing controlling the space between
+              lines. */}
+          <div className="flex flex-col items-center gap-0 text-center leading-none">
             <p className="text-base font-bold">{formSettings.orgName}</p>
             <p className="text-base font-bold">{formSettings.maintenanceFormTitle}</p>
             <p className="text-sm">{formSettings.fiscalYearLabel}</p>
-            {formDepartment && <p className="mt-1 text-sm">กลุ่มงาน: {formDepartment}</p>}
+            {formDepartment && <p className="mt-0.5 text-sm">กลุ่มงาน: {formDepartment}</p>}
           </div>
 
           <div className="mt-4">
             <p className="mb-2 font-semibold" style={{ fontSize: `${bodyFontSizePt}pt` }}>
               ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา
             </p>
-            <table className="w-full border-collapse text-[10px] leading-snug">
+            <table className="w-full border-collapse text-[11px] leading-snug">
               <colgroup>
                 <col className="w-[4%]" />
                 <col className="w-[13%]" />
@@ -1944,23 +1945,23 @@ export default function MaintenanceReportBuilder({
                 {selectedRows.map((row, i) => (
                   <tr key={row.rowNumber}>
                     <td className="border border-zinc-400 px-1 py-1 text-center align-top">{i + 1}</td>
-                    <td className="border border-zinc-400 px-1 py-1 align-top whitespace-nowrap text-[9px]">
+                    <td className="border border-zinc-400 px-1 py-1 align-top whitespace-nowrap text-[10px]">
                       {row.assetNumber || "—"}
                     </td>
                     <td className="border border-zinc-400 px-1 py-1 align-top">
                       <div className="font-medium">{row.equipmentType || "—"}</div>
                       {row.brandModel && (
-                        <div className="text-[8.5px] leading-snug text-zinc-500">{row.brandModel}</div>
+                        <div className="text-[9.5px] leading-snug text-zinc-500">{row.brandModel}</div>
                       )}
                     </td>
                     <td className="border border-zinc-400 px-1 py-1 align-top">
                       {row.department && (
-                        <div className="text-[8.5px] leading-snug text-zinc-500">{row.department}</div>
+                        <div className="text-[9.5px] leading-snug text-zinc-500">{row.department}</div>
                       )}
                       <div>{row.location || "—"}</div>
                     </td>
                     <td className="border border-zinc-400 px-1 py-1 align-top">{row.responsiblePerson || "—"}</td>
-                    <td className="border border-zinc-400 px-1 py-1 align-top text-[9px] leading-snug">
+                    <td className="border border-zinc-400 px-1 py-1 align-top text-[10px] leading-snug">
                       <div className="flex flex-col gap-0.5">
                         {printActionOptions.map((label) => (
                           <span key={label}>☐ {label}</span>
@@ -1968,7 +1969,7 @@ export default function MaintenanceReportBuilder({
                       </div>
                     </td>
                     <td className="border border-zinc-400 px-1 py-1 align-top">
-                      <div className="grid grid-cols-2 gap-x-1 gap-y-0.5 whitespace-nowrap text-[9px]">
+                      <div className="grid grid-cols-2 gap-x-1 gap-y-0.5 whitespace-nowrap text-[10px]">
                         <span>☐ ปกติ</span>
                         <span>☐ เปลี่ยนอะไหล่ ................</span>
                         <span>☐ ส่งซ่อม</span>
@@ -2014,17 +2015,18 @@ export default function MaintenanceReportBuilder({
             {signatureBlocks.map((block, idx) => (
               <div
                 key={block.key}
-                className={`flex flex-col items-center gap-1 leading-tight print:break-inside-avoid ${
+                className={`flex flex-col items-center gap-0.5 leading-none print:break-inside-avoid ${
                   signatureBlocks.length % 2 === 1 && idx === signatureBlocks.length - 1 ? "sm:col-span-2" : ""
                 }`}
               >
                 {/* pt-6 leaves blank room above the dotted line for an
                     actual pen signature — the dots alone (no space above
                     them) left no room to sign without touching the block
-                    above. leading-tight on the block above tightens the
-                    four lines below it (name/ตำแหน่ง/กลุ่มงาน), same
-                    "the configured print font's own line-height reads too
-                    airy" fix as the page header above. */}
+                    above. leading-none on the block above tightens the
+                    four lines below it (name/ตำแหน่ง/กลุ่มงาน) — leading-tight
+                    still left visible daylight between lines with the
+                    configured print font's taller default line-height, same
+                    fix as the page header above. */}
                 <p className="pt-6">{block.heading}</p>
                 <p>{block.nameLine}</p>
                 <p>{block.positionLine}</p>
