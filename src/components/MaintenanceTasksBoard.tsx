@@ -19,7 +19,7 @@ import {
   X,
 } from "lucide-react";
 import type { InspectionCheck, MaintenanceTask, MaintenanceTaskStatus } from "@/lib/sheets";
-import { actionColorVars, buildActionColorMap, colorForAction } from "@/lib/actionColors";
+import { actionColorVars, buildActionColorMap, colorForAction, resolveColorOrder } from "@/lib/actionColors";
 import MultiSelect from "@/components/MultiSelect";
 import MaintenanceStatusStrip from "@/components/MaintenanceStatusStrip";
 
@@ -96,6 +96,7 @@ export default function MaintenanceTasksBoard({
   actionOptions,
   hiddenActionOptions,
   detailRequiredActionOptions,
+  actionColorOrder,
 }: {
   session: { username: string; displayName: string; isBootstrap: boolean };
   initialTasks: MaintenanceTask[];
@@ -112,6 +113,11 @@ export default function MaintenanceTasksBoard({
    * lib/sheets. Passed through to TaskUpdateModal, which renders a text box
    * next to any currently-selected action in this list. */
   detailRequiredActionOptions: string[];
+  /** ReportSettings.actionColorOrder — see the interface comment on it in
+   * lib/sheets. Fed through resolveColorOrder (lib/actionColors) wherever
+   * this board builds a color map, so a reorder on /manage/it/report never
+   * reshuffles what's shown here. */
+  actionColorOrder: string[];
 }) {
   const router = useRouter();
 
@@ -538,6 +544,7 @@ export default function MaintenanceTasksBoard({
                           otherDetail: rt.otherDetail,
                         }))}
                         actionOptions={actionOptions}
+                        actionColorOrder={actionColorOrder}
                         year={currentYear}
                         assetLabel={t.assetNumber || undefined}
                       />
@@ -639,6 +646,7 @@ export default function MaintenanceTasksBoard({
           actionOptions={actionOptions}
           hiddenActionOptions={hiddenActionOptions}
           detailRequiredActionOptions={detailRequiredActionOptions}
+          actionColorOrder={actionColorOrder}
           onClose={() => setActiveTaskId(null)}
           onPatch={(updates) => patchTask(activeTask.taskId, updates)}
         />
@@ -652,6 +660,7 @@ function TaskUpdateModal({
   actionOptions,
   hiddenActionOptions,
   detailRequiredActionOptions,
+  actionColorOrder,
   onClose,
   onPatch,
 }: {
@@ -659,17 +668,24 @@ function TaskUpdateModal({
   actionOptions: string[];
   hiddenActionOptions: string[];
   detailRequiredActionOptions: string[];
+  actionColorOrder: string[];
   onClose: () => void;
   onPatch: (updates: Record<string, unknown>) => Promise<MaintenanceTask>;
 }) {
   const readOnly = task.status === "done";
-  // Same index-based categorical color as /manage/it/report's month-strip
-  // and legend (see lib/actionColors) — actionOptions here is the exact
-  // same ReportSettings list, so a given action always renders in the same
+  // Same categorical color as /manage/it/report's month-strip and legend
+  // (see lib/actionColors) — actionOptions here is the exact same
+  // ReportSettings list, so a given action always renders in the same
   // color in both places. Uses the FULL, unfiltered actionOptions (hidden
   // entries included) so a hidden entry's color never shifts even though
-  // it won't actually show up as a pickable option below.
-  const actionColorMap = useMemo(() => buildActionColorMap(actionOptions), [actionOptions]);
+  // it won't actually show up as a pickable option below. Fed through
+  // resolveColorOrder + actionColorOrder so a plain reorder of รายการ
+  // "การดำเนินการ" (the up/down arrows in the settings list) never
+  // reshuffles which color shows up here.
+  const actionColorMap = useMemo(
+    () => buildActionColorMap(resolveColorOrder(actionOptions, actionColorOrder)),
+    [actionOptions, actionColorOrder]
+  );
   // The checklist this task's form was actually printed with (see
   // MaintenanceTask.plannedActions) — falls back to the full master
   // actionOptions list for a task created before plannedActions existed, so

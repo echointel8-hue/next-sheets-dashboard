@@ -50,11 +50,13 @@ export default async function ManageItTasksPage() {
   let actionOptions = DEFAULT_REPORT_SETTINGS.actionOptions;
   let hiddenActionOptions = DEFAULT_REPORT_SETTINGS.hiddenActionOptions;
   let detailRequiredActionOptions = DEFAULT_REPORT_SETTINGS.detailRequiredActionOptions;
+  let actionColorOrder = DEFAULT_REPORT_SETTINGS.actionColorOrder;
   try {
     const settings = await getReportSettings();
     actionOptions = settings.actionOptions;
     hiddenActionOptions = settings.hiddenActionOptions;
     detailRequiredActionOptions = settings.detailRequiredActionOptions;
+    actionColorOrder = settings.actionColorOrder;
   } catch {
     // Fall back to the default single option — same tolerance as every
     // other ReportSettings reader in this app.
@@ -78,6 +80,7 @@ export default async function ManageItTasksPage() {
       actionOptions={actionOptions}
       hiddenActionOptions={hiddenActionOptions}
       detailRequiredActionOptions={detailRequiredActionOptions}
+      actionColorOrder={actionColorOrder}
     />
   );
 }

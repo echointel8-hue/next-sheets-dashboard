@@ -16,7 +16,7 @@
 
 import { useMemo, useState, type CSSProperties } from "react";
 import { CheckCircle2, Wrench, X } from "lucide-react";
-import { actionColorVars, buildActionColorMap, colorForAction, type ActionColor } from "@/lib/actionColors";
+import { actionColorVars, buildActionColorMap, colorForAction, resolveColorOrder, type ActionColor } from "@/lib/actionColors";
 import type { InspectionCheck, MaintenanceTaskStatus } from "@/lib/sheets";
 
 const THAI_MONTHS_SHORT = [
@@ -74,16 +74,26 @@ function formatInspectionResult(t: StripTask): string {
 export default function MaintenanceStatusStrip({
   tasks,
   actionOptions,
+  actionColorOrder,
   year,
   assetLabel,
 }: {
   tasks: StripTask[];
   actionOptions: string[];
+  /** ReportSettings.actionColorOrder — see the interface comment on it in
+   * lib/sheets. Fed through resolveColorOrder (lib/actionColors) so this
+   * strip's colors always match /manage/it/report's, including after a
+   * bootstrap account reorders รายการ "การดำเนินการ" there (a plain
+   * reorder never touches actionColorOrder, so colors stay put). */
+  actionColorOrder: string[];
   year: string;
   /** Shown in the popup header for context (e.g. the asset number). */
   assetLabel?: string;
 }) {
-  const actionColorMap = useMemo(() => buildActionColorMap(actionOptions), [actionOptions]);
+  const actionColorMap = useMemo(
+    () => buildActionColorMap(resolveColorOrder(actionOptions, actionColorOrder)),
+    [actionOptions, actionColorOrder]
+  );
   const [openMonth, setOpenMonth] = useState<number | null>(null);
 
   // Buckets by the task's *effective* เดือน, not เดือนที่เปิดเคส (createdAt):

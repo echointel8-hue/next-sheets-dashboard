@@ -31,13 +31,16 @@ export const ACTION_COLOR_PALETTE: ActionColor[] = [
  * categorical colors above — used once a 9th distinct action shows up. */
 export const ACTION_OTHER_COLOR: ActionColor = { light: "#a1a1aa", dark: "#71717a" };
 
-/** Builds a name -> color map from the canonical, ordered
- * ReportSettings.actionOptions list — index-based (first item gets slot 1,
- * etc.), so a color only ever changes if the list itself is reordered or an
- * earlier entry is removed — both of which are restricted to the bootstrap
- * account (see /api/manage/it/settings). Blank entries (a not-yet-named row
- * mid-edit in the settings modal) are skipped so they don't consume a color
- * slot or shift later entries' colors. */
+/** Builds a name -> color map from an ordered list of action names —
+ * index-based (first item gets slot 1, etc.), so a color only changes if
+ * this list's order/membership itself changes. Callers that want a color
+ * to survive a plain reorder of ReportSettings.actionOptions (the
+ * up/down-arrow buttons in the settings list) should pass
+ * resolveColorOrder(actionOptions, actionColorOrder) here instead of
+ * actionOptions directly — see that function below for why a separate
+ * order is needed. Blank entries (a not-yet-named row mid-edit in the
+ * settings modal) are skipped so they don't consume a color slot or shift
+ * later entries' colors. */
 export function buildActionColorMap(actionOptions: string[]): Map<string, ActionColor> {
   const map = new Map<string, ActionColor>();
   let idx = 0;
@@ -55,6 +58,55 @@ export function buildActionColorMap(actionOptions: string[]): Map<string, Action
  * this feature, or before the text was renamed). */
 export function colorForAction(map: Map<string, ActionColor>, name: string): ActionColor {
   return map.get(name.trim()) ?? ACTION_OTHER_COLOR;
+}
+
+/** The order buildActionColorMap should actually assign colors in — NOT the
+ * same as the live, ordered ReportSettings.actionOptions list (which also
+ * drives display/print order and can be freely reordered with the
+ * up/down-arrow buttons in the settings list), but the separately
+ * persisted ReportSettings.actionColorOrder, which only changes when a name
+ * is truly added or removed. Reordering actionOptions alone
+ * (moveActionOption in MaintenanceReportBuilder) never touches
+ * actionColorOrder, so an entry keeps the exact color it already had no
+ * matter where it's moved to — only a genuinely new name (first time it's
+ * ever been saved) gets appended at the end and picks up the next open
+ * color slot; a name removed from actionOptions drops out here too, so
+ * later names shift up and reclaim that slot, same as this always behaved
+ * before actionColorOrder existed. A rename (editing an existing entry's
+ * text in place) is treated as removing the old name and adding a new one
+ * — same convention this app already uses for hiddenActionOptions/
+ * detailRequiredActionOptions, which are also keyed by exact name text, not
+ * array position.
+ *
+ * Safe to call with an empty/stale colorOrder (e.g. a ReportSettings tab
+ * saved before this field existed) — every actionOptions name just falls
+ * through to being treated as new and gets appended in actionOptions' own
+ * order, matching the original index-based behavior exactly for anyone who
+ * hasn't touched anything since. */
+export function resolveColorOrder(actionOptions: string[], colorOrder: string[]): string[] {
+  const live = new Set<string>();
+  const cleanedOptions: string[] = [];
+  for (const raw of actionOptions) {
+    const name = raw.trim();
+    if (!name || live.has(name)) continue;
+    live.add(name);
+    cleanedOptions.push(name);
+  }
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const raw of colorOrder) {
+    const name = raw.trim();
+    if (!name || seen.has(name) || !live.has(name)) continue;
+    seen.add(name);
+    ordered.push(name);
+  }
+  for (const name of cleanedOptions) {
+    if (!seen.has(name)) {
+      seen.add(name);
+      ordered.push(name);
+    }
+  }
+  return ordered;
 }
 
 /** CSS custom properties for one action-color swatch/segment — pair with

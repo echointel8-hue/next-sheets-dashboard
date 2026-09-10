@@ -144,6 +144,7 @@ export default function ITDashboard({
   initialMaintenanceLog,
   initialMaintenanceTasks,
   actionOptions,
+  actionColorOrder,
   initialSpecStandards,
 }: {
   session: { username: string; isBootstrap: boolean };
@@ -159,6 +160,11 @@ export default function ITDashboard({
    * so MaintenanceStatusStrip colors each action exactly the same as
    * /manage/it/report does (see lib/actionColors' index-based assignment). */
   actionOptions: string[];
+  /** ReportSettings.actionColorOrder — see the interface comment on it in
+   * lib/sheets. Passed straight through to MaintenanceStatusStrip so a
+   * bootstrap account reordering รายการ "การดำเนินการ" on /manage/it/report
+   * never reshuffles the colors shown here too. */
+  actionColorOrder: string[];
   initialSpecStandards: SpecStandards | null;
 }) {
   const router = useRouter();
@@ -929,6 +935,7 @@ export default function ITDashboard({
               showSpecStatus
               tasksByRowNumber={tasksByRowNumber}
               actionOptions={actionOptions}
+              actionColorOrder={actionColorOrder}
               statusYear={currentYear}
               selectable
               selectedRowNumbers={selectedRowNumbers}
@@ -949,6 +956,7 @@ export default function ITDashboard({
               showSpecStatus={false}
               tasksByRowNumber={tasksByRowNumber}
               actionOptions={actionOptions}
+              actionColorOrder={actionColorOrder}
               statusYear={currentYear}
             />
           </>
@@ -1047,6 +1055,7 @@ function SpecTable({
   showSpecStatus,
   tasksByRowNumber,
   actionOptions,
+  actionColorOrder,
   statusYear,
   selectable = false,
   selectedRowNumbers,
@@ -1067,6 +1076,7 @@ function SpecTable({
    * read-only MaintenanceStatusStrip embedded under เลขครุภัณฑ์. */
   tasksByRowNumber: Map<number, MaintenanceTask[]>;
   actionOptions: string[];
+  actionColorOrder: string[];
   statusYear: string;
   /** เพิ่มคอลัมน์ checkbox นำหน้าตาราง สำหรับ "แก้ไขพร้อมกันหลายรายการ" — ตอนนี้
    * มีเฉพาะตารางคอมพิวเตอร์/โน้ตบุ๊ก/All-in-One เพราะฟิลด์ที่แก้ไขได้ (ยี่ห้อ
@@ -1180,6 +1190,7 @@ function SpecTable({
                         otherDetail: t.otherDetail,
                       }))}
                       actionOptions={actionOptions}
+                      actionColorOrder={actionColorOrder}
                       year={statusYear}
                       assetLabel={assetNumber || undefined}
                     />

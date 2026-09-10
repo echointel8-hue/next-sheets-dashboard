@@ -40,6 +40,7 @@ export default async function ManageItPage() {
   let specStandards: SpecStandards | null = null;
   let maintenanceTasks: MaintenanceTask[] = [];
   let actionOptions: string[] = [];
+  let actionColorOrder: string[] = [];
   try {
     const snapshot = await getEquipmentDataUnredacted();
     // Deleted rows never reach any /manage view, IT included — same rule
@@ -82,7 +83,9 @@ export default async function ManageItPage() {
     // Fall through with an empty list.
   }
   try {
-    actionOptions = (await getReportSettings()).actionOptions;
+    const settings = await getReportSettings();
+    actionOptions = settings.actionOptions;
+    actionColorOrder = settings.actionColorOrder;
   } catch {
     // Fall through with no colors — MaintenanceStatusStrip still renders
     // fine (everything just falls into ACTION_OTHER_COLOR).
@@ -95,6 +98,7 @@ export default async function ManageItPage() {
       initialMaintenanceLog={maintenanceLog}
       initialMaintenanceTasks={maintenanceTasks}
       actionOptions={actionOptions}
+      actionColorOrder={actionColorOrder}
       initialSpecStandards={specStandards}
     />
   );

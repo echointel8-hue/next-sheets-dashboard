@@ -35,6 +35,7 @@ import {
   actionColorVars,
   buildActionColorMap,
   colorForAction as colorForActionShared,
+  resolveColorOrder,
   type ActionColor,
 } from "@/lib/actionColors";
 import MultiSelect from "@/components/MultiSelect";
@@ -637,20 +638,25 @@ export default function MaintenanceReportBuilder({
     return [...set].sort((a, b) => Number(b) - Number(a));
   }, [taskHistory]);
 
-  // Assigns each distinct "การดำเนินการ" text a fixed color, by its
-  // position in the canonical, ordered รายการ "การดำเนินการ" list (see the
-  // settings modal below) rather than by when it happens to first show up
-  // in task history — so the color a person sees in the settings list
-  // matches the color used everywhere else (month-strip, legend, popup) even
-  // before that action has ever been recorded on a real task. Only the
-  // bootstrap account can reorder or remove entries from that list (see
-  // canManageActionOptions below), so a color is effectively "set" by
-  // controlling list order/membership rather than picked by hand per item —
-  // see buildActionColorMap (lib/actionColors) for the actual index -> color
-  // assignment and its 8-color cap.
+  // Assigns each distinct "การดำเนินการ" text a fixed color — by its
+  // position in ReportSettings.actionColorOrder (NOT actionOptions' own,
+  // freely-reorderable display order), so the color a person sees in the
+  // settings list matches the color used everywhere else (month-strip,
+  // legend, popup) even before that action has ever been recorded on a real
+  // task, AND stays put when someone uses the up/down-arrow buttons to
+  // reorder the list — only adding, removing, or renaming an entry (via the
+  // bootstrap-only canManageActionOptions controls below) actually changes
+  // a color. formSettings.actionColorOrder itself never gets mutated by any
+  // local edit here (see moveActionOption/addActionOption/
+  // removeActionOption/updateActionOption below — none of them touch it),
+  // so it stays a stable baseline for this whole editing session until the
+  // next successful save echoes back whatever the server recomputed — see
+  // resolveColorOrder (lib/actionColors) for the actual merge logic and
+  // buildActionColorMap for the index -> color assignment and its 8-color
+  // cap.
   const actionColorMap = useMemo(
-    () => buildActionColorMap(formSettings.actionOptions),
-    [formSettings.actionOptions]
+    () => buildActionColorMap(resolveColorOrder(formSettings.actionOptions, formSettings.actionColorOrder)),
+    [formSettings.actionOptions, formSettings.actionColorOrder]
   );
 
   const colorForAction = (name: string): ActionColor => colorForActionShared(actionColorMap, name);
@@ -981,18 +987,14 @@ export default function MaintenanceReportBuilder({
   }
 
   /** Bootstrap-only reorder for one รายการ "การดำเนินการ" entry — swaps it
-   * with its immediate neighbor (direction -1 = move up, +1 = move down).
-   * Reordering is deliberately restricted the same way add/remove already
-   * are (see canManageActionOptions above): this list's array position is
-   * also what buildActionColorMap (lib/actionColors) uses to assign each
-   * action's color, so moving an entry changes not just its own color but
-   * every entry between its old and new position too — everywhere that
-   * color shows up (month-strip segments, the legend, the printed form,
-   * already-saved task history) picks up the new mapping immediately, not
-   * just future printouts. That's an intentional, if occasionally
-   * surprising, consequence of controlling order — same trade-off the
-   * comment on actionColorMap already documents for add/remove — so this
-   * stays gated to the one account the hospital trusts to make that call. */
+   * with its immediate neighbor (direction -1 = move up, +1 = move down),
+   * changing only actionOptions' own display/print order. Deliberately
+   * restricted the same way add/remove already are (see
+   * canManageActionOptions above) — this is still the list that determines
+   * dropdown/print order for everyone — but unlike add/remove/rename, a
+   * plain reorder never touches actionColorOrder (see the actionColorMap
+   * comment above), so moving an entry up or down never changes anyone's
+   * color, here or anywhere else it's shown. */
   function moveActionOption(index: number, direction: -1 | 1) {
     if (!canManageActionOptions) return;
     setFormSettings((prev) => {

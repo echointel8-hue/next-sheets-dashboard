@@ -4,6 +4,7 @@ import { redactSurname, resolveFields, type EquipmentRow, type FieldMap } from "
 import type { Role } from "@/lib/auth";
 import { DEFAULT_SPEC_STANDARDS, type SpecOptionLists, type SpecStandards } from "@/lib/specEvaluation";
 import { getLatestMaintenanceLogByAsset, type MaintenanceLogEntry } from "@/lib/maintenanceLog";
+import { resolveColorOrder } from "@/lib/actionColors";
 
 export type { EquipmentRow, FieldMap };
 // Re-exported so existing callers can keep importing these types (and the
@@ -547,6 +548,24 @@ export interface ReportSettings {
    * it stays attached to the right entry through a reorder. Stored as a
    * JSON array, same as actionOptions/hiddenActionOptions. */
   detailRequiredActionOptions: string[];
+  /** The order buildActionColorMap (lib/actionColors) actually assigns
+   * colors in — deliberately NOT the same as actionOptions' own order, so
+   * that reordering the settings list with the up/down-arrow buttons
+   * (moveActionOption) never reshuffles anyone's color. Self-heals on every
+   * read (see getReportSettings) and is reconciled on every write (see
+   * updateReportSettings) via resolveColorOrder — a genuinely new name gets
+   * appended and picks up the next open color slot, a removed name drops
+   * out (so later names shift up and reclaim that slot, same as this
+   * always behaved before this field existed), and a plain reorder of
+   * actionOptions leaves this list completely untouched. Deliberately not
+   * exposed to direct client editing — see readSettingsPayload
+   * (/api/manage/it/settings), which doesn't accept this key at all;
+   * updateReportSettings always recomputes it server-side from the
+   * incoming actionOptions and whatever was already persisted, so a
+   * tampered/stale value in a PATCH body can never override it. Stored as
+   * a JSON array, same as actionOptions/hiddenActionOptions/
+   * detailRequiredActionOptions. */
+  actionColorOrder: string[];
 }
 
 // Matches the attached example form exactly, so a hospital that never
@@ -565,6 +584,7 @@ export const DEFAULT_REPORT_SETTINGS: ReportSettings = {
   actionOptions: ["บำรุงรักษา"],
   hiddenActionOptions: [],
   detailRequiredActionOptions: [],
+  actionColorOrder: ["บำรุงรักษา"],
 };
 
 // Fixed key order — also what updateReportSettings writes back, so the
@@ -608,25 +628,34 @@ export async function getReportSettings(): Promise<ReportSettings> {
     actionOptions: [...DEFAULT_REPORT_SETTINGS.actionOptions],
     hiddenActionOptions: [...DEFAULT_REPORT_SETTINGS.hiddenActionOptions],
     detailRequiredActionOptions: [...DEFAULT_REPORT_SETTINGS.detailRequiredActionOptions],
+    actionColorOrder: [...DEFAULT_REPORT_SETTINGS.actionColorOrder],
   };
   for (const key of REPORT_SETTINGS_KEYS) {
     const v = stored.get(key);
     if (v === undefined || v.trim() === "") continue;
-    if (key === "actionOptions" || key === "hiddenActionOptions" || key === "detailRequiredActionOptions") {
+    if (
+      key === "actionOptions" ||
+      key === "hiddenActionOptions" ||
+      key === "detailRequiredActionOptions" ||
+      key === "actionColorOrder"
+    ) {
       // JSON array, not plain text — see the interface comment above.
       try {
         const parsed: unknown = JSON.parse(v);
         if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
           // actionOptions must never end up empty (nothing to print/pick
-          // from) — hiddenActionOptions/detailRequiredActionOptions have no
-          // such floor, an empty array just means "nothing hidden/flagged
-          // right now".
+          // from) — hiddenActionOptions/detailRequiredActionOptions/
+          // actionColorOrder have no such floor, an empty array just means
+          // "nothing hidden/flagged/color-assigned yet" (actionColorOrder
+          // self-heals right below anyway).
           if (key === "actionOptions") {
             if (parsed.length > 0) result.actionOptions = parsed as string[];
           } else if (key === "hiddenActionOptions") {
             result.hiddenActionOptions = parsed as string[];
-          } else {
+          } else if (key === "detailRequiredActionOptions") {
             result.detailRequiredActionOptions = parsed as string[];
+          } else {
+            result.actionColorOrder = parsed as string[];
           }
         }
       } catch {
@@ -636,6 +665,13 @@ export async function getReportSettings(): Promise<ReportSettings> {
     }
     result[key] = v;
   }
+  // Self-heals actionColorOrder on every read: a ReportSettings tab saved
+  // before this field existed (or hand-edited into an inconsistent state)
+  // just falls back to actionOptions' own current order, which is exactly
+  // this app's original index-based color behavior — see resolveColorOrder
+  // (lib/actionColors) for why this is safe to always run, not just when
+  // the parsed value came back empty.
+  result.actionColorOrder = resolveColorOrder(result.actionOptions, result.actionColorOrder);
   return result;
 }
 
@@ -647,6 +683,16 @@ export async function getReportSettings(): Promise<ReportSettings> {
 export async function updateReportSettings(updates: Partial<ReportSettings>): Promise<ReportSettings> {
   const current = await getReportSettings();
   const merged: ReportSettings = { ...current, ...updates };
+  // actionColorOrder is never taken from `updates` as-is — always
+  // recomputed here from the current (already self-healed) persisted order
+  // plus whatever actionOptions ends up in `merged`, so a client can never
+  // influence color assignment except indirectly through an actionOptions
+  // change it's already permitted to make (see readSettingsPayload,
+  // /api/manage/it/settings, which doesn't even accept this key). This is
+  // also what makes a plain reorder (moveActionOption client-side) a no-op
+  // for color: it only ever touches actionOptions, so this line just
+  // reproduces the exact same actionColorOrder that was already there.
+  merged.actionColorOrder = resolveColorOrder(merged.actionOptions, current.actionColorOrder);
 
   const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
   const tab = getReportSettingsTab();
@@ -662,6 +708,7 @@ export async function updateReportSettings(updates: Partial<ReportSettings>): Pr
           if (key === "actionOptions") return [key, JSON.stringify(merged.actionOptions)];
           if (key === "hiddenActionOptions") return [key, JSON.stringify(merged.hiddenActionOptions)];
           if (key === "detailRequiredActionOptions") return [key, JSON.stringify(merged.detailRequiredActionOptions)];
+          if (key === "actionColorOrder") return [key, JSON.stringify(merged.actionColorOrder)];
           return [key, merged[key]];
         }),
       },

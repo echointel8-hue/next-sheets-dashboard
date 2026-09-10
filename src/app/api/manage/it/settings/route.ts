@@ -53,7 +53,7 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
   const b = body as Record<string, unknown>;
   const stringKeys: Exclude<
     keyof ReportSettings,
-    "actionOptions" | "hiddenActionOptions" | "detailRequiredActionOptions"
+    "actionOptions" | "hiddenActionOptions" | "detailRequiredActionOptions" | "actionColorOrder"
   >[] = [
     "orgName",
     "maintenanceFormTitle",
@@ -118,6 +118,12 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
     // is a perfectly normal, common state.
     out.detailRequiredActionOptions = (b.detailRequiredActionOptions as string[]).map((s) => s.trim()).filter(Boolean);
   }
+  // actionColorOrder is deliberately never read from the request body at
+  // all — it's entirely server-derived (see updateReportSettings, which
+  // always recomputes it from the current persisted order plus whatever
+  // actionOptions ends up in this update), so a client — malicious or just
+  // stale — can never override color assignment directly, only indirectly
+  // through an actionOptions change it's already permitted to make.
   return out;
 }
 
