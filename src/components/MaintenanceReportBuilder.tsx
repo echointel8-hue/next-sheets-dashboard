@@ -1870,22 +1870,28 @@ export default function MaintenanceReportBuilder({
 
         {/* The printable form itself — kept visible on screen too (as a live
             preview) so what ends up on paper is never a surprise. */}
-        <div className="print-area rounded-2xl border border-zinc-200 bg-white p-8 text-zinc-900 shadow-sm print:rounded-none print:border-0 print:p-0 print:shadow-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
+        <div className="print-area relative rounded-2xl border border-zinc-200 bg-white p-8 text-zinc-900 shadow-sm print:rounded-none print:border-0 print:p-0 print:shadow-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
+          {/* Per the hospital's request, a reprinted copy stays visibly
+              marked as such — including the date it was reprinted, not
+              just the original วันที่ดำเนินการ below — so anyone reviewing
+              it later can tell it's a reissued copy rather than a second
+              original. Pinned to the page's own top-right corner (small,
+              out of the way of the centered header text) rather than sitting
+              inline under the header — note this is still inside OUR page
+              content, not the browser's own print header/footer strip
+              (the date/title line Chrome adds above the page when
+              "Headers and footers" is on in the print dialog) — a page has
+              no way to draw into that browser-owned area. */}
+          {isReprint && (
+            <p className="absolute right-3 top-3 text-[9px] text-red-600 print:right-0 print:top-0">
+              (พิมพ์ซ้ำเมื่อ {formatThaiDate(new Date().toISOString().slice(0, 10))})
+            </p>
+          )}
           <div className="flex flex-col items-center gap-1 text-center">
             <p className="text-base font-bold">{formSettings.orgName}</p>
             <p className="text-base font-bold">{formSettings.maintenanceFormTitle}</p>
             <p className="text-sm">{formSettings.fiscalYearLabel}</p>
             {formDepartment && <p className="mt-1 text-sm">กลุ่มงาน: {formDepartment}</p>}
-            {/* Per the hospital's request, a reprinted copy stays visibly
-                marked as such — including the date it was reprinted, not
-                just the original วันที่ดำเนินการ above — so anyone
-                reviewing it later can tell it's a reissued copy rather than
-                a second original. */}
-            {isReprint && (
-              <p className="mt-1 text-xs text-red-600">
-                (พิมพ์ซ้ำเมื่อ {formatThaiDate(new Date().toISOString().slice(0, 10))})
-              </p>
-            )}
           </div>
 
           <div className="mt-4">
