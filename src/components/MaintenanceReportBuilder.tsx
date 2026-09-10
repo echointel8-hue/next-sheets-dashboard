@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Check,
@@ -199,6 +200,7 @@ export default function MaintenanceReportBuilder({
    * with no tasks yet just shows no badges, no code change needed. */
   taskHistory: ReportTaskEntry[];
 }) {
+  const router = useRouter();
   const [items, setItems] = useState(initialItems);
   // Multi-select — an empty array means "no filter on that dimension", same
   // convention as the department/equipment-type filters on /manage and
@@ -274,6 +276,22 @@ export default function MaintenanceReportBuilder({
   // most; task tracking is secondary).
   const [creatingTasks, setCreatingTasks] = useState(false);
   const [taskCreateError, setTaskCreateError] = useState<string | null>(null);
+
+  // Once IT clicks "พิมพ์ / บันทึกเป็น PDF" (handlePrint calls window.print()
+  // below), the browser's own print dialog/preview takes over the screen —
+  // "afterprint" is the one event every major browser fires the moment that
+  // dialog closes again, whether the person actually printed or just
+  // cancelled it. Either way, per the hospital's request, leaving that
+  // dialog means the maintenance round has started, so this sends them
+  // straight to "งานบำรุงรักษา" (the tasks board) instead of leaving them
+  // back on this report-builder page.
+  useEffect(() => {
+    function handleAfterPrint() {
+      router.push("/manage/it/tasks");
+    }
+    window.addEventListener("afterprint", handleAfterPrint);
+    return () => window.removeEventListener("afterprint", handleAfterPrint);
+  }, [router]);
 
   // Form header / signature text — editable right here (pre-filled from the
   // saved ReportSettings) so a one-off change (a substitute signee, say)
@@ -446,6 +464,27 @@ export default function MaintenanceReportBuilder({
     return { inProgress, lastCompleted, visitCounts, monthlyTasks };
   }, [taskHistory, maintenanceYearFilter, maintenanceMonthFilter]);
 
+  // Locks the checkbox for any equipment someone else already has "กำลัง
+  // บำรุงรักษาโดย ..." open — per the hospital's request, one IT starting a
+  // maintenance round on a piece of equipment should block every other IT
+  // from picking that same equipment again until the first one marks it
+  // เสร็จสิ้น. Deliberately NOT the `inProgress` map above (that one is
+  // scoped to whichever ปี/เดือนที่บำรุงรักษา filter happens to be selected,
+  // so it can go blank for an open task created in an earlier เดือน/ปี —
+  // see its own comment) — the lock has to hold regardless of what this
+  // page's filters are currently set to, so it always scans the full,
+  // unfiltered taskHistory instead. The server (POST /api/manage/it/tasks)
+  // enforces the real "one open task per equipment" rule independently —
+  // this is only what makes the picker table itself refuse the duplicate
+  // selection up front, with a reason IT can see.
+  const inProgressByEquipment = useMemo(() => {
+    const map: Record<number, { displayName: string }> = {};
+    for (const t of taskHistory) {
+      if (t.status === "in_progress") map[t.equipmentRowNumber] = { displayName: t.displayName };
+    }
+    return map;
+  }, [taskHistory]);
+
   // Which month-strip tick's task list is open, shown as a small centered
   // modal (see the JSX below) — click-only, no hover tracking. An earlier
   // version tried a hover-following tooltip positioned with
@@ -475,6 +514,10 @@ export default function MaintenanceReportBuilder({
   }, [items, departmentFilter, equipmentTypeFilter, maintenanceStatusFilter, inProgress, lastCompleted, search]);
 
   function toggleItem(rowNumber: number) {
+    // A locked (already in_progress elsewhere) row can still appear here if
+    // it was selected before the lock kicked in — always allow *un*checking,
+    // just never re-checking a currently-locked row.
+    if (inProgressByEquipment[rowNumber] && !selectedRowNumbers.includes(rowNumber)) return;
     setSelectedRowNumbers((prev) =>
       prev.includes(rowNumber) ? prev.filter((n) => n !== rowNumber) : [...prev, rowNumber]
     );
@@ -483,7 +526,10 @@ export default function MaintenanceReportBuilder({
   function selectAllFiltered() {
     setSelectedRowNumbers((prev) => {
       const next = new Set(prev);
-      for (const it of filteredItems) next.add(it.rowNumber);
+      for (const it of filteredItems) {
+        if (inProgressByEquipment[it.rowNumber]) continue; // locked — someone else already has this open
+        next.add(it.rowNumber);
+      }
       return [...next];
     });
   }
@@ -724,6 +770,16 @@ export default function MaintenanceReportBuilder({
         const json = await res.json().catch(() => ({}));
         setTaskCreateError(json.error ?? "บันทึกงานเข้าระบบติดตามไม่สำเร็จ — พิมพ์รายงานต่อได้ตามปกติ");
       }
+      // Note: a successful response's skippedAlreadyInProgress count (the
+      // server's own backstop against the same equipment somehow ending up
+      // with two open tasks — see POST /api/manage/it/tasks) isn't surfaced
+      // here on purpose: window.print() below is immediately followed by
+      // the "afterprint" redirect to /manage/it/tasks (see the useEffect
+      // above), so any message set on this page would be shown for only a
+      // moment, hidden behind the print dialog the whole time — not a
+      // reliable place for it. The checkbox lock in the picker table is
+      // what actually prevents this up front, in a place IT can see before
+      // printing at all.
     } catch {
       setTaskCreateError("บันทึกงานเข้าระบบติดตามไม่สำเร็จ — พิมพ์รายงานต่อได้ตามปกติ");
     } finally {
@@ -1184,13 +1240,25 @@ export default function MaintenanceReportBuilder({
                 <tbody>
                   {filteredItems.map((it) => (
                     <tr key={it.rowNumber} className="border-b border-zinc-50 last:border-0 dark:border-zinc-800/60">
-                      <td className="px-2 py-1.5">
+                      <td className="px-2 py-1.5 align-top">
                         <input
                           type="checkbox"
                           checked={selectedRowNumbers.includes(it.rowNumber)}
                           onChange={() => toggleItem(it.rowNumber)}
+                          disabled={Boolean(inProgressByEquipment[it.rowNumber]) && !selectedRowNumbers.includes(it.rowNumber)}
+                          title={
+                            inProgressByEquipment[it.rowNumber]
+                              ? `กำลังบำรุงรักษาโดย ${inProgressByEquipment[it.rowNumber].displayName} อยู่ — เลือกซ้ำไม่ได้จนกว่าจะกดเสร็จสิ้น`
+                              : undefined
+                          }
                           aria-label={`เลือก ${it.assetNumber || it.equipmentType}`}
+                          className="disabled:cursor-not-allowed disabled:opacity-40"
                         />
+                        {inProgressByEquipment[it.rowNumber] && (
+                          <p className="mt-1 w-9 text-[8px] leading-tight text-amber-600 dark:text-amber-400">
+                            กำลังบำรุงรักษาอยู่ — เลือกซ้ำไม่ได้
+                          </p>
+                        )}
                       </td>
                       <td className="px-2 py-1.5 align-top">
                         <div
