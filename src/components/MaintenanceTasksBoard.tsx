@@ -9,6 +9,7 @@ import {
   ClipboardList,
   FileText,
   Loader2,
+  Printer,
   Save,
   Trash2,
   Users,
@@ -536,6 +537,20 @@ export default function MaintenanceTasksBoard({
                           <Wrench size={13} strokeWidth={2} aria-hidden="true" />
                           {t.status === "in_progress" ? "อัปเดตสถานะ" : "ดูรายละเอียด"}
                         </button>
+                        {/* For a lost/damaged original printout — reopens
+                            the report page pre-filled with this task's
+                            equipment/วันที่ and, per its own isReprint
+                            handling, prints again WITHOUT logging a second,
+                            brand-new maintenance round for it. See
+                            manage/it/report/page.tsx's reprintTaskId. */}
+                        <Link
+                          href={`/manage/it/report?reprintTaskId=${encodeURIComponent(t.taskId)}`}
+                          title="พิมพ์ซ้ำแบบฟอร์มของงานนี้ (เช่น กรณีเอกสารต้นฉบับสูญหาย) — จะไม่สร้างงานบำรุงรักษารายการใหม่"
+                          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        >
+                          <Printer size={13} strokeWidth={2} aria-hidden="true" />
+                          พิมพ์ซ้ำ
+                        </Link>
                         <button
                           type="button"
                           onClick={() => deleteTask(t)}

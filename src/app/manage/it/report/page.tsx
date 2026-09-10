@@ -13,6 +13,7 @@ import { rowSnapshotHash } from "@/lib/recordHash";
 import MaintenanceReportBuilder, {
   type ReportEquipmentItem,
   type ReportTaskEntry,
+  type ReprintTaskInfo,
 } from "@/components/MaintenanceReportBuilder";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +46,15 @@ function splitTitlePrefix(fullName: string): { titlePrefix: string; nameOnly: st
  * request it's dropped from IT's list entirely rather than shown with a
  * "(จำหน่ายแล้ว)" tag as before.
  */
-export default async function ManageItReportPage() {
+export default async function ManageItReportPage({
+  searchParams,
+}: {
+  /** ?reprintTaskId=... — set only when reached via the "พิมพ์ซ้ำ" button
+   * on /manage/it/tasks (see MaintenanceTasksBoard). Absent on every normal
+   * visit to this page. */
+  searchParams: Promise<{ reprintTaskId?: string }>;
+}) {
+  const { reprintTaskId } = await searchParams;
   const cookieStore = await cookies();
   const session = verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
   if (!session) {
@@ -135,6 +144,11 @@ export default async function ManageItReportPage() {
   // other read failure should just mean no badges this load, not break the
   // whole report page.
   let taskHistory: ReportTaskEntry[] = [];
+  // Set only when reprintTaskId names a task that still exists — see
+  // MaintenanceReportBuilder's ReprintTaskInfo/isReprint for what this
+  // drives. Deliberately looked up from the very same getMaintenanceTasks()
+  // call as taskHistory just below, rather than a second read.
+  let reprintTask: ReprintTaskInfo | null = null;
   try {
     const tasks = await getMaintenanceTasks();
     taskHistory = tasks.map((t) => ({
@@ -151,8 +165,48 @@ export default async function ManageItReportPage() {
       partsChanged: t.partsChanged,
       otherDetail: t.otherDetail,
     }));
+
+    if (reprintTaskId) {
+      const found = tasks.find((t) => t.taskId === reprintTaskId);
+      if (found) {
+        reprintTask = {
+          taskId: found.taskId,
+          equipmentRowNumber: found.equipmentRowNumber,
+          department: found.department,
+          createdAt: found.createdAt,
+        };
+        // The equipment picker/print table only ever draws from `items`
+        // above, which already excludes disposed/deleted rows — normal for
+        // a fresh printout, but a reprint can easily point at equipment
+        // that's since been disposed (that's often *why* someone wants a
+        // reprint of an old record in the first place). Rather than let the
+        // reprint silently come up with nothing to select, splice in a
+        // best-effort stand-in row built from the task's own saved fields
+        // when the real one isn't in `items` anymore.
+        if (!items.some((it) => it.rowNumber === found.equipmentRowNumber)) {
+          items = [
+            ...items,
+            {
+              rowNumber: found.equipmentRowNumber,
+              assetNumber: found.assetNumber,
+              equipmentType: found.equipmentType,
+              brandModel: found.brandModel,
+              department: found.department,
+              installLocation: found.location,
+              responsiblePerson: "",
+              titlePrefix: "",
+              nameOnly: "",
+              snapshotHash: "",
+              // No live sheet row backs this stand-in, so there's nothing
+              // to save location/responsible-person edits back to.
+              canSaveResponsiblePerson: false,
+            },
+          ];
+        }
+      }
+    }
   } catch {
-    // Fall through with no badges.
+    // Fall through with no badges, and no reprint pre-fill.
   }
 
   return (
@@ -162,6 +216,7 @@ export default async function ManageItReportPage() {
       settings={settings}
       currentUser={{ username: session.username, displayName, isBootstrap: session.isBootstrap }}
       taskHistory={taskHistory}
+      reprintTask={reprintTask}
     />
   );
 }

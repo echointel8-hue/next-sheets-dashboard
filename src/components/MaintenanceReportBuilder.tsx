@@ -82,6 +82,23 @@ export interface ReportTaskEntry {
   otherDetail: string;
 }
 
+/** Minimal data manage/it/tasks/page.tsx (via ?reprintTaskId=) hands down to
+ * pre-fill this page for "พิมพ์ซ้ำ" — reprinting the same paper form for a
+ * maintenance round that already happened, because the original copy got
+ * lost, WITHOUT logging what would look like a second, brand-new visit. See
+ * the isReprint prefill effect below and handlePrint's early return. */
+export interface ReprintTaskInfo {
+  taskId: string;
+  equipmentRowNumber: number;
+  department: string;
+  /** ISO timestamp the original task (and therefore, in practice, the
+   * original printout) was created at — used to default "วันที่ดำเนินการ"
+   * back to that same date rather than today's, since a reprint documents
+   * a visit that already happened on that day, not a new one happening
+   * now. */
+  createdAt: string;
+}
+
 /** "ปกติ, เปลี่ยนอะไหล่ (จอ LCD), ส่งซ่อม" — folds the ผลการตรวจสอบโดย IT
  * checkboxes back into one readable line for the month-strip popup, same
  * checks as the printed form's "ผลการตรวจสอบโดย IT" box. Appends the
@@ -181,6 +198,7 @@ export default function MaintenanceReportBuilder({
   settings: initialSettings,
   currentUser,
   taskHistory,
+  reprintTask,
 }: {
   items: ReportEquipmentItem[];
   loadError: string | null;
@@ -201,6 +219,10 @@ export default function MaintenanceReportBuilder({
    * badges for whichever year is selected, client-side — a future year
    * with no tasks yet just shows no badges, no code change needed. */
   taskHistory: ReportTaskEntry[];
+  /** Set only when this page was reached via the "พิมพ์ซ้ำ" button on
+   * /manage/it/tasks (?reprintTaskId=...) — see manage/it/report/page.tsx.
+   * Null on every normal visit to this page. */
+  reprintTask?: ReprintTaskInfo | null;
 }) {
   const router = useRouter();
   const [items, setItems] = useState(initialItems);
@@ -244,9 +266,17 @@ export default function MaintenanceReportBuilder({
   // so picking a status is always relative to whichever ปีที่บำรุงรักษา is
   // selected — e.g. "ยังไม่เคยบำรุงรักษา" means "no task logged in that ปี".
   const [maintenanceStatusFilter, setMaintenanceStatusFilter] = useState<"" | "in_progress" | "done" | "none">("");
-  const [selectedRowNumbers, setSelectedRowNumbers] = useState<number[]>([]);
-  const [formDepartment, setFormDepartment] = useState("");
-  const [visitDate, setVisitDate] = useState("");
+  // Pre-selects the one equipment item (and its กลุ่มงาน/วันที่) a
+  // "พิมพ์ซ้ำ" visit came in with — see ReprintTaskInfo's own comment for
+  // why วันที่ defaults to the ORIGINAL task's createdAt rather than today.
+  // Lazy initializers rather than an effect (reprintTask is a stable prop
+  // for this page's whole lifetime, set once server-side from the URL), so
+  // this never fights the eslint "no setState in an effect" rule.
+  const [selectedRowNumbers, setSelectedRowNumbers] = useState<number[]>(() =>
+    reprintTask ? [reprintTask.equipmentRowNumber] : []
+  );
+  const [formDepartment, setFormDepartment] = useState(() => reprintTask?.department ?? "");
+  const [visitDate, setVisitDate] = useState(() => reprintTask?.createdAt.slice(0, 10) ?? "");
   const [timeFrom, setTimeFrom] = useState("");
   const [timeTo, setTimeTo] = useState("");
   const [overrides, setOverrides] = useState<
@@ -294,6 +324,17 @@ export default function MaintenanceReportBuilder({
     window.addEventListener("afterprint", handleAfterPrint);
     return () => window.removeEventListener("afterprint", handleAfterPrint);
   }, [router]);
+
+  // True for the whole lifetime of this page load whenever it was reached
+  // via "พิมพ์ซ้ำ" — see handlePrint below (skips creating a fresh
+  // maintenance task entirely, since the round already happened and is
+  // already on record) and the no-print banner / printed-page note further
+  // down. Deliberately not "only while selectedRowNumbers still matches
+  // reprintTask" — if IT adds or swaps items during this same reprint
+  // session, this is still fundamentally a reprint errand, not a new
+  // maintenance round, so it keeps skipping task-creation for the whole
+  // session rather than switching behavior mid-way.
+  const isReprint = Boolean(reprintTask);
 
   // Form header / signature text — editable right here (pre-filled from the
   // saved ReportSettings) so a one-off change (a substitute signee, say)
@@ -794,6 +835,15 @@ export default function MaintenanceReportBuilder({
    * the part that has to happen regardless. */
   async function handlePrint() {
     if (selectedRows.length === 0) return;
+    if (isReprint) {
+      // The maintenance round this reprint documents already happened and
+      // is already on record (that's exactly what reprintTask points at) —
+      // this is standing in for a lost paper copy, not a new visit, so
+      // skip POST /api/manage/it/tasks entirely rather than logging what
+      // would look like a second, brand-new round for the same equipment.
+      window.print();
+      return;
+    }
     setCreatingTasks(true);
     setTaskCreateError(null);
     try {
@@ -909,6 +959,20 @@ export default function MaintenanceReportBuilder({
               </button>
             </div>
           </header>
+
+          {isReprint && (
+            <div
+              role="status"
+              className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
+            >
+              <PrinterIcon size={16} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <span>
+                โหมดพิมพ์ซ้ำ — เตรียมพิมพ์สำเนาแบบฟอร์มของงานบำรุงรักษาที่มีอยู่แล้วในระบบ
+                (สำหรับกรณีเอกสารต้นฉบับสูญหาย) การพิมพ์ครั้งนี้จะ<strong>ไม่สร้างงานบำรุงรักษารายการใหม่</strong>
+                ในระบบ — ปรับ วันที่/ช่วงเวลา/รายการครุภัณฑ์ ด้านล่างได้ตามจริงก่อนพิมพ์
+              </span>
+            </div>
+          )}
 
           {loadError && (
             <div
@@ -1795,6 +1859,16 @@ export default function MaintenanceReportBuilder({
             <p className="text-base font-bold">{formSettings.maintenanceFormTitle}</p>
             <p className="text-sm">{formSettings.fiscalYearLabel}</p>
             {formDepartment && <p className="mt-1 text-sm">กลุ่มงาน: {formDepartment}</p>}
+            {/* Per the hospital's request, a reprinted copy stays visibly
+                marked as such — including the date it was reprinted, not
+                just the original วันที่ดำเนินการ above — so anyone
+                reviewing it later can tell it's a reissued copy rather than
+                a second original. */}
+            {isReprint && (
+              <p className="mt-1 text-xs text-red-600">
+                (พิมพ์ซ้ำเมื่อ {formatThaiDate(new Date().toISOString().slice(0, 10))})
+              </p>
+            )}
           </div>
 
           <div className="mt-4">
@@ -1944,7 +2018,7 @@ export default function MaintenanceReportBuilder({
               ) : (
                 <PrinterIcon size={16} strokeWidth={2} aria-hidden="true" />
               )}
-              พิมพ์ / บันทึกเป็น PDF
+              {isReprint ? "พิมพ์ซ้ำ / บันทึกเป็น PDF (ไม่สร้างงานใหม่)" : "พิมพ์ / บันทึกเป็น PDF"}
             </button>
           </div>
         </div>
