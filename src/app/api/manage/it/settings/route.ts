@@ -61,7 +61,7 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
     "printFontSizePt",
     "printHeaderFontSizePt",
     "printTableFontSizePx",
-    "printLetterSpacingPx",
+    "printLineHeight",
   ];
   const out: Partial<ReportSettings> = {};
   for (const key of stringKeys) {
@@ -87,11 +87,11 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
     // helper clamps to at render time — kept in sync deliberately.
     if (!Number.isFinite(n) || n < 7 || n > 20) return null;
   }
-  if (out.printLetterSpacingPx !== undefined) {
-    const n = Number(out.printLetterSpacingPx);
-    // Same -2–5px range MaintenanceReportBuilder's printLetterSpacingPx
-    // helper clamps to at render time — kept in sync deliberately.
-    if (!Number.isFinite(n) || n < -2 || n > 5) return null;
+  if (out.printLineHeight !== undefined) {
+    const n = Number(out.printLineHeight);
+    // Same 0.7–2.5 range MaintenanceReportBuilder's printLineHeight helper
+    // clamps to at render time — kept in sync deliberately.
+    if (!Number.isFinite(n) || n < 0.7 || n > 2.5) return null;
   }
   if (b.actionOptions !== undefined) {
     if (!Array.isArray(b.actionOptions) || !b.actionOptions.every((x) => typeof x === "string")) return null;

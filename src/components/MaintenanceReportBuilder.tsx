@@ -194,14 +194,14 @@ function printHeaderFontSizePt(raw: string): number {
   return Number.isFinite(n) && n >= 8 && n <= 36 ? n : 16;
 }
 
-/** Parses ReportSettings.printLetterSpacingPx into a safe px number for
- * the print-area's own inline letter-spacing style — same "reject a bad
- * stored value, don't break the page" role as the size helpers above, and
- * the same -2–5 range the API route validates on save. Falls back to "0"
- * (browser default spacing), the field's own default. */
-function printLetterSpacingPx(raw: string): number {
+/** Parses ReportSettings.printLineHeight into a safe, unitless line-height
+ * multiplier for the print-area's own inline line-height style — same
+ * "reject a bad stored value, don't break the page" role as the size
+ * helpers above, and the same 0.7–2.5 range the API route validates on
+ * save. Falls back to "0.9", the field's own default. */
+function printLineHeight(raw: string): number {
   const n = Number(raw);
-  return Number.isFinite(n) && n >= -2 && n <= 5 ? n : 0;
+  return Number.isFinite(n) && n >= 0.7 && n <= 2.5 ? n : 0.9;
 }
 
 /** Fixed print font stack — used to be user-configurable
@@ -1073,9 +1073,11 @@ export default function MaintenanceReportBuilder({
   // ever changes size.
   const headerFontSizePt = printHeaderFontSizePt(formSettings.printHeaderFontSizePt);
   // Applied to the whole print-area container (see the print-area div
-  // below) — the one letter-spacing knob covers header, table, and body
-  // text together.
-  const letterSpacingPx = printLetterSpacingPx(formSettings.printLetterSpacingPx);
+  // below) and inherited by everything under it except the equipment
+  // table (its own leading-snug wins over the inherited value) — see
+  // ReportSettings.printLineHeight's own comment for exactly what that
+  // covers.
+  const lineHeightRatio = printLineHeight(formSettings.printLineHeight);
   // Drives the equipment table's base font size (see
   // ReportSettings.printTableFontSizePx) — the two smaller in-table sizes
   // below are derived from it, offset by fixed px amounts, so the table's
@@ -1348,15 +1350,15 @@ export default function MaintenanceReportBuilder({
                         />
                       </label>
                       <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-                        ระยะห่างระหว่างตัวอักษรภาพรวม (px)
+                        ระยะห่างระหว่างบรรทัดภาพรวม (เท่าของขนาดตัวอักษร)
                         <input
                           type="number"
-                          min={-2}
-                          max={5}
-                          step={0.5}
-                          value={formSettings.printLetterSpacingPx}
+                          min={0.7}
+                          max={2.5}
+                          step={0.05}
+                          value={formSettings.printLineHeight}
                           onChange={(e) => {
-                            setFormSettings((prev) => ({ ...prev, printLetterSpacingPx: e.target.value }));
+                            setFormSettings((prev) => ({ ...prev, printLineHeight: e.target.value }));
                             setSettingsSaved(false);
                           }}
                           className={INPUT_CLASS}
@@ -2117,15 +2119,16 @@ export default function MaintenanceReportBuilder({
 
         {/* The printable form itself — kept visible on screen too (as a live
             preview) so what ends up on paper is never a surprise. The fixed
-            print font (PRINT_FONT_FAMILY) and the configured letter-spacing
-            (ReportSettings.printLetterSpacingPx) both apply to the whole
-            page at once (including the table below, which keeps its own
-            small fixed sizes — see printTableFontSizePx) so the live
+            print font (PRINT_FONT_FAMILY) applies to the whole page, and
+            the configured line-height (ReportSettings.printLineHeight)
+            applies here too and is inherited by everything under it EXCEPT
+            the equipment table below (its own leading-snug class wins over
+            the inherited value — see printTableFontSizePx) — so the live
             preview matches what actually prints, same reasoning as
             everything else on this page staying visible pre-print. */}
         <div
           className="print-area relative rounded-2xl border border-zinc-200 bg-white p-8 text-zinc-900 shadow-sm print:rounded-none print:border-0 print:p-0 print:shadow-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
-          style={{ fontFamily: PRINT_FONT_FAMILY, letterSpacing: `${letterSpacingPx}px` }}
+          style={{ fontFamily: PRINT_FONT_FAMILY, lineHeight: lineHeightRatio }}
         >
           {/* Per the hospital's request, a reprinted copy stays visibly
               marked as such — including the date it was reprinted, not
@@ -2143,24 +2146,17 @@ export default function MaintenanceReportBuilder({
               (พิมพ์ซ้ำเมื่อ {formatThaiDate(new Date().toISOString().slice(0, 10))})
             </p>
           )}
-          {/* Tailwind's tightest preset (leading-none, line-height: 1) still
-              left visible daylight between these lines — TH SarabunPSK (see
-              PRINT_FONT_FAMILY) bakes an unusually tall line box into its
-              own font metrics, taller than line-height: 1 alone can
-              correct. An explicit ratio below 1 on the inline style (which
-              wins over any leading-* class) is what actually closes that
-              up; 0.9 was picked as tight as it gets before Thai tone
-              marks/vowel signs risk visually touching the line above.
-              gap-0 removes the flex gap entirely, and fontSize here now
-              comes from ReportSettings.printHeaderFontSizePt (see
-              headerFontSizePt above) instead of the old fixed
-              text-base/text-sm classes, so this line-height is the only
-              thing controlling the space between lines regardless of that
-              setting's value. */}
-          <div
-            className="flex flex-col items-center gap-0 text-center"
-            style={{ lineHeight: 0.9, fontSize: `${headerFontSizePt}pt` }}
-          >
+          {/* No line-height override here anymore — this block just
+              inherits ReportSettings.printLineHeight (lineHeightRatio)
+              from the print-area container above it, same as the "ข้อมูล
+              ครุภัณฑ์..." heading/date-time line below and the signature
+              blocks further down, so all three are now tuned together by
+              that one setting instead of each carrying its own
+              hard-coded value. gap-0 removes the flex gap entirely so
+              line-height alone controls the space between these lines.
+              fontSize comes from ReportSettings.printHeaderFontSizePt
+              (see headerFontSizePt above), its own separate control. */}
+          <div className="flex flex-col items-center gap-0 text-center" style={{ fontSize: `${headerFontSizePt}pt` }}>
             <p className="font-bold">{formSettings.orgName}</p>
             <p className="font-bold">{formSettings.maintenanceFormTitle}</p>
             <p>{formSettings.fiscalYearLabel}</p>
@@ -2318,18 +2314,19 @@ export default function MaintenanceReportBuilder({
             {signatureBlocks.map((block, idx) => (
               <div
                 key={block.key}
-                className={`flex flex-col items-center gap-0.5 leading-none print:break-inside-avoid ${
+                className={`flex flex-col items-center gap-0.5 print:break-inside-avoid ${
                   signatureBlocks.length % 2 === 1 && idx === signatureBlocks.length - 1 ? "sm:col-span-2" : ""
                 }`}
               >
                 {/* pt-6 leaves blank room above the dotted line for an
                     actual pen signature — the dots alone (no space above
                     them) left no room to sign without touching the block
-                    above. leading-none on the block above tightens the
-                    four lines below it (name/ตำแหน่ง/กลุ่มงาน) — leading-tight
-                    still left visible daylight between lines with the
-                    configured print font's taller default line-height, same
-                    fix as the page header above. */}
+                    above. No line-height class here anymore — like the
+                    page header, this now just inherits
+                    ReportSettings.printLineHeight (lineHeightRatio) from
+                    the print-area container, so the four lines below
+                    (name/ตำแหน่ง/กลุ่มงาน) stay tight without a class of
+                    their own to keep in sync. */}
                 <p className="pt-6">{block.heading}</p>
                 <p>{block.nameLine}</p>
                 <p>{block.positionLine}</p>

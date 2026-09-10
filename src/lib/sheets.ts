@@ -490,20 +490,29 @@ export interface ReportSettings {
    * Stored as a string, same plain-text handling as every other field
    * here. */
   printTableFontSizePx: string;
-  /** Letter-spacing (in px — CSS letter-spacing accepts the same units as
-   * font-size, and px keeps this consistent with printTableFontSizePx
-   * rather than mixing in yet another unit) applied to the whole printed
-   * form at once — header, table, and body text together — via the
-   * print-area container's own inline style (see
-   * MaintenanceReportBuilder's print-area div), same "whole page" scope
-   * the now-removed printFontFamily setting used to have. A small
-   * positive value can help a dense Thai form breathe a bit; a small
-   * negative value can claw back a bit of horizontal room. Stored as a
-   * string, same plain-text handling as every other field here — parsed
-   * with a fallback at render time (see MaintenanceReportBuilder's
-   * printLetterSpacingPx) so a blank or hand-edited non-numeric cell
-   * never breaks the page. */
-  printLetterSpacingPx: string;
+  /** Line-height (a bare unitless CSS multiplier of font-size, e.g. "0.9"
+   * — NOT px/pt, so it scales correctly no matter what font size each
+   * block underneath ends up at) applied to the whole printed form at
+   * once via the print-area container's own inline style (see
+   * MaintenanceReportBuilder's print-area div) and inherited down by
+   * everything under it EXCEPT the equipment table, which keeps its own
+   * separately-tuned leading-snug instead (it was already deliberately
+   * kept small and dense to fit the whole list on one printed page, a
+   * different goal than "how tight the rest of the form reads"). That
+   * means this one setting now governs the header block, the "ข้อมูล
+   * ครุภัณฑ์..." heading/date-time line, AND the ผู้ตรวจสอบ/ผู้รับทราบ
+   * signature blocks together — all three needed hand-tuned tightening
+   * before this became adjustable (TH SarabunPSK, see PRINT_FONT_FAMILY,
+   * bakes an unusually tall line box into its own font metrics, so this
+   * typically needs to sit well below 1 to read as normal spacing rather
+   * than airy), so one shared control now covers all three instead of
+   * each needing its own code change. Defaults to "0.9", matching what
+   * this form already used before the value became adjustable. Stored as
+   * a string, same plain-text handling as every other field here —
+   * parsed with a fallback at render time (see MaintenanceReportBuilder's
+   * printLineHeight) so a blank or hand-edited non-numeric cell never
+   * breaks the page. */
+  printLineHeight: string;
   /** Checklist items shown under the "การดำเนินการ" column of a printed
    * maintenance report — editable by the hospital instead of hard-coded,
    * since this list is expected to grow (today just "บำรุงรักษา", later
@@ -538,7 +547,7 @@ export const DEFAULT_REPORT_SETTINGS: ReportSettings = {
   printFontSizePt: "14",
   printHeaderFontSizePt: "16",
   printTableFontSizePx: "11",
-  printLetterSpacingPx: "0",
+  printLineHeight: "0.9",
   actionOptions: ["บำรุงรักษา"],
   hiddenActionOptions: [],
 };
