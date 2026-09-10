@@ -7,6 +7,8 @@ import {
   ArrowLeft,
   Check,
   CheckCircle2,
+  Eye,
+  EyeOff,
   Loader2,
   Lock,
   MapPin,
@@ -710,9 +712,40 @@ export default function MaintenanceReportBuilder({
 
   function removeActionOption(index: number) {
     if (!canManageActionOptions && index < lockedActionOptionsCount) return;
-    setFormSettings((prev) =>
-      prev.actionOptions.length <= 1 ? prev : { ...prev, actionOptions: prev.actionOptions.filter((_, i) => i !== index) }
-    );
+    setFormSettings((prev) => {
+      if (prev.actionOptions.length <= 1) return prev;
+      const removed = prev.actionOptions[index];
+      return {
+        ...prev,
+        actionOptions: prev.actionOptions.filter((_, i) => i !== index),
+        // A removed entry has nothing left to hide — drop it from
+        // hiddenActionOptions too so that list never accumulates names
+        // that no longer exist.
+        hiddenActionOptions: prev.hiddenActionOptions.filter((n) => n !== removed),
+      };
+    });
+    setSettingsSaved(false);
+  }
+
+  /** Bootstrap-only "ซ่อน/แสดง" (hide/show) toggle for one รายการ
+   * "การดำเนินการ" entry. Unlike removeActionOption, this never touches
+   * actionOptions itself — the entry stays at its exact array index (so
+   * its color from buildActionColorMap never shifts) — it only adds/
+   * removes the entry's exact text from hiddenActionOptions. A hidden
+   * entry disappears from every place IT actually *picks* an action (the
+   * "เลือกรายการที่จะดำเนินการ" chips below, the printed form's
+   * printActionOptions, and /manage/it/tasks's "อัปเดตสถานะงาน" checklist)
+   * but stays visible — dimmed — in this settings list so it can be
+   * unhidden and used again later, per the hospital's request not to lose
+   * it outright. */
+  function toggleHiddenActionOption(name: string) {
+    if (!canManageActionOptions) return;
+    setFormSettings((prev) => ({
+      ...prev,
+      hiddenActionOptions: prev.hiddenActionOptions.includes(name)
+        ? prev.hiddenActionOptions.filter((n) => n !== name)
+        : [...prev.hiddenActionOptions, name],
+    }));
     setSettingsSaved(false);
   }
 
@@ -721,7 +754,15 @@ export default function MaintenanceReportBuilder({
     setSettingsError(null);
     setSettingsSaved(false);
     try {
-      const payload: ReportSettings = { ...formSettings, actionOptions: cleanActionOptions(formSettings.actionOptions) };
+      const cleanedActionOptions = cleanActionOptions(formSettings.actionOptions);
+      const payload: ReportSettings = {
+        ...formSettings,
+        actionOptions: cleanedActionOptions,
+        // Drop any hidden-name that no longer matches a real entry (e.g.
+        // it got removed, or a blank row it referenced was cleaned away)
+        // so this list never grows stale.
+        hiddenActionOptions: formSettings.hiddenActionOptions.filter((n) => cleanedActionOptions.includes(n)),
+      };
       const res = await fetch("/api/manage/it/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -795,12 +836,14 @@ export default function MaintenanceReportBuilder({
   const displayDate = visitDate ? formatThaiDate(visitDate) : "";
   const timeRangeLabel = timeFrom && timeTo ? `${timeFrom} - ${timeTo}` : timeFrom || timeTo || "";
   // Blank rows mid-edit in the settings modal never leak into the printed
-  // table (cleanActionOptions), and anything toggled off for this round
-  // (excludedActionOptions, see the "เลือกรายการที่จะดำเนินการ" card) is
-  // dropped too — the master list stays untouched either way.
-  const printActionOptions = cleanActionOptions(formSettings.actionOptions).filter(
-    (name) => !excludedActionOptions.includes(name)
-  );
+  // table (cleanActionOptions), anything ซ่อน/hidden from the master list
+  // (hiddenActionOptions) never appears on a printed form at all, and
+  // anything toggled off for just this round (excludedActionOptions, see
+  // the "เลือกรายการที่จะดำเนินการ" card) is dropped too — the master list
+  // stays untouched either way.
+  const printActionOptions = cleanActionOptions(formSettings.actionOptions)
+    .filter((name) => !formSettings.hiddenActionOptions.includes(name))
+    .filter((name) => !excludedActionOptions.includes(name));
   // One ผู้ตรวจสอบ block per department, then ผู้รับทราบ last — all rendered
   // from a single grid below so they pair up left/right instead of
   // ผู้รับทราบ always getting shoved onto its own row. See that grid's
@@ -968,17 +1011,23 @@ export default function MaintenanceReportBuilder({
                     <div className="flex flex-col gap-2">
                       {formSettings.actionOptions.map((opt, idx) => {
                         const locked = !canManageActionOptions && idx < lockedActionOptionsCount;
+                        const hidden = opt.trim() ? formSettings.hiddenActionOptions.includes(opt) : false;
                         const color = opt.trim() ? colorForAction(opt) : null;
                         return (
-                          <div key={idx} className="flex items-center gap-2">
+                          <div key={idx} className={`flex items-center gap-2 ${hidden ? "opacity-50" : ""}`}>
                             <span
                               className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
                               style={color ? actionColorStyle(color) : actionColorStyle(ACTION_OTHER_COLOR)}
                               aria-hidden="true"
                             />
                             {locked ? (
-                              <span className="flex h-10 flex-1 items-center rounded-lg border border-transparent px-3 text-sm text-zinc-700 dark:text-zinc-300">
+                              <span className="flex h-10 flex-1 items-center gap-2 rounded-lg border border-transparent px-3 text-sm text-zinc-700 dark:text-zinc-300">
                                 {opt}
+                                {hidden && (
+                                  <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                                    ซ่อนอยู่
+                                  </span>
+                                )}
                               </span>
                             ) : (
                               <input
@@ -988,6 +1037,25 @@ export default function MaintenanceReportBuilder({
                                 placeholder="เช่น อัพเดทโปรแกรม Hosxp 3 เป็นเวอร์ชัน ...."
                                 className={`${INPUT_CLASS} flex-1`}
                               />
+                            )}
+                            {canManageActionOptions && opt.trim() && (
+                              <button
+                                type="button"
+                                onClick={() => toggleHiddenActionOption(opt)}
+                                title={
+                                  hidden
+                                    ? "แสดงรายการนี้อีกครั้ง — จะกลับมาให้ IT เลือกและปรากฏในเอกสาร"
+                                    : "ซ่อนรายการนี้ — จะหายไปจากรายการที่ IT เลือกได้และในเอกสาร แต่ไม่ถูกลบ"
+                                }
+                                aria-label={hidden ? "แสดงรายการนี้อีกครั้ง" : "ซ่อนรายการนี้"}
+                                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                              >
+                                {hidden ? (
+                                  <EyeOff size={16} strokeWidth={2} aria-hidden="true" />
+                                ) : (
+                                  <Eye size={16} strokeWidth={2} aria-hidden="true" />
+                                )}
+                              </button>
                             )}
                             {locked ? (
                               <Lock
@@ -1442,7 +1510,13 @@ export default function MaintenanceReportBuilder({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setExcludedActionOptions(cleanActionOptions(formSettings.actionOptions))}
+                  onClick={() =>
+                    setExcludedActionOptions(
+                      cleanActionOptions(formSettings.actionOptions).filter(
+                        (name) => !formSettings.hiddenActionOptions.includes(name)
+                      )
+                    )
+                  }
                   disabled={printActionOptions.length === 0}
                   className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >
@@ -1452,9 +1526,11 @@ export default function MaintenanceReportBuilder({
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              {cleanActionOptions(formSettings.actionOptions).map((name) => {
-                const active = !excludedActionOptions.includes(name);
-                return (
+              {cleanActionOptions(formSettings.actionOptions)
+                .filter((name) => !formSettings.hiddenActionOptions.includes(name))
+                .map((name) => {
+                  const active = !excludedActionOptions.includes(name);
+                  return (
                   <button
                     key={name}
                     type="button"

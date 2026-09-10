@@ -455,6 +455,18 @@ export interface ReportSettings {
    * getReportSettings/updateReportSettings below, since every other
    * setting here is a plain string. */
   actionOptions: string[];
+  /** Exact text of any actionOptions entries that are currently "ซ่อน"
+   * (hidden) — hidden entries disappear from every place IT actually
+   * *picks* an action (the report page's "เลือกรายการที่จะดำเนินการ"
+   * chips, the printed form, and the "อัปเดตสถานะงาน" checklist on
+   * /manage/it/tasks) but stay in actionOptions itself, at their original
+   * array index, so they can be unhidden and reused later without
+   * shifting any other entry's position — see buildActionColorMap
+   * (lib/actionColors), which assigns colors by array index and would
+   * otherwise silently reassign every later entry's color, desyncing
+   * already-printed reports and saved task records from their original
+   * color. Stored as a JSON array, same as actionOptions. */
+  hiddenActionOptions: string[];
 }
 
 // Matches the attached example form exactly, so a hospital that never
@@ -467,6 +479,7 @@ export const DEFAULT_REPORT_SETTINGS: ReportSettings = {
   acknowledgerPosition: "เจ้าพนักงานเวชสถิติชำนาญงาน",
   acknowledgerDepartment: "กลุ่มงานประกันสุขภาพและกลุ่มงานสุขภาพดิจิทัล",
   actionOptions: ["บำรุงรักษา"],
+  hiddenActionOptions: [],
 };
 
 // Fixed key order — also what updateReportSettings writes back, so the
@@ -505,16 +518,27 @@ export async function getReportSettings(): Promise<ReportSettings> {
     if (key) stored.set(key, (row[1] ?? "").toString());
   }
 
-  const result: ReportSettings = { ...DEFAULT_REPORT_SETTINGS, actionOptions: [...DEFAULT_REPORT_SETTINGS.actionOptions] };
+  const result: ReportSettings = {
+    ...DEFAULT_REPORT_SETTINGS,
+    actionOptions: [...DEFAULT_REPORT_SETTINGS.actionOptions],
+    hiddenActionOptions: [...DEFAULT_REPORT_SETTINGS.hiddenActionOptions],
+  };
   for (const key of REPORT_SETTINGS_KEYS) {
     const v = stored.get(key);
     if (v === undefined || v.trim() === "") continue;
-    if (key === "actionOptions") {
+    if (key === "actionOptions" || key === "hiddenActionOptions") {
       // JSON array, not plain text — see the interface comment above.
       try {
         const parsed: unknown = JSON.parse(v);
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((x) => typeof x === "string")) {
-          result.actionOptions = parsed as string[];
+        if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
+          // actionOptions must never end up empty (nothing to print/pick
+          // from) — hiddenActionOptions has no such floor, an empty array
+          // just means "nothing hidden right now".
+          if (key === "actionOptions") {
+            if (parsed.length > 0) result.actionOptions = parsed as string[];
+          } else {
+            result.hiddenActionOptions = parsed as string[];
+          }
         }
       } catch {
         // Malformed cell (hand-edited?) — keep the default rather than crash.
@@ -545,9 +569,11 @@ export async function updateReportSettings(updates: Partial<ReportSettings>): Pr
       range: `${tab}!A2:B${1 + REPORT_SETTINGS_KEYS.length}`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
-        values: REPORT_SETTINGS_KEYS.map((key) =>
-          key === "actionOptions" ? [key, JSON.stringify(merged.actionOptions)] : [key, merged[key]]
-        ),
+        values: REPORT_SETTINGS_KEYS.map((key) => {
+          if (key === "actionOptions") return [key, JSON.stringify(merged.actionOptions)];
+          if (key === "hiddenActionOptions") return [key, JSON.stringify(merged.hiddenActionOptions)];
+          return [key, merged[key]];
+        }),
       },
     });
   } catch (err: unknown) {

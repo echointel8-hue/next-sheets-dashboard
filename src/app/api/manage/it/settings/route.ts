@@ -4,12 +4,13 @@ import { getReportSettings, updateReportSettings, type ReportSettings } from "@/
 
 /** True iff the two lists are identical, entry for entry. The client
  * (MaintenanceReportBuilder's saveSettingsAsDefault) always sends the full
- * ReportSettings object on every save — including actionOptions — even
- * when someone only edited, say, orgName, so this route can't treat
- * "actionOptions was present in the request" as "actionOptions was meant
- * to change". Used below to let a non-bootstrap account's save through as
- * long as it leaves รายการ "การดำเนินการ" exactly as it already was. */
-function sameActionOptions(a: string[], b: string[]): boolean {
+ * ReportSettings object on every save — including actionOptions and
+ * hiddenActionOptions — even when someone only edited, say, orgName, so
+ * this route can't treat "the field was present in the request" as "the
+ * field was meant to change". Used below to let a non-bootstrap account's
+ * save through as long as it leaves รายการ "การดำเนินการ" (both which
+ * items exist and which are ซ่อน/hidden) exactly as it already was. */
+function sameStringList(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
 function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
-  const stringKeys: Exclude<keyof ReportSettings, "actionOptions">[] = [
+  const stringKeys: Exclude<keyof ReportSettings, "actionOptions" | "hiddenActionOptions">[] = [
     "orgName",
     "maintenanceFormTitle",
     "fiscalYearLabel",
@@ -69,6 +70,12 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
     const cleaned = (b.actionOptions as string[]).map((s) => s.trim()).filter(Boolean);
     if (cleaned.length === 0) return null;
     out.actionOptions = cleaned;
+  }
+  if (b.hiddenActionOptions !== undefined) {
+    if (!Array.isArray(b.hiddenActionOptions) || !b.hiddenActionOptions.every((x) => typeof x === "string")) return null;
+    // No non-empty floor here, unlike actionOptions — "nothing hidden" is
+    // a perfectly normal, common state.
+    out.hiddenActionOptions = (b.hiddenActionOptions as string[]).map((s) => s.trim()).filter(Boolean);
   }
   return out;
 }
@@ -93,19 +100,25 @@ export async function PATCH(request: NextRequest) {
 
   try {
     // Only the single env-configured bootstrap account may touch รายการ
-    // "การดำเนินการ" at all — add a new one, or reorder/rename/remove an
-    // already-saved one. Everyone else who can reach this route (it, or a
-    // superadmin created later through /manage/users) may still update
-    // every other setting here (org name, form title, ผู้รับทราบ, ...) — the
-    // client always sends actionOptions along with those (see
-    // sameActionOptions above), so only reject when it would actually
-    // change; the UI already hides its "+ เพิ่มรายการ" button and renders
+    // "การดำเนินการ" at all — add a new one, reorder/rename/remove an
+    // already-saved one, or ซ่อน/แสดง (hide/show) one. Everyone else who
+    // can reach this route (it, or a superadmin created later through
+    // /manage/users) may still update every other setting here (org name,
+    // form title, ผู้รับทราบ, ...) — the client always sends actionOptions
+    // and hiddenActionOptions along with those (see sameStringList above),
+    // so only reject when one of them would actually change; the UI
+    // already hides its "+ เพิ่มรายการ"/hide-toggle controls and renders
     // every entry read-only for a non-bootstrap account (see
     // MaintenanceReportBuilder's canManageActionOptions) — this is the
     // actual boundary in case that UI is ever bypassed.
-    if (updates.actionOptions !== undefined && !session.isBootstrap) {
+    if (!session.isBootstrap && (updates.actionOptions !== undefined || updates.hiddenActionOptions !== undefined)) {
       const current = await getReportSettings();
-      if (!sameActionOptions(current.actionOptions, updates.actionOptions)) {
+      const actionOptionsChanged =
+        updates.actionOptions !== undefined && !sameStringList(current.actionOptions, updates.actionOptions);
+      const hiddenChanged =
+        updates.hiddenActionOptions !== undefined &&
+        !sameStringList(current.hiddenActionOptions, updates.hiddenActionOptions);
+      if (actionOptionsChanged || hiddenChanged) {
         return NextResponse.json(
           { error: "จัดการรายการ \"การดำเนินการ\" ได้เฉพาะบัญชีผู้ดูแลระบบหลักเท่านั้น" },
           { status: 403 }

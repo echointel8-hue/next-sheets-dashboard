@@ -90,11 +90,18 @@ export default function MaintenanceTasksBoard({
   initialTasks,
   loadError,
   actionOptions,
+  hiddenActionOptions,
 }: {
   session: { username: string; displayName: string; isBootstrap: boolean };
   initialTasks: MaintenanceTask[];
   loadError: string | null;
   actionOptions: string[];
+  /** ซ่อน/hidden entries within actionOptions — see the interface comment
+   * on ReportSettings.hiddenActionOptions in lib/sheets. Full color
+   * assignment (actionColorMap below) still uses the unfiltered
+   * actionOptions so a hidden entry's color never shifts; only the actual
+   * checklist offered in TaskUpdateModal is filtered by this. */
+  hiddenActionOptions: string[];
 }) {
   const [tasks, setTasks] = useState(initialTasks);
   const [statusFilter, setStatusFilter] = useState<"all" | MaintenanceTaskStatus>("in_progress");
@@ -566,6 +573,7 @@ export default function MaintenanceTasksBoard({
         <TaskUpdateModal
           task={activeTask}
           actionOptions={actionOptions}
+          hiddenActionOptions={hiddenActionOptions}
           onClose={() => setActiveTaskId(null)}
           onPatch={(updates) => patchTask(activeTask.taskId, updates)}
         />
@@ -577,11 +585,13 @@ export default function MaintenanceTasksBoard({
 function TaskUpdateModal({
   task,
   actionOptions,
+  hiddenActionOptions,
   onClose,
   onPatch,
 }: {
   task: MaintenanceTask;
   actionOptions: string[];
+  hiddenActionOptions: string[];
   onClose: () => void;
   onPatch: (updates: Record<string, unknown>) => Promise<MaintenanceTask>;
 }) {
@@ -589,8 +599,20 @@ function TaskUpdateModal({
   // Same index-based categorical color as /manage/it/report's month-strip
   // and legend (see lib/actionColors) — actionOptions here is the exact
   // same ReportSettings list, so a given action always renders in the same
-  // color in both places.
+  // color in both places. Uses the FULL, unfiltered actionOptions (hidden
+  // entries included) so a hidden entry's color never shifts even though
+  // it won't actually show up as a pickable option below.
   const actionColorMap = useMemo(() => buildActionColorMap(actionOptions), [actionOptions]);
+  // What's actually offered in the checklist below — a ซ่อน/hidden entry
+  // disappears, EXCEPT when it's already part of this specific task's
+  // saved actionsTaken (task.actionsTaken, not the live editable state
+  // below), so a historical record that referenced a since-hidden action
+  // still displays and stays togglable during this edit session instead of
+  // silently vanishing.
+  const visibleActionOptions = useMemo(
+    () => actionOptions.filter((opt) => !hiddenActionOptions.includes(opt) || task.actionsTaken.includes(opt)),
+    [actionOptions, hiddenActionOptions, task.actionsTaken]
+  );
   const [actionsTaken, setActionsTaken] = useState<string[]>(task.actionsTaken);
   const [inspectionChecks, setInspectionChecks] = useState<InspectionCheck[]>(task.inspectionChecks);
   const [partsChanged, setPartsChanged] = useState(task.partsChanged);
@@ -675,12 +697,16 @@ function TaskUpdateModal({
 
           <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
             <p className="text-sm font-bold text-zinc-800 dark:text-zinc-100">การดำเนินการ</p>
-            {actionOptions.length === 0 ? (
-              <p className="text-sm text-zinc-400">ยังไม่มีรายการ — ตั้งค่าได้ที่หน้าออกรายงาน</p>
+            {visibleActionOptions.length === 0 ? (
+              <p className="text-sm text-zinc-400">
+                {actionOptions.length === 0
+                  ? "ยังไม่มีรายการ — ตั้งค่าได้ที่หน้าออกรายงาน"
+                  : "ทุกรายการถูกซ่อนอยู่ — แสดงรายการได้ที่หน้าออกรายงาน"}
+              </p>
             ) : (
               <MultiSelect
                 label=""
-                options={actionOptions.map((opt) => ({
+                options={visibleActionOptions.map((opt) => ({
                   value: opt,
                   colorVars: actionColorVars(colorForAction(actionColorMap, opt)),
                 }))}
