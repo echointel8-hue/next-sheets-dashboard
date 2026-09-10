@@ -7,11 +7,24 @@ export const dynamic = "force-dynamic";
 const INSPECTION_CHECKS: InspectionCheck[] = ["ปกติ", "ส่งซ่อม", "เปลี่ยนอะไหล่", "อื่นๆ"];
 
 type UpdatePayload = Partial<
-  Pick<MaintenanceTask, "status" | "actionsTaken" | "inspectionChecks" | "partsChanged" | "otherDetail" | "notes">
+  Pick<
+    MaintenanceTask,
+    "status" | "actionsTaken" | "inspectionChecks" | "partsChanged" | "otherDetail" | "notes" | "actionDetails"
+  >
 >;
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((x) => typeof x === "string");
+}
+
+/** actionDetails is a plain object of string -> string (action name -> IT's
+ * free-text detail, see MaintenanceTask.actionDetails) — trims each value
+ * and drops any that end up empty, same "don't store noise" rule as
+ * actionsTaken's trim+filter above. Rejects the whole payload (returns null)
+ * if any value isn't a string, same strictness as isStringArray. */
+function isStringRecord(v: unknown): v is Record<string, string> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  return Object.values(v as Record<string, unknown>).every((x) => typeof x === "string");
 }
 
 function readPayload(body: unknown): UpdatePayload | null {
@@ -45,6 +58,15 @@ function readPayload(body: unknown): UpdatePayload | null {
   if (b.notes !== undefined) {
     if (typeof b.notes !== "string") return null;
     out.notes = b.notes.trim();
+  }
+  if (b.actionDetails !== undefined) {
+    if (!isStringRecord(b.actionDetails)) return null;
+    const trimmed: Record<string, string> = {};
+    for (const [k, v] of Object.entries(b.actionDetails)) {
+      const value = v.trim();
+      if (value) trimmed[k] = value;
+    }
+    out.actionDetails = trimmed;
   }
   // Reject a genuinely empty payload (no recognized field at all) — anything
   // else, including a status-only "mark done" call, is valid.

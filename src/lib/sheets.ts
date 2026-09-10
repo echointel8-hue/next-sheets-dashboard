@@ -533,6 +533,20 @@ export interface ReportSettings {
    * already-printed reports and saved task records from their original
    * color. Stored as a JSON array, same as actionOptions. */
   hiddenActionOptions: string[];
+  /** Exact text of any actionOptions entries that need IT to write in a
+   * free-text detail when they mark that action taken — e.g. "อัปเกรด/
+   * เปลี่ยนอะไหล่ฮาร์ดแวร์" needs to say *which* part. Every place the
+   * action's label appears as a fill-in checklist item (the printed form's
+   * "การดำเนินการ" column) gets a dotted blank appended after the label —
+   * see MaintenanceReportBuilder's ACTION_DETAIL_SUFFIX/actionLabelForPrint
+   * — and MaintenanceTasksBoard's TaskUpdateModal offers a matching
+   * free-text box once that action is ticked, saved onto the task as
+   * MaintenanceTask.actionDetails[name]. Membership list by name, not
+   * index — same convention as hiddenActionOptions above, for the same
+   * reason: this is a property of the entry itself, not its position, so
+   * it stays attached to the right entry through a reorder. Stored as a
+   * JSON array, same as actionOptions/hiddenActionOptions. */
+  detailRequiredActionOptions: string[];
 }
 
 // Matches the attached example form exactly, so a hospital that never
@@ -550,6 +564,7 @@ export const DEFAULT_REPORT_SETTINGS: ReportSettings = {
   printLineHeight: "0.9",
   actionOptions: ["บำรุงรักษา"],
   hiddenActionOptions: [],
+  detailRequiredActionOptions: [],
 };
 
 // Fixed key order — also what updateReportSettings writes back, so the
@@ -592,22 +607,26 @@ export async function getReportSettings(): Promise<ReportSettings> {
     ...DEFAULT_REPORT_SETTINGS,
     actionOptions: [...DEFAULT_REPORT_SETTINGS.actionOptions],
     hiddenActionOptions: [...DEFAULT_REPORT_SETTINGS.hiddenActionOptions],
+    detailRequiredActionOptions: [...DEFAULT_REPORT_SETTINGS.detailRequiredActionOptions],
   };
   for (const key of REPORT_SETTINGS_KEYS) {
     const v = stored.get(key);
     if (v === undefined || v.trim() === "") continue;
-    if (key === "actionOptions" || key === "hiddenActionOptions") {
+    if (key === "actionOptions" || key === "hiddenActionOptions" || key === "detailRequiredActionOptions") {
       // JSON array, not plain text — see the interface comment above.
       try {
         const parsed: unknown = JSON.parse(v);
         if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
           // actionOptions must never end up empty (nothing to print/pick
-          // from) — hiddenActionOptions has no such floor, an empty array
-          // just means "nothing hidden right now".
+          // from) — hiddenActionOptions/detailRequiredActionOptions have no
+          // such floor, an empty array just means "nothing hidden/flagged
+          // right now".
           if (key === "actionOptions") {
             if (parsed.length > 0) result.actionOptions = parsed as string[];
-          } else {
+          } else if (key === "hiddenActionOptions") {
             result.hiddenActionOptions = parsed as string[];
+          } else {
+            result.detailRequiredActionOptions = parsed as string[];
           }
         }
       } catch {
@@ -642,6 +661,7 @@ export async function updateReportSettings(updates: Partial<ReportSettings>): Pr
         values: REPORT_SETTINGS_KEYS.map((key) => {
           if (key === "actionOptions") return [key, JSON.stringify(merged.actionOptions)];
           if (key === "hiddenActionOptions") return [key, JSON.stringify(merged.hiddenActionOptions)];
+          if (key === "detailRequiredActionOptions") return [key, JSON.stringify(merged.detailRequiredActionOptions)];
           return [key, merged[key]];
         }),
       },
@@ -823,13 +843,32 @@ export interface MaintenanceTask {
   notes: string;
   completedAt: string;
   completedByUsername: string;
+  /** Snapshot of exactly which รายการ "การดำเนินการ" were selected and
+   * printed on THIS task's form — set once at creation (see
+   * createMaintenanceTasks, called from MaintenanceReportBuilder's
+   * handlePrint with that print round's printActionOptions) and never
+   * changed afterward. This is what MaintenanceTasksBoard's TaskUpdateModal
+   * checklist is scoped to, instead of the full master ReportSettings.
+   * actionOptions list — a task for "เป่าฝุ่น + อัปเดตโปรแกรม" should only
+   * ever offer those two, not every action the hospital has ever defined.
+   * A task created before this field existed reads back as an empty array
+   * (parseJsonStringArray on a blank cell) — callers fall back to the full
+   * master list in that case, see MaintenanceTasksBoard's own comment. */
+  plannedActions: string[];
+  /** Free-text detail per action, keyed by the exact action name — only
+   * meaningful for names in ReportSettings.detailRequiredActionOptions
+   * (e.g. "อัปเกรด/เปลี่ยนอะไหล่ฮาร์ดแวร์" -> "RAM 8GB"), filled in from
+   * TaskUpdateModal once that action is ticked. Stored as a JSON object in
+   * one cell, same one-cell-per-structured-value convention as
+   * actionsTaken/inspectionChecks above. */
+  actionDetails: Record<string, string>;
 }
 
 const MAINTENANCE_TASKS_HEADER_ROW = [
   "TaskId", "CreatedAt", "EquipmentRowNumber", "AssetNumber", "EquipmentType", "BrandModel",
   "Department", "Location", "AssignedToUsername", "AssignedToDisplayName", "Status",
   "ActionsTaken", "InspectionChecks", "PartsChanged", "OtherDetail", "Notes",
-  "CompletedAt", "CompletedByUsername",
+  "CompletedAt", "CompletedByUsername", "PlannedActions", "ActionDetails",
 ];
 
 function getMaintenanceTasksTab(): string {
@@ -843,6 +882,25 @@ function parseJsonStringArray(raw: string): string[] {
     return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
   } catch {
     return [];
+  }
+}
+
+/** Same one-cell-JSON convention as parseJsonStringArray, for the one
+ * object-shaped field (MaintenanceTask.actionDetails) instead of an array —
+ * a malformed or blank cell reads back as an empty object rather than
+ * throwing. */
+function parseJsonStringRecord(raw: string): Record<string, string> {
+  if (!raw.trim()) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === "string") out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
   }
 }
 
@@ -867,6 +925,8 @@ function rowToMaintenanceTask(row: string[]): MaintenanceTask {
     notes: col(15),
     completedAt: col(16),
     completedByUsername: col(17),
+    plannedActions: parseJsonStringArray(col(18)),
+    actionDetails: parseJsonStringRecord(col(19)),
   };
 }
 
@@ -876,6 +936,7 @@ function maintenanceTaskToRow(t: MaintenanceTask): (string | number)[] {
     t.department, t.location, t.assignedToUsername, t.assignedToDisplayName, t.status,
     JSON.stringify(t.actionsTaken), JSON.stringify(t.inspectionChecks), t.partsChanged,
     t.otherDetail, t.notes, t.completedAt, t.completedByUsername,
+    JSON.stringify(t.plannedActions), JSON.stringify(t.actionDetails),
   ];
 }
 
@@ -891,7 +952,7 @@ export async function getMaintenanceTasks(): Promise<MaintenanceTask[]> {
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:R100000`,
+      range: `${tab}!A2:T100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -922,7 +983,13 @@ export async function createMaintenanceTasks(
     location: string;
     assignedToUsername: string;
     assignedToDisplayName: string;
-  }[]
+  }[],
+  /** The exact รายการ "การดำเนินการ" selected and printed on this round's
+   * report — snapshotted identically onto every task created from it, since
+   * one print always covers the same action selection across all its
+   * equipment rows. See MaintenanceTask.plannedActions for why this needs
+   * to be captured at creation time rather than re-derived later. */
+  plannedActions: string[] = []
 ): Promise<MaintenanceTask[]> {
   if (entries.length === 0) return [];
 
@@ -950,6 +1017,8 @@ export async function createMaintenanceTasks(
     notes: "",
     completedAt: "",
     completedByUsername: "",
+    plannedActions: [...plannedActions],
+    actionDetails: {},
   }));
 
   try {
@@ -982,7 +1051,15 @@ export async function updateMaintenanceTask(
   updates: Partial<
     Pick<
       MaintenanceTask,
-      "status" | "actionsTaken" | "inspectionChecks" | "partsChanged" | "otherDetail" | "notes" | "completedAt" | "completedByUsername"
+      | "status"
+      | "actionsTaken"
+      | "inspectionChecks"
+      | "partsChanged"
+      | "otherDetail"
+      | "notes"
+      | "completedAt"
+      | "completedByUsername"
+      | "actionDetails"
     >
   >
 ): Promise<MaintenanceTask> {
@@ -994,7 +1071,7 @@ export async function updateMaintenanceTask(
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:R100000`,
+      range: `${tab}!A2:T100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -1013,7 +1090,7 @@ export async function updateMaintenanceTask(
   try {
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${tab}!A${sheetRow}:R${sheetRow}`,
+      range: `${tab}!A${sheetRow}:T${sheetRow}`,
       valueInputOption: "USER_ENTERED",
       requestBody: { values: [maintenanceTaskToRow(merged)] },
     });
@@ -1048,7 +1125,7 @@ export async function deleteMaintenanceTask(taskId: string): Promise<void> {
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:R100000`,
+      range: `${tab}!A2:T100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {

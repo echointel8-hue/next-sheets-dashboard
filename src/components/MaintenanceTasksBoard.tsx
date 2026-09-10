@@ -95,6 +95,7 @@ export default function MaintenanceTasksBoard({
   loadError,
   actionOptions,
   hiddenActionOptions,
+  detailRequiredActionOptions,
 }: {
   session: { username: string; displayName: string; isBootstrap: boolean };
   initialTasks: MaintenanceTask[];
@@ -106,6 +107,11 @@ export default function MaintenanceTasksBoard({
    * actionOptions so a hidden entry's color never shifts; only the actual
    * checklist offered in TaskUpdateModal is filtered by this. */
   hiddenActionOptions: string[];
+  /** Entries that need IT to write in a free-text detail once ticked — see
+   * the interface comment on ReportSettings.detailRequiredActionOptions in
+   * lib/sheets. Passed through to TaskUpdateModal, which renders a text box
+   * next to any currently-selected action in this list. */
+  detailRequiredActionOptions: string[];
 }) {
   const router = useRouter();
 
@@ -632,6 +638,7 @@ export default function MaintenanceTasksBoard({
           task={activeTask}
           actionOptions={actionOptions}
           hiddenActionOptions={hiddenActionOptions}
+          detailRequiredActionOptions={detailRequiredActionOptions}
           onClose={() => setActiveTaskId(null)}
           onPatch={(updates) => patchTask(activeTask.taskId, updates)}
         />
@@ -644,12 +651,14 @@ function TaskUpdateModal({
   task,
   actionOptions,
   hiddenActionOptions,
+  detailRequiredActionOptions,
   onClose,
   onPatch,
 }: {
   task: MaintenanceTask;
   actionOptions: string[];
   hiddenActionOptions: string[];
+  detailRequiredActionOptions: string[];
   onClose: () => void;
   onPatch: (updates: Record<string, unknown>) => Promise<MaintenanceTask>;
 }) {
@@ -661,6 +670,13 @@ function TaskUpdateModal({
   // entries included) so a hidden entry's color never shifts even though
   // it won't actually show up as a pickable option below.
   const actionColorMap = useMemo(() => buildActionColorMap(actionOptions), [actionOptions]);
+  // The checklist this task's form was actually printed with (see
+  // MaintenanceTask.plannedActions) — falls back to the full master
+  // actionOptions list for a task created before plannedActions existed, so
+  // an in-flight legacy task doesn't suddenly lose its checklist. Fixes the
+  // reported bug where every task, regardless of what was actually
+  // selected/printed for it, offered the entire "การดำเนินการ" catalog.
+  const baseActionOptions = task.plannedActions.length > 0 ? task.plannedActions : actionOptions;
   // What's actually offered in the checklist below — a ซ่อน/hidden entry
   // disappears, EXCEPT when it's already part of this specific task's
   // saved actionsTaken (task.actionsTaken, not the live editable state
@@ -668,14 +684,15 @@ function TaskUpdateModal({
   // still displays and stays togglable during this edit session instead of
   // silently vanishing.
   const visibleActionOptions = useMemo(
-    () => actionOptions.filter((opt) => !hiddenActionOptions.includes(opt) || task.actionsTaken.includes(opt)),
-    [actionOptions, hiddenActionOptions, task.actionsTaken]
+    () => baseActionOptions.filter((opt) => !hiddenActionOptions.includes(opt) || task.actionsTaken.includes(opt)),
+    [baseActionOptions, hiddenActionOptions, task.actionsTaken]
   );
   const [actionsTaken, setActionsTaken] = useState<string[]>(task.actionsTaken);
   const [inspectionChecks, setInspectionChecks] = useState<InspectionCheck[]>(task.inspectionChecks);
   const [partsChanged, setPartsChanged] = useState(task.partsChanged);
   const [otherDetail, setOtherDetail] = useState(task.otherDetail);
   const [notes, setNotes] = useState(task.notes);
+  const [actionDetails, setActionDetails] = useState<Record<string, string>>(task.actionDetails);
   const [saving, setSaving] = useState<"draft" | "done" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -683,16 +700,31 @@ function TaskUpdateModal({
     setInspectionChecks((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
   }
 
+  // Only the currently-ticked actions that are also flagged in
+  // detailRequiredActionOptions get a free-text box — same set the printed
+  // form shows a dotted blank for (see MaintenanceReportBuilder's
+  // actionLabelForPrint), just filled in digitally here instead of by hand.
+  const actionsNeedingDetail = actionsTaken.filter((name) => detailRequiredActionOptions.includes(name));
+
   async function save(markDone: boolean) {
     setSaving(markDone ? "done" : "draft");
     setError(null);
     try {
+      // Only keep details for actions that are both still ticked and still
+      // flagged — an unticked or unflagged action's leftover text shouldn't
+      // silently persist and resurface if it's ticked again later.
+      const cleanedActionDetails: Record<string, string> = {};
+      for (const name of actionsNeedingDetail) {
+        const v = (actionDetails[name] ?? "").trim();
+        if (v) cleanedActionDetails[name] = v;
+      }
       await onPatch({
         actionsTaken,
         inspectionChecks,
         partsChanged,
         otherDetail,
         notes,
+        actionDetails: cleanedActionDetails,
         ...(markDone ? { status: "done" } : {}),
       });
       onClose();
@@ -757,7 +789,7 @@ function TaskUpdateModal({
             <p className="text-sm font-bold text-zinc-800 dark:text-zinc-100">การดำเนินการ</p>
             {visibleActionOptions.length === 0 ? (
               <p className="text-sm text-zinc-400">
-                {actionOptions.length === 0
+                {baseActionOptions.length === 0
                   ? "ยังไม่มีรายการ — ตั้งค่าได้ที่หน้าออกรายงาน"
                   : "ทุกรายการถูกซ่อนอยู่ — แสดงรายการได้ที่หน้าออกรายงาน"}
               </p>
@@ -773,6 +805,23 @@ function TaskUpdateModal({
                 allLabel="ยังไม่ได้เลือก"
                 disabled={readOnly}
               />
+            )}
+            {actionsNeedingDetail.length > 0 && (
+              <div className="mt-1 flex flex-col gap-2">
+                {actionsNeedingDetail.map((name) => (
+                  <label key={name} className="flex flex-col gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    รายละเอียด — {name}
+                    <input
+                      type="text"
+                      value={actionDetails[name] ?? ""}
+                      onChange={(e) => setActionDetails((prev) => ({ ...prev, [name]: e.target.value }))}
+                      disabled={readOnly}
+                      placeholder="ระบุรายละเอียด"
+                      className={`${INPUT_CLASS} disabled:bg-zinc-50 disabled:text-zinc-500 dark:disabled:bg-zinc-800/60`}
+                    />
+                  </label>
+                ))}
+              </div>
             )}
           </div>
 

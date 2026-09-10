@@ -71,6 +71,18 @@ function readItemsPayload(body: unknown): TaskItemPayload[] | null {
   return out;
 }
 
+/** The รายการ "การดำเนินการ" selected and printed on this round's report —
+ * one shared snapshot applied to every task created from this POST (see
+ * MaintenanceTask.plannedActions). Optional/defaults to [] so an older
+ * client build that doesn't send it yet still creates tasks, just without
+ * the snapshot (same as any other pre-existing task). */
+function readPlannedActions(body: unknown): string[] {
+  if (!body || typeof body !== "object") return [];
+  const raw = (body as Record<string, unknown>).plannedActions;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((x): x is string => typeof x === "string");
+}
+
 /** Creates one "in progress" task per equipment item — called from the
  * report page the moment an IT account prints/saves the maintenance report,
  * so the equipment list can show "กำลังบำรุงรักษาโดย {ชื่อ}" right away.
@@ -103,6 +115,7 @@ export async function POST(request: NextRequest) {
   if (!items) {
     return NextResponse.json({ error: "ข้อมูลที่ส่งมาไม่ถูกต้อง" }, { status: 400 });
   }
+  const plannedActions = readPlannedActions(body);
 
   try {
     // Best-effort — a Users tab hiccup shouldn't stop task creation, it
@@ -127,7 +140,8 @@ export async function POST(request: NextRequest) {
         ...it,
         assignedToUsername: session.username,
         assignedToDisplayName: displayName,
-      }))
+      })),
+      plannedActions
     );
     return NextResponse.json({ tasks, skippedAlreadyInProgress: items.length - itemsToCreate.length });
   } catch (err: unknown) {

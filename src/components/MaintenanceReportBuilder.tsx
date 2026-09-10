@@ -16,6 +16,7 @@ import {
   Lock,
   LogOut,
   MapPin,
+  PenLine,
   Plus,
   Printer as PrinterIcon,
   RectangleHorizontal,
@@ -214,6 +215,25 @@ function printLineHeight(raw: string): number {
  * anything besides this, so it's now just a constant instead of a
  * settings field + UI input to maintain. */
 const PRINT_FONT_FAMILY = '"TH SarabunPSK", "TH Sarabun New", sans-serif';
+
+/** Appended (with a leading space) after a การดำเนินการ label, on the
+ * printed form only, when that entry is in
+ * ReportSettings.detailRequiredActionOptions — a blank for the maintenance
+ * technician to hand-write a detail into (e.g. which hardware part was
+ * replaced), matching the existing hand-written blanks already used for the
+ * separate ผลการตรวจสอบโดย IT checklist ("เปลี่ยนอะไหล่ ................",
+ * see computeAutoTableColumnWidths's itCheckLabels). Same dot count/style as
+ * those for visual consistency. */
+const ACTION_DETAIL_SUFFIX = " ..........";
+
+/** The exact text printed for one การดำเนินการ checklist item — the plain
+ * name, or the name plus ACTION_DETAIL_SUFFIX when it's flagged in
+ * detailRequiredActionOptions. Shared by the print table's own rendering and
+ * computeAutoTableColumnWidths's width measurement, so what gets measured is
+ * always exactly what gets printed. */
+function actionLabelForPrint(name: string, detailRequiredActionOptions: string[]): string {
+  return detailRequiredActionOptions.includes(name) ? `${name}${ACTION_DETAIL_SUFFIX}` : name;
+}
 
 /** The printed equipment table's column widths (% of table width, in
  * ลำดับ / หมายเลขครุภัณฑ์ / รายการครุภัณฑ์ / สถานที่ตั้ง /
@@ -1007,6 +1027,27 @@ export default function MaintenanceReportBuilder({
     setSettingsSaved(false);
   }
 
+  /** Bootstrap-only toggle for whether one รายการ "การดำเนินการ" entry needs
+   * IT to write in a free-text detail when marking it taken — e.g. "อัปเกรด/
+   * เปลี่ยนอะไหล่ฮาร์ดแวร์" needs to say *which* part. Same
+   * membership-by-name convention as toggleHiddenActionOption above, for the
+   * same reason (stays attached to the right entry through a reorder,
+   * doesn't disturb buildActionColorMap's index-based colors). Flagging an
+   * entry adds a dotted blank after its label on the printed form (see
+   * ACTION_DETAIL_SUFFIX/actionLabelForPrint) and — once IT actually ticks
+   * that action while it's selected on a task — a matching free-text box in
+   * /manage/it/tasks's "อัปเดตสถานะงาน" (see MaintenanceTasksBoard). */
+  function toggleDetailRequiredActionOption(name: string) {
+    if (!canManageActionOptions) return;
+    setFormSettings((prev) => ({
+      ...prev,
+      detailRequiredActionOptions: prev.detailRequiredActionOptions.includes(name)
+        ? prev.detailRequiredActionOptions.filter((n) => n !== name)
+        : [...prev.detailRequiredActionOptions, name],
+    }));
+    setSettingsSaved(false);
+  }
+
   async function saveSettingsAsDefault() {
     setSettingsSaving(true);
     setSettingsError(null);
@@ -1016,10 +1057,13 @@ export default function MaintenanceReportBuilder({
       const payload: ReportSettings = {
         ...formSettings,
         actionOptions: cleanedActionOptions,
-        // Drop any hidden-name that no longer matches a real entry (e.g.
-        // it got removed, or a blank row it referenced was cleaned away)
-        // so this list never grows stale.
+        // Drop any hidden-name/detail-required-name that no longer matches
+        // a real entry (e.g. it got removed, or a blank row it referenced
+        // was cleaned away) so neither list ever grows stale.
         hiddenActionOptions: formSettings.hiddenActionOptions.filter((n) => cleanedActionOptions.includes(n)),
+        detailRequiredActionOptions: formSettings.detailRequiredActionOptions.filter((n) =>
+          cleanedActionOptions.includes(n)
+        ),
       };
       const res = await fetch("/api/manage/it/settings", {
         method: "PATCH",
@@ -1076,6 +1120,11 @@ export default function MaintenanceReportBuilder({
             department: row.department,
             location: row.location,
           })),
+          // Snapshotted onto every task this print round creates (see
+          // MaintenanceTask.plannedActions) so /manage/it/tasks's
+          // "อัปเดตสถานะงาน" only ever offers the actions actually printed
+          // on THIS task's form, not the full master list.
+          plannedActions: printActionOptions,
         }),
       });
       if (!res.ok) {
@@ -1157,7 +1206,7 @@ export default function MaintenanceReportBuilder({
     if (selectedRows.length === 0) return;
     const widths = computeAutoTableColumnWidths(
       selectedRows,
-      printActionOptions,
+      printActionOptions.map((name) => actionLabelForPrint(name, formSettings.detailRequiredActionOptions)),
       PRINT_FONT_FAMILY,
       tableBaseFontSizePx,
       tableSecondaryFontSizePx,
@@ -1429,6 +1478,9 @@ export default function MaintenanceReportBuilder({
                       {formSettings.actionOptions.map((opt, idx) => {
                         const locked = !canManageActionOptions && idx < lockedActionOptionsCount;
                         const hidden = opt.trim() ? formSettings.hiddenActionOptions.includes(opt) : false;
+                        const detailRequired = opt.trim()
+                          ? formSettings.detailRequiredActionOptions.includes(opt)
+                          : false;
                         const color = opt.trim() ? colorForAction(opt) : null;
                         return (
                           <div key={idx} className={`flex items-center gap-2 ${hidden ? "opacity-50" : ""}`}>
@@ -1469,6 +1521,11 @@ export default function MaintenanceReportBuilder({
                                     ซ่อนอยู่
                                   </span>
                                 )}
+                                {detailRequired && (
+                                  <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                                    มีช่องกรอกรายละเอียด
+                                  </span>
+                                )}
                               </span>
                             ) : (
                               <input
@@ -1496,6 +1553,25 @@ export default function MaintenanceReportBuilder({
                                 ) : (
                                   <Eye size={16} strokeWidth={2} aria-hidden="true" />
                                 )}
+                              </button>
+                            )}
+                            {canManageActionOptions && opt.trim() && (
+                              <button
+                                type="button"
+                                onClick={() => toggleDetailRequiredActionOption(opt)}
+                                title={
+                                  detailRequired
+                                    ? "ยกเลิกช่องกรอกรายละเอียด — จะไม่มีจุดประ .......... ต่อท้ายรายการนี้อีก"
+                                    : "เพิ่มช่องกรอกรายละเอียด — จะมีจุดประ .......... ต่อท้ายรายการนี้บนแบบฟอร์ม เพื่อให้เจ้าหน้าที่เขียน/กรอกรายละเอียดเพิ่มเติม"
+                                }
+                                aria-label={detailRequired ? "ยกเลิกช่องกรอกรายละเอียด" : "เพิ่มช่องกรอกรายละเอียด"}
+                                className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                                  detailRequired
+                                    ? "border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300"
+                                    : "border-zinc-200 text-zinc-500 hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                                }`}
+                              >
+                                <PenLine size={16} strokeWidth={2} aria-hidden="true" />
                               </button>
                             )}
                             {locked ? (
@@ -2345,8 +2421,10 @@ export default function MaintenanceReportBuilder({
                       style={{ fontSize: `${tableSecondaryFontSizePx}px` }}
                     >
                       <div className="flex flex-col gap-0.5">
-                        {printActionOptions.map((label) => (
-                          <span key={label}>☐ {label}</span>
+                        {printActionOptions.map((name) => (
+                          <span key={name}>
+                            ☐ {actionLabelForPrint(name, formSettings.detailRequiredActionOptions)}
+                          </span>
                         ))}
                       </div>
                     </td>

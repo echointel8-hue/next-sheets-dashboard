@@ -51,7 +51,10 @@ export async function GET(request: NextRequest) {
 function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
-  const stringKeys: Exclude<keyof ReportSettings, "actionOptions" | "hiddenActionOptions">[] = [
+  const stringKeys: Exclude<
+    keyof ReportSettings,
+    "actionOptions" | "hiddenActionOptions" | "detailRequiredActionOptions"
+  >[] = [
     "orgName",
     "maintenanceFormTitle",
     "fiscalYearLabel",
@@ -105,6 +108,16 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
     // a perfectly normal, common state.
     out.hiddenActionOptions = (b.hiddenActionOptions as string[]).map((s) => s.trim()).filter(Boolean);
   }
+  if (b.detailRequiredActionOptions !== undefined) {
+    if (
+      !Array.isArray(b.detailRequiredActionOptions) ||
+      !b.detailRequiredActionOptions.every((x) => typeof x === "string")
+    )
+      return null;
+    // Same "no non-empty floor" as hiddenActionOptions — "nothing flagged"
+    // is a perfectly normal, common state.
+    out.detailRequiredActionOptions = (b.detailRequiredActionOptions as string[]).map((s) => s.trim()).filter(Boolean);
+  }
   return out;
 }
 
@@ -129,24 +142,33 @@ export async function PATCH(request: NextRequest) {
   try {
     // Only the single env-configured bootstrap account may touch รายการ
     // "การดำเนินการ" at all — add a new one, reorder/rename/remove an
-    // already-saved one, or ซ่อน/แสดง (hide/show) one. Everyone else who
-    // can reach this route (it, or a superadmin created later through
-    // /manage/users) may still update every other setting here (org name,
-    // form title, ผู้รับทราบ, ...) — the client always sends actionOptions
-    // and hiddenActionOptions along with those (see sameStringList above),
-    // so only reject when one of them would actually change; the UI
-    // already hides its "+ เพิ่มรายการ"/hide-toggle controls and renders
-    // every entry read-only for a non-bootstrap account (see
-    // MaintenanceReportBuilder's canManageActionOptions) — this is the
-    // actual boundary in case that UI is ever bypassed.
-    if (!session.isBootstrap && (updates.actionOptions !== undefined || updates.hiddenActionOptions !== undefined)) {
+    // already-saved one, ซ่อน/แสดง (hide/show) one, or flag one as needing
+    // an IT free-text detail. Everyone else who can reach this route (it,
+    // or a superadmin created later through /manage/users) may still
+    // update every other setting here (org name, form title, ผู้รับทราบ,
+    // ...) — the client always sends actionOptions/hiddenActionOptions/
+    // detailRequiredActionOptions along with those (see sameStringList
+    // above), so only reject when one of them would actually change; the
+    // UI already hides its "+ เพิ่มรายการ"/hide-toggle/detail-toggle
+    // controls and renders every entry read-only for a non-bootstrap
+    // account (see MaintenanceReportBuilder's canManageActionOptions) —
+    // this is the actual boundary in case that UI is ever bypassed.
+    if (
+      !session.isBootstrap &&
+      (updates.actionOptions !== undefined ||
+        updates.hiddenActionOptions !== undefined ||
+        updates.detailRequiredActionOptions !== undefined)
+    ) {
       const current = await getReportSettings();
       const actionOptionsChanged =
         updates.actionOptions !== undefined && !sameStringList(current.actionOptions, updates.actionOptions);
       const hiddenChanged =
         updates.hiddenActionOptions !== undefined &&
         !sameStringList(current.hiddenActionOptions, updates.hiddenActionOptions);
-      if (actionOptionsChanged || hiddenChanged) {
+      const detailRequiredChanged =
+        updates.detailRequiredActionOptions !== undefined &&
+        !sameStringList(current.detailRequiredActionOptions, updates.detailRequiredActionOptions);
+      if (actionOptionsChanged || hiddenChanged || detailRequiredChanged) {
         return NextResponse.json(
           { error: "จัดการรายการ \"การดำเนินการ\" ได้เฉพาะบัญชีผู้ดูแลระบบหลักเท่านั้น" },
           { status: 403 }
