@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, Loader2, Save, X } from "lucide-react";
+import EditableSelect from "@/components/EditableSelect";
+import type { SpecOptionLists } from "@/lib/sheets";
 
 const INPUT_CLASS =
   "h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:disabled:bg-zinc-800/60 dark:disabled:text-zinc-500";
@@ -28,14 +30,17 @@ const RAM_TYPE_CHOICES = ["DDR2", "DDR3", "DDR4", "DDR5"];
 // columns (see PC_ONLY_FIELD_HEADERS in fields.ts / BULK_FIELD_HEADER_INDEX
 // in the API route) — matches why the checkbox-select column that opens
 // this modal only exists on the คอมพิวเตอร์/โน้ตบุ๊ก/All-in-One table.
-const FIELD_CONFIG: { key: BulkFieldKey; label: string; options?: string[] }[] = [
+const FIELD_CONFIG: { key: BulkFieldKey; label: string; options?: string[]; extensibleOptionsKey?: keyof SpecOptionLists }[] = [
   { key: "brand", label: "ยี่ห้อ" },
   { key: "model", label: "รุ่น" },
   { key: "processor", label: "หน่วยประมวลผล" },
   { key: "ramType", label: "ประเภท RAM", options: RAM_TYPE_CHOICES },
-  { key: "ramCapacity", label: "ความจุ RAM" },
-  { key: "ramSpeed", label: "ความเร็ว RAM" },
-  { key: "storageType", label: "ประเภทหน่วยจัดเก็บ" },
+  // These three used to be free text — now an EditableSelect (see
+  // extensibleOptionsKey below) whose choices live in SpecStandards and can
+  // be extended right from the dropdown, unlike ramType's fixed list above.
+  { key: "ramCapacity", label: "ความจุ RAM", extensibleOptionsKey: "ramCapacityOptions" },
+  { key: "ramSpeed", label: "ความเร็ว RAM", extensibleOptionsKey: "ramSpeedOptions" },
+  { key: "storageType", label: "ประเภทหน่วยจัดเก็บ", extensibleOptionsKey: "storageTypeOptions" },
   { key: "storageCapacity", label: "ความจุจัดเก็บ" },
 ];
 
@@ -52,10 +57,19 @@ const FIELD_CONFIG: { key: BulkFieldKey; label: string; options?: string[] }[] =
  */
 export default function BulkEditSpecModal({
   rowNumbers,
+  specOptions,
+  onAddSpecOption,
   onClose,
   onSaved,
 }: {
   rowNumbers: number[];
+  /** Current choices for ความจุ RAM / ความเร็ว RAM / ประเภทหน่วยจัดเก็บ —
+   * see EditableSelect and /api/manage/spec-options. */
+  specOptions: SpecOptionLists;
+  /** Persists a newly-typed value into the shared list named by `key` —
+   * see ITDashboard's addSpecOption, which PATCHes /api/manage/spec-options
+   * and keeps this modal's specOptions prop in sync afterward. */
+  onAddSpecOption: (key: keyof SpecOptionLists, value: string) => Promise<boolean>;
   onClose: () => void;
   /** Fired once, right after a successful save, so the caller can patch its
    * own row state immediately — the modal stays open afterward to show the
@@ -197,6 +211,15 @@ export default function BulkEditSpecModal({
                             </option>
                           ))}
                         </select>
+                      ) : f.extensibleOptionsKey ? (
+                        <EditableSelect
+                          value={values[f.key] ?? ""}
+                          onChange={(v) => setValues((prev) => ({ ...prev, [f.key]: v }))}
+                          options={specOptions[f.extensibleOptionsKey]}
+                          onAddOption={(v) => onAddSpecOption(f.extensibleOptionsKey!, v)}
+                          disabled={saving || !isEnabled}
+                          className={`${INPUT_CLASS} ml-6 flex-1`}
+                        />
                       ) : (
                         <input
                           type="text"

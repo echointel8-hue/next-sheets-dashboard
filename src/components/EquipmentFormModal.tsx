@@ -8,10 +8,21 @@ import {
   findSelectFieldConfig,
   OTHER_OPTION_LABEL,
   OTHER_OPTION_VALUE,
+  PC_ONLY_FIELD_HEADERS,
   visibleFormHeaders,
   type FieldMap,
 } from "@/lib/fields";
 import MultiSelectField from "@/components/MultiSelectField";
+import EditableSelect from "@/components/EditableSelect";
+import type { SpecOptionLists } from "@/lib/sheets";
+
+// Exact header text for the 3 PC spec fields wired to an extensible
+// dropdown (see EditableSelect) instead of free text — same indices
+// BulkEditSpecModal.tsx / lib/specEvaluation.ts use into
+// PC_ONLY_FIELD_HEADERS: 3 = storage type, 6 = RAM capacity, 7 = RAM speed.
+const STORAGE_TYPE_HEADER = PC_ONLY_FIELD_HEADERS[3];
+const RAM_CAPACITY_HEADER = PC_ONLY_FIELD_HEADERS[6];
+const RAM_SPEED_HEADER = PC_ONLY_FIELD_HEADERS[7];
 
 const INPUT_CLASS =
   "h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:disabled:bg-zinc-800/60 dark:disabled:text-zinc-500";
@@ -38,6 +49,8 @@ export default function EquipmentFormModal({
   snapshotHash,
   readOnlyHeaders = [],
   existingRows,
+  specOptions,
+  onAddSpecOption,
   onClose,
   onSaved,
 }: {
@@ -64,6 +77,14 @@ export default function EquipmentFormModal({
    * entirely, the field just skips the live hint and relies on that
    * server check alone. */
   existingRows?: { rowNumber: number; values: Record<string, string> }[];
+  /** Current choices for ความจุ RAM / ความเร็ว RAM / ประเภทหน่วยจัดเก็บ —
+   * see EditableSelect and /api/manage/spec-options. */
+  specOptions: SpecOptionLists;
+  /** Persists a newly-typed value into the shared list named by `key` —
+   * see ManageDashboard's/ITDashboard's addSpecOption, which PATCHes
+   * /api/manage/spec-options and keeps this modal's specOptions prop in
+   * sync afterward. */
+  onAddSpecOption: (key: keyof SpecOptionLists, value: string) => Promise<boolean>;
   onClose: () => void;
   onSaved: (result: EquipmentFormResult) => void;
 }) {
@@ -262,6 +283,41 @@ export default function EquipmentFormModal({
                         </option>
                       ))}
                     </select>
+                  </label>
+                );
+              }
+
+              // ความจุ RAM / ความเร็ว RAM / ประเภทหน่วยจัดเก็บ — used to be
+              // free text; now an extensible dropdown (see EditableSelect)
+              // seeded from SpecStandards.ramCapacityOptions/ramSpeedOptions/
+              // storageTypeOptions and growable right from the control by
+              // anyone filling in this form, not just IT (see
+              // /api/manage/spec-options). Kept separate from the
+              // SELECT_FIELD_CONFIGS-driven branch below since those lists
+              // are fixed and admin-only where extensible at all
+              // (actionOptions-style), while these three are meant to grow
+              // from ordinary use.
+              const trimmedHeader = header.trim();
+              const extensibleOptionsKey: keyof SpecOptionLists | null =
+                trimmedHeader === STORAGE_TYPE_HEADER.trim()
+                  ? "storageTypeOptions"
+                  : trimmedHeader === RAM_CAPACITY_HEADER.trim()
+                    ? "ramCapacityOptions"
+                    : trimmedHeader === RAM_SPEED_HEADER.trim()
+                      ? "ramSpeedOptions"
+                      : null;
+              if (extensibleOptionsKey) {
+                return (
+                  <label key={header} className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+                    {header}
+                    <EditableSelect
+                      value={currentValue}
+                      onChange={(v) => setValues((prev) => ({ ...prev, [header]: v }))}
+                      options={specOptions[extensibleOptionsKey]}
+                      onAddOption={(v) => onAddSpecOption(extensibleOptionsKey, v)}
+                      disabled={saving || readOnly}
+                      className={INPUT_CLASS}
+                    />
                   </label>
                 );
               }

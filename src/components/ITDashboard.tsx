@@ -33,7 +33,7 @@ import {
   type EquipmentRow,
   type FieldMap,
 } from "@/lib/fields";
-import type { MaintenanceTask, SpecStandards } from "@/lib/sheets";
+import type { MaintenanceTask, SpecOptionLists, SpecStandards } from "@/lib/sheets";
 import { getLatestMaintenanceLogByAsset, type MaintenanceLogEntry } from "@/lib/maintenanceLog";
 import { DEFAULT_SPEC_STANDARDS, evaluateRowSpec } from "@/lib/specEvaluation";
 import MultiSelect from "@/components/MultiSelect";
@@ -511,6 +511,29 @@ export default function ITDashboard({
     });
   }
 
+  // Adds one new value to ramCapacityOptions/ramSpeedOptions/
+  // storageTypeOptions (see EditableSelect, passed down to BulkEditSpecModal
+  // below) — sends "current list + the new value" so the API's dedup
+  // (readPayload in the route) is just a safety net, not load-bearing.
+  // Open to this account regardless of role (canAccessItDashboard already
+  // gates this whole page) — see /api/manage/spec-options for why this
+  // route itself has no extra permission check.
+  async function addSpecOption(key: keyof SpecOptionLists, value: string): Promise<boolean> {
+    try {
+      const res = await fetch("/api/manage/spec-options", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: [...specStandards[key], value] }),
+      });
+      if (!res.ok) return false;
+      const json = await res.json();
+      setSpecStandards((prev) => ({ ...prev, ...json }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function logout() {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
@@ -882,6 +905,8 @@ export default function ITDashboard({
             {showBulkEdit && (
               <BulkEditSpecModal
                 rowNumbers={[...selectedRowNumbers]}
+                specOptions={specStandards}
+                onAddSpecOption={addSpecOption}
                 onClose={() => setShowBulkEdit(false)}
                 onSaved={applyBulkEditResult}
               />

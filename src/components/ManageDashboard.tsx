@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -29,6 +29,16 @@ import {
   type FieldMap,
 } from "@/lib/fields";
 import type { Role } from "@/lib/auth";
+// DEFAULT_SPEC_STANDARDS/SpecOptionLists come from lib/specEvaluation, not
+// lib/sheets, here specifically because this is a Client Component: sheets.ts
+// pulls in googleapis (Node-only — child_process etc.), which can't be
+// bundled for the browser, while specEvaluation.ts is the pure module with
+// no server deps that both files' definitions actually live in (see that
+// file's own top comment) — lib/sheets.ts only re-exports them for server
+// code's convenience. A `import type` from lib/sheets (as EquipmentFormModal
+// below does for SpecOptionLists) is fine either way since type-only imports
+// are erased before bundling; it's only this *value* import that matters.
+import { DEFAULT_SPEC_STANDARDS, type SpecOptionLists } from "@/lib/specEvaluation";
 import EquipmentFormModal, { type EquipmentFormResult } from "@/components/EquipmentFormModal";
 import MultiSelect from "@/components/MultiSelect";
 
@@ -126,6 +136,53 @@ export default function ManageDashboard({
   const [restoringRow, setRestoringRow] = useState<number | null>(null);
   const [deletingRow, setDeletingRow] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // ตัวเลือก dropdown ความจุ/ความเร็ว RAM และประเภทหน่วยจัดเก็บ ใน
+  // EquipmentFormModal (see EditableSelect) — starts from the built-in
+  // defaults so the form still has sensible choices before this fetch
+  // resolves (or if it fails), then refreshed from the shared list on
+  // mount. /manage has no server-fetched initial value for this the way
+  // ITDashboard's specStandards prop does, since this page is reachable by
+  // admin/superadmin accounts that /api/manage/it/spec-standards would
+  // reject — see /api/manage/spec-options, which any logged-in account can
+  // read/extend.
+  const [specOptions, setSpecOptions] = useState<SpecOptionLists>({
+    ramCapacityOptions: DEFAULT_SPEC_STANDARDS.ramCapacityOptions,
+    ramSpeedOptions: DEFAULT_SPEC_STANDARDS.ramSpeedOptions,
+    storageTypeOptions: DEFAULT_SPEC_STANDARDS.storageTypeOptions,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/manage/spec-options");
+        if (!res.ok || cancelled) return;
+        const json = (await res.json()) as SpecOptionLists;
+        if (!cancelled) setSpecOptions(json);
+      } catch {
+        // Fetch failed — keep the built-in defaults above.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function addSpecOption(key: keyof SpecOptionLists, value: string): Promise<boolean> {
+    try {
+      const res = await fetch("/api/manage/spec-options", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: [...specOptions[key], value] }),
+      });
+      if (!res.ok) return false;
+      const json = (await res.json()) as SpecOptionLists;
+      setSpecOptions((prev) => ({ ...prev, ...json }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   const isSuperadmin = session.role === "superadmin";
 
@@ -760,6 +817,8 @@ export default function ManageDashboard({
           snapshotHash={modal.snapshotHash}
           readOnlyHeaders={modal.readOnlyHeaders}
           existingRows={rows}
+          specOptions={specOptions}
+          onAddSpecOption={addSpecOption}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
         />

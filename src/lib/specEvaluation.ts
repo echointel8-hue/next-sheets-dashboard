@@ -30,13 +30,62 @@ export interface SpecStandards {
   /** "true" | "false" — when "true", a machine whose storage type doesn't
    * mention SSD/NVMe counts as below standard. */
   requireSsd: string;
+  /** Dropdown choices offered for "ความจุของ RAM (RAM Capacity)" in
+   * BulkEditSpecModal and EquipmentFormModal (see EditableSelect.tsx) —
+   * seeded with the RAM capacities actually sold for desktop/notebook PCs,
+   * but not meant to stay fixed: any logged-in account filling in that
+   * field can add a value that isn't on the list yet, right from the
+   * dropdown, and it's saved back here (via PATCH /api/manage/spec-options,
+   * lib/sheets.ts's updateSpecStandards) so it becomes a normal choice for
+   * everyone afterward — see SpecOptionLists below. Stored as a JSON array
+   * in the SpecStandards tab, same convention as
+   * ReportSettings.actionOptions (see lib/sheets.ts's getSpecStandards/
+   * updateSpecStandards for the special-cased array read/write). */
+  ramCapacityOptions: string[];
+  /** Dropdown choices for "ความเร็วของ RAM (RAM Speed)" — same
+   * extensible-list behavior as ramCapacityOptions above. */
+  ramSpeedOptions: string[];
+  /** Dropdown choices for "ประเภทของหน่วยจัดเก็บข้อมูล (Storage Type)" —
+   * same extensible-list behavior as ramCapacityOptions above. */
+  storageTypeOptions: string[];
 }
 
 export const DEFAULT_SPEC_STANDARDS: SpecStandards = {
   minRamCapacityGb: "8",
   minRamType: "DDR4",
   requireSsd: "false",
+  // Common RAM capacities sold for desktop/notebook PCs today — a
+  // reasonable starting list per the hospital's request, not an exhaustive
+  // one (see ramCapacityOptions above for how it grows from here).
+  ramCapacityOptions: ["2 GB", "4 GB", "8 GB", "16 GB", "32 GB", "64 GB"],
+  // DDR3 through DDR5 speeds in common retail use, low to high.
+  ramSpeedOptions: [
+    "1333 MHz",
+    "1600 MHz",
+    "2133 MHz",
+    "2400 MHz",
+    "2666 MHz",
+    "3200 MHz",
+    "3600 MHz",
+    "4800 MHz",
+    "5600 MHz",
+  ],
+  storageTypeOptions: ["HDD", "SSD (SATA)", "SSD (M.2 NVMe)", "eMMC"],
 };
+
+/** The three PC spec fields above that are wired to an extensible dropdown
+ * (EditableSelect.tsx) instead of free text. Callers that only need to
+ * read/offer the option lists — not the auto-evaluation thresholds above —
+ * take this narrower shape rather than the full SpecStandards; see
+ * ManageDashboard/ITDashboard, which pass it down to EquipmentFormModal/
+ * BulkEditSpecModal. */
+export type SpecOptionLists = Pick<SpecStandards, "ramCapacityOptions" | "ramSpeedOptions" | "storageTypeOptions">;
+
+export const SPEC_OPTION_LIST_KEYS: (keyof SpecOptionLists)[] = [
+  "ramCapacityOptions",
+  "ramSpeedOptions",
+  "storageTypeOptions",
+];
 
 const RAM_TYPE_RANK: Record<string, number> = {
   DDR: 1,

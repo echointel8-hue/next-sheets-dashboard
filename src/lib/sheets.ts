@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { google } from "googleapis";
 import { redactSurname, resolveFields, type EquipmentRow, type FieldMap } from "@/lib/fields";
 import type { Role } from "@/lib/auth";
-import { DEFAULT_SPEC_STANDARDS, type SpecStandards } from "@/lib/specEvaluation";
+import { DEFAULT_SPEC_STANDARDS, type SpecOptionLists, type SpecStandards } from "@/lib/specEvaluation";
 import { getLatestMaintenanceLogByAsset, type MaintenanceLogEntry } from "@/lib/maintenanceLog";
 
 export type { EquipmentRow, FieldMap };
@@ -14,7 +14,7 @@ export type { EquipmentRow, FieldMap };
 // code should generally still prefer importing the read/write functions
 // (getSpecStandards, getMaintenanceLog, etc.) from here.
 export { DEFAULT_SPEC_STANDARDS, getLatestMaintenanceLogByAsset };
-export type { SpecStandards, MaintenanceLogEntry };
+export type { SpecStandards, SpecOptionLists, MaintenanceLogEntry };
 
 // Each record pairs a row's data with its 1-based row number in the sheet
 // (data row index + 2, accounting for the header row at row 1). This is the
@@ -1146,10 +1146,29 @@ export async function getSpecStandards(): Promise<SpecStandards> {
     if (key) stored.set(key, (row[1] ?? "").toString());
   }
 
-  const result = { ...DEFAULT_SPEC_STANDARDS };
+  const result: SpecStandards = {
+    ...DEFAULT_SPEC_STANDARDS,
+    ramCapacityOptions: [...DEFAULT_SPEC_STANDARDS.ramCapacityOptions],
+    ramSpeedOptions: [...DEFAULT_SPEC_STANDARDS.ramSpeedOptions],
+    storageTypeOptions: [...DEFAULT_SPEC_STANDARDS.storageTypeOptions],
+  };
   for (const key of SPEC_STANDARDS_KEYS) {
     const v = stored.get(key);
-    if (v !== undefined && v.trim() !== "") result[key] = v;
+    if (v === undefined || v.trim() === "") continue;
+    if (key === "ramCapacityOptions" || key === "ramSpeedOptions" || key === "storageTypeOptions") {
+      // JSON array, not plain text — same convention as
+      // ReportSettings.actionOptions (see getReportSettings above).
+      try {
+        const parsed: unknown = JSON.parse(v);
+        if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
+          result[key] = parsed as string[];
+        }
+      } catch {
+        // Malformed cell (hand-edited?) — keep the default rather than crash.
+      }
+      continue;
+    }
+    result[key] = v;
   }
   return result;
 }
@@ -1168,7 +1187,12 @@ export async function updateSpecStandards(updates: Partial<SpecStandards>): Prom
       range: `${tab}!A2:B${1 + SPEC_STANDARDS_KEYS.length}`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
-        values: SPEC_STANDARDS_KEYS.map((key) => [key, merged[key]]),
+        values: SPEC_STANDARDS_KEYS.map((key) => {
+          if (key === "ramCapacityOptions" || key === "ramSpeedOptions" || key === "storageTypeOptions") {
+            return [key, JSON.stringify(merged[key])];
+          }
+          return [key, merged[key]];
+        }),
       },
     });
   } catch (err: unknown) {
