@@ -58,12 +58,24 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
     "acknowledgerName",
     "acknowledgerPosition",
     "acknowledgerDepartment",
+    "printFontFamily",
+    "printFontSizePt",
   ];
   const out: Partial<ReportSettings> = {};
   for (const key of stringKeys) {
     if (b[key] === undefined) continue;
     if (typeof b[key] !== "string") return null;
     out[key] = (b[key] as string).trim();
+  }
+  // printFontFamily blank would silently undo the whole point of the
+  // setting (the print-area would just fall back to the browser's plain
+  // default), and printFontSizePt has to actually parse to a sane pt size
+  // for MaintenanceReportBuilder's inline style — reject the save rather
+  // than let either through broken.
+  if (out.printFontFamily !== undefined && out.printFontFamily === "") return null;
+  if (out.printFontSizePt !== undefined) {
+    const n = Number(out.printFontSizePt);
+    if (!Number.isFinite(n) || n < 8 || n > 36) return null;
   }
   if (b.actionOptions !== undefined) {
     if (!Array.isArray(b.actionOptions) || !b.actionOptions.every((x) => typeof x === "string")) return null;

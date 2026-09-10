@@ -162,6 +162,17 @@ function actionColorStyle(color: ActionColor): CSSProperties {
   return actionColorVars(color) as CSSProperties;
 }
 
+/** Parses ReportSettings.printFontSizePt into a safe pt number for the
+ * print-area's inline font-size style — falls back to the same "14" the
+ * field defaults to (DEFAULT_REPORT_SETTINGS) whenever the stored value is
+ * blank or a hand-edited, non-numeric sheet cell, so a bad value never
+ * breaks the page. The API route validates this range on save too, but
+ * this is the last line of defense for whatever's actually in the sheet. */
+function printBodyFontSizePt(raw: string): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 8 && n <= 36 ? n : 14;
+}
+
 /** Full names, in the same index order as THAI_MONTHS_SHORT — used only for
  * the month-strip popup heading below (e.g. "สิงหาคม 2569"), where the
  * abbreviation would read a bit too terse for a heading. */
@@ -884,6 +895,11 @@ export default function MaintenanceReportBuilder({
 
   const displayDate = visitDate ? formatThaiDate(visitDate) : "";
   const timeRangeLabel = timeFrom && timeTo ? `${timeFrom} - ${timeTo}` : timeFrom || timeTo || "";
+  // Drives the inline font-size on the "ข้อมูลครุภัณฑ์..." heading and the
+  // วันที่ดำเนินการ/ลายเซ็น block below the table — see
+  // ReportSettings.printFontSizePt's own comment for why only those two,
+  // not the whole print-area.
+  const bodyFontSizePt = printBodyFontSizePt(formSettings.printFontSizePt);
   // Blank rows mid-edit in the settings modal never leak into the printed
   // table (cleanActionOptions), anything ซ่อน/hidden from the master list
   // (hiddenActionOptions) never appears on a printed form at all, and
@@ -1070,6 +1086,42 @@ export default function MaintenanceReportBuilder({
                         </label>
                       ))}
                     </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+                    <p className="text-sm font-bold text-zinc-800 dark:text-zinc-100">แบบอักษรที่ใช้พิมพ์</p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                        ชนิดตัวอักษร (CSS font-family)
+                        <input
+                          type="text"
+                          value={formSettings.printFontFamily}
+                          onChange={(e) => {
+                            setFormSettings((prev) => ({ ...prev, printFontFamily: e.target.value }));
+                            setSettingsSaved(false);
+                          }}
+                          placeholder='เช่น "TH SarabunPSK", "TH Sarabun New", sans-serif'
+                          className={INPUT_CLASS}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                        ขนาดตัวอักษร (pt) — เฉพาะหัวข้อ &quot;ข้อมูลครุภัณฑ์...&quot; และส่วนวันที่/ลายเซ็นใต้ตาราง
+                        <input
+                          type="number"
+                          min={8}
+                          max={36}
+                          value={formSettings.printFontSizePt}
+                          onChange={(e) => {
+                            setFormSettings((prev) => ({ ...prev, printFontSizePt: e.target.value }));
+                            setSettingsSaved(false);
+                          }}
+                          className={INPUT_CLASS}
+                        />
+                      </label>
+                    </div>
+                    <p className="text-xs text-zinc-400">
+                      ต้องเป็นฟอนต์ที่ติดตั้งอยู่ในเครื่องคอมพิวเตอร์ที่ใช้พิมพ์จริง มิฉะนั้นเบราว์เซอร์จะใช้ฟอนต์สำรองแทน — ตัวอย่างด้านล่าง (พรีวิวก่อนพิมพ์) จะแสดงผลตรงกับที่พิมพ์จริงเสมอ
+                    </p>
                   </div>
 
                   <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
@@ -1823,8 +1875,16 @@ export default function MaintenanceReportBuilder({
         </div>
 
         {/* The printable form itself — kept visible on screen too (as a live
-            preview) so what ends up on paper is never a surprise. */}
-        <div className="print-area relative rounded-2xl border border-zinc-200 bg-white p-8 text-zinc-900 shadow-sm print:rounded-none print:border-0 print:p-0 print:shadow-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
+            preview) so what ends up on paper is never a surprise. The
+            configured font-family applies to the whole page (including the
+            table below, which keeps its own small fixed sizes — see
+            ReportSettings.printFontFamily's own comment) so the live
+            preview matches what actually prints, same reasoning as
+            everything else on this page staying visible pre-print. */}
+        <div
+          className="print-area relative rounded-2xl border border-zinc-200 bg-white p-8 text-zinc-900 shadow-sm print:rounded-none print:border-0 print:p-0 print:shadow-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+          style={{ fontFamily: formSettings.printFontFamily }}
+        >
           {/* Per the hospital's request, a reprinted copy stays visibly
               marked as such — including the date it was reprinted, not
               just the original วันที่ดำเนินการ below — so anyone reviewing
@@ -1849,7 +1909,9 @@ export default function MaintenanceReportBuilder({
           </div>
 
           <div className="mt-4">
-            <p className="mb-2 text-sm font-semibold">ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา</p>
+            <p className="mb-2 font-semibold" style={{ fontSize: `${bodyFontSizePt}pt` }}>
+              ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา
+            </p>
             <table className="w-full border-collapse text-[10px] leading-snug">
               <colgroup>
                 <col className="w-[4%]" />
@@ -1919,7 +1981,7 @@ export default function MaintenanceReportBuilder({
             </table>
           </div>
 
-          <div className="mt-4 text-sm print:break-inside-avoid">
+          <div className="mt-4 print:break-inside-avoid" style={{ fontSize: `${bodyFontSizePt}pt` }}>
             <div className="flex flex-wrap gap-x-8 gap-y-2">
               <span>วันที่ดำเนินการ {displayDate || "............................................."}</span>
               <span>ช่วงเวลา {timeRangeLabel || "....................."}</span>
@@ -1938,7 +2000,10 @@ export default function MaintenanceReportBuilder({
               ever landing mid-signature; an odd one out (here, whichever
               block ends up alone) spans both columns instead of sitting
               lopsided in a half-filled row. */}
-          <div className="mt-6 grid grid-cols-1 gap-x-8 gap-y-8 text-center text-sm sm:grid-cols-2">
+          <div
+            className="mt-6 grid grid-cols-1 gap-x-8 gap-y-8 text-center sm:grid-cols-2"
+            style={{ fontSize: `${bodyFontSizePt}pt` }}
+          >
             {signatureBlocks.map((block, idx) => (
               <div
                 key={block.key}

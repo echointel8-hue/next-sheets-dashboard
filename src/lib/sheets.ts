@@ -447,6 +447,28 @@ export interface ReportSettings {
   acknowledgerName: string;
   acknowledgerPosition: string;
   acknowledgerDepartment: string;
+  /** CSS font-family value applied to the whole printed form (see
+   * MaintenanceReportBuilder's print-area) — a plain string so the
+   * hospital can type any font actually installed on the IT account's own
+   * computer (this only ever renders/prints client-side, there's no
+   * server-side font embedding here). Defaults to a Thai government
+   * document standard font with a close fallback, so a hospital that never
+   * touches this setting still gets a correct-looking, print-appropriate
+   * font instead of the browser's plain sans-serif default. */
+  printFontFamily: string;
+  /** Font size (in pt — the unit print layouts are conventionally sized
+   * in, unlike on-screen px/rem) for the two blocks of the printed form
+   * that read as body text: the "ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา"
+   * section heading, and the วันที่ดำเนินการ/ช่วงเวลา/ผู้ดำเนินการ +
+   * signature block below the table. Deliberately NOT applied to the
+   * equipment table itself (its columns use their own small, carefully
+   * tuned fixed sizes to keep the whole table on one printed page) or to
+   * the org name/form title header (kept relatively sized to that
+   * heading). Stored as a string, same plain-text handling as every other
+   * field here — parsed with a fallback at render time (see
+   * MaintenanceReportBuilder's printBodyFontSizePt) so a blank or
+   * hand-edited non-numeric cell never breaks the page. */
+  printFontSizePt: string;
   /** Checklist items shown under the "การดำเนินการ" column of a printed
    * maintenance report — editable by the hospital instead of hard-coded,
    * since this list is expected to grow (today just "บำรุงรักษา", later
@@ -478,6 +500,8 @@ export const DEFAULT_REPORT_SETTINGS: ReportSettings = {
   acknowledgerName: "นางขนัญธร เสียงล้ำ",
   acknowledgerPosition: "เจ้าพนักงานเวชสถิติชำนาญงาน",
   acknowledgerDepartment: "กลุ่มงานประกันสุขภาพและกลุ่มงานสุขภาพดิจิทัล",
+  printFontFamily: '"TH SarabunPSK", "TH Sarabun New", sans-serif',
+  printFontSizePt: "14",
   actionOptions: ["บำรุงรักษา"],
   hiddenActionOptions: [],
 };
