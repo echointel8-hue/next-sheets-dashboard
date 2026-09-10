@@ -1254,11 +1254,6 @@ export default function MaintenanceReportBuilder({
                           aria-label={`เลือก ${it.assetNumber || it.equipmentType}`}
                           className="disabled:cursor-not-allowed disabled:opacity-40"
                         />
-                        {inProgressByEquipment[it.rowNumber] && (
-                          <p className="mt-1 w-9 text-[8px] leading-tight text-amber-600 dark:text-amber-400">
-                            กำลังบำรุงรักษาอยู่ — เลือกซ้ำไม่ได้
-                          </p>
-                        )}
                       </td>
                       <td className="px-2 py-1.5 align-top">
                         <div
