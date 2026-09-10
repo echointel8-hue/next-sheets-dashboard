@@ -461,14 +461,31 @@ export interface ReportSettings {
    * that read as body text: the "ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา"
    * section heading, and the วันที่ดำเนินการ/ช่วงเวลา/ผู้ดำเนินการ +
    * signature block below the table. Deliberately NOT applied to the
-   * equipment table itself (its columns use their own small, carefully
-   * tuned fixed sizes to keep the whole table on one printed page) or to
-   * the org name/form title header (kept relatively sized to that
-   * heading). Stored as a string, same plain-text handling as every other
-   * field here — parsed with a fallback at render time (see
-   * MaintenanceReportBuilder's printBodyFontSizePt) so a blank or
-   * hand-edited non-numeric cell never breaks the page. */
+   * equipment table itself (see printTableFontSizePx just below, its own
+   * separate control) or to the org name/form title header (kept
+   * relatively sized to that heading). Stored as a string, same
+   * plain-text handling as every other field here — parsed with a
+   * fallback at render time (see MaintenanceReportBuilder's
+   * printBodyFontSizePt) so a blank or hand-edited non-numeric cell never
+   * breaks the page. */
   printFontSizePt: string;
+  /** Base font size (in px, not pt — the equipment table's columns are
+   * laid out in px so its three internal sizes can stay in fixed
+   * proportion to each other, see below) for the printed equipment table:
+   * the ลำดับ/รายการครุภัณฑ์/ผู้รับผิดชอบครุภัณฑ์ columns sit at exactly
+   * this size, while the smaller sub-details (หมายเลขครุภัณฑ์, the
+   * ยี่ห้อ/รุ่น and กลุ่มงาน sub-lines, การดำเนินการ checkboxes, and
+   * ผลการตรวจสอบโดย IT checkboxes) are derived from it at render time
+   * (see MaintenanceReportBuilder's printTableFontSizePx) so raising or
+   * lowering this one number scales the whole table together instead of
+   * needing five separate settings. Kept separate from printFontSizePt
+   * above (and from the table entirely on purpose) since this table was
+   * originally, and still needs to stay, small enough to keep the whole
+   * printed list on one page — too large a value here risks the table
+   * spilling onto a second page for a report with many selected items.
+   * Stored as a string, same plain-text handling as every other field
+   * here. */
+  printTableFontSizePx: string;
   /** Checklist items shown under the "การดำเนินการ" column of a printed
    * maintenance report — editable by the hospital instead of hard-coded,
    * since this list is expected to grow (today just "บำรุงรักษา", later
@@ -502,6 +519,7 @@ export const DEFAULT_REPORT_SETTINGS: ReportSettings = {
   acknowledgerDepartment: "กลุ่มงานประกันสุขภาพและกลุ่มงานสุขภาพดิจิทัล",
   printFontFamily: '"TH SarabunPSK", "TH Sarabun New", sans-serif',
   printFontSizePt: "14",
+  printTableFontSizePx: "11",
   actionOptions: ["บำรุงรักษา"],
   hiddenActionOptions: [],
 };

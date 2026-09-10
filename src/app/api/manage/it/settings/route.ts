@@ -60,6 +60,7 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
     "acknowledgerDepartment",
     "printFontFamily",
     "printFontSizePt",
+    "printTableFontSizePx",
   ];
   const out: Partial<ReportSettings> = {};
   for (const key of stringKeys) {
@@ -69,13 +70,19 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
   }
   // printFontFamily blank would silently undo the whole point of the
   // setting (the print-area would just fall back to the browser's plain
-  // default), and printFontSizePt has to actually parse to a sane pt size
-  // for MaintenanceReportBuilder's inline style — reject the save rather
-  // than let either through broken.
+  // default), and printFontSizePt/printTableFontSizePx each have to
+  // actually parse to a sane size for MaintenanceReportBuilder's inline
+  // styles — reject the save rather than let any of them through broken.
   if (out.printFontFamily !== undefined && out.printFontFamily === "") return null;
   if (out.printFontSizePt !== undefined) {
     const n = Number(out.printFontSizePt);
     if (!Number.isFinite(n) || n < 8 || n > 36) return null;
+  }
+  if (out.printTableFontSizePx !== undefined) {
+    const n = Number(out.printTableFontSizePx);
+    // Same 7–20px range MaintenanceReportBuilder's printTableFontSizePx
+    // helper clamps to at render time — kept in sync deliberately.
+    if (!Number.isFinite(n) || n < 7 || n > 20) return null;
   }
   if (b.actionOptions !== undefined) {
     if (!Array.isArray(b.actionOptions) || !b.actionOptions.every((x) => typeof x === "string")) return null;

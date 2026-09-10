@@ -173,6 +173,16 @@ function printBodyFontSizePt(raw: string): number {
   return Number.isFinite(n) && n >= 8 && n <= 36 ? n : 14;
 }
 
+/** Parses ReportSettings.printTableFontSizePx into a safe px number for the
+ * printed equipment table's base font size — same "reject a bad stored
+ * value, don't break the page" role as printBodyFontSizePt above, and the
+ * same 7–20 range the API route validates on save. Falls back to "11", the
+ * field's own default. */
+function printTableFontSizePx(raw: string): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 7 && n <= 20 ? n : 11;
+}
+
 /** Full names, in the same index order as THAI_MONTHS_SHORT — used only for
  * the month-strip popup heading below (e.g. "สิงหาคม 2569"), where the
  * abbreviation would read a bit too terse for a heading. */
@@ -906,6 +916,17 @@ export default function MaintenanceReportBuilder({
   // ReportSettings.printFontSizePt's own comment for why only those two,
   // not the whole print-area.
   const bodyFontSizePt = printBodyFontSizePt(formSettings.printFontSizePt);
+  // Drives the equipment table's base font size (see
+  // ReportSettings.printTableFontSizePx) — the two smaller in-table sizes
+  // below are derived from it, offset by fixed px amounts, so the table's
+  // original visual hierarchy (ลำดับ/รายการ/ผู้รับผิดชอบ largest, then
+  // หมายเลขครุภัณฑ์/checkboxes, then the ยี่ห้อ-รุ่น/กลุ่มงาน sub-lines
+  // smallest) holds at any base size instead of flattening out. Math.max
+  // floors each at 6px so an admin dialing the base all the way down to 7
+  // still gets a readable, non-zero/negative table rather than broken CSS.
+  const tableBaseFontSizePx = printTableFontSizePx(formSettings.printTableFontSizePx);
+  const tableSecondaryFontSizePx = Math.max(tableBaseFontSizePx - 1, 6);
+  const tableTertiaryFontSizePx = Math.max(tableBaseFontSizePx - 1.5, 6);
   // Blank rows mid-edit in the settings modal never leak into the printed
   // table (cleanActionOptions), anything ซ่อน/hidden from the master list
   // (hiddenActionOptions) never appears on a printed form at all, and
@@ -1124,9 +1145,23 @@ export default function MaintenanceReportBuilder({
                           className={INPUT_CLASS}
                         />
                       </label>
+                      <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                        ขนาดตัวอักษรในตาราง (px) — สเกลทั้งตารางครุภัณฑ์พร้อมกัน
+                        <input
+                          type="number"
+                          min={7}
+                          max={20}
+                          value={formSettings.printTableFontSizePx}
+                          onChange={(e) => {
+                            setFormSettings((prev) => ({ ...prev, printTableFontSizePx: e.target.value }));
+                            setSettingsSaved(false);
+                          }}
+                          className={INPUT_CLASS}
+                        />
+                      </label>
                     </div>
                     <p className="text-xs text-zinc-400">
-                      ต้องเป็นฟอนต์ที่ติดตั้งอยู่ในเครื่องคอมพิวเตอร์ที่ใช้พิมพ์จริง มิฉะนั้นเบราว์เซอร์จะใช้ฟอนต์สำรองแทน — ตัวอย่างด้านล่าง (พรีวิวก่อนพิมพ์) จะแสดงผลตรงกับที่พิมพ์จริงเสมอ
+                      ต้องเป็นฟอนต์ที่ติดตั้งอยู่ในเครื่องคอมพิวเตอร์ที่ใช้พิมพ์จริง มิฉะนั้นเบราว์เซอร์จะใช้ฟอนต์สำรองแทน — ตัวอย่างด้านล่าง (พรีวิวก่อนพิมพ์) จะแสดงผลตรงกับที่พิมพ์จริงเสมอ ขนาดตัวอักษรในตารางถูกตั้งเล็กไว้โดยเจตนาเพื่อให้รายการทั้งหมดพิมพ์พอดีหน้าเดียว — ปรับขึ้นมากอาจทำให้ตารางล้นไปหน้าที่ 2 หากเลือกครุภัณฑ์จำนวนมาก
                     </p>
                   </div>
 
@@ -1928,7 +1963,10 @@ export default function MaintenanceReportBuilder({
             <p className="mb-2 font-semibold" style={{ fontSize: `${bodyFontSizePt}pt` }}>
               ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา
             </p>
-            <table className="w-full border-collapse text-[11px] leading-snug">
+            <table
+              className="w-full border-collapse leading-snug"
+              style={{ fontSize: `${tableBaseFontSizePx}px` }}
+            >
               <colgroup>
                 <col className="w-[4%]" />
                 <col className="w-[13%]" />
@@ -1953,23 +1991,39 @@ export default function MaintenanceReportBuilder({
                 {selectedRows.map((row, i) => (
                   <tr key={row.rowNumber}>
                     <td className="border border-zinc-400 px-1 py-1 text-center align-top">{i + 1}</td>
-                    <td className="border border-zinc-400 px-1 py-1 align-top whitespace-nowrap text-[10px]">
+                    <td
+                      className="border border-zinc-400 px-1 py-1 align-top whitespace-nowrap"
+                      style={{ fontSize: `${tableSecondaryFontSizePx}px` }}
+                    >
                       {row.assetNumber || "—"}
                     </td>
                     <td className="border border-zinc-400 px-1 py-1 align-top">
                       <div className="font-medium">{row.equipmentType || "—"}</div>
                       {row.brandModel && (
-                        <div className="text-[9.5px] leading-snug text-zinc-500">{row.brandModel}</div>
+                        <div
+                          className="leading-snug text-zinc-500"
+                          style={{ fontSize: `${tableTertiaryFontSizePx}px` }}
+                        >
+                          {row.brandModel}
+                        </div>
                       )}
                     </td>
                     <td className="border border-zinc-400 px-1 py-1 align-top">
                       {row.department && (
-                        <div className="text-[9.5px] leading-snug text-zinc-500">{row.department}</div>
+                        <div
+                          className="leading-snug text-zinc-500"
+                          style={{ fontSize: `${tableTertiaryFontSizePx}px` }}
+                        >
+                          {row.department}
+                        </div>
                       )}
                       <div>{row.location || "—"}</div>
                     </td>
                     <td className="border border-zinc-400 px-1 py-1 align-top">{row.responsiblePerson || "—"}</td>
-                    <td className="border border-zinc-400 px-1 py-1 align-top text-[10px] leading-snug">
+                    <td
+                      className="border border-zinc-400 px-1 py-1 align-top leading-snug"
+                      style={{ fontSize: `${tableSecondaryFontSizePx}px` }}
+                    >
                       <div className="flex flex-col gap-0.5">
                         {printActionOptions.map((label) => (
                           <span key={label}>☐ {label}</span>
@@ -1977,7 +2031,10 @@ export default function MaintenanceReportBuilder({
                       </div>
                     </td>
                     <td className="border border-zinc-400 px-1 py-1 align-top">
-                      <div className="grid grid-cols-2 gap-x-1 gap-y-0.5 whitespace-nowrap text-[10px]">
+                      <div
+                        className="grid grid-cols-2 gap-x-1 gap-y-0.5 whitespace-nowrap"
+                        style={{ fontSize: `${tableSecondaryFontSizePx}px` }}
+                      >
                         <span>☐ ปกติ</span>
                         <span>☐ เปลี่ยนอะไหล่ ................</span>
                         <span>☐ ส่งซ่อม</span>
