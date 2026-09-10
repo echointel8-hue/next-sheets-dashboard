@@ -67,7 +67,8 @@ function dateOnly(raw: string): string {
   return raw.replace(/\s+\d{1,2}:\d{2}(:\d{2})?\s*$/, "").trim();
 }
 
-const CARD = "rounded-2xl border border-emerald-900/10 bg-white shadow-sm dark:border-emerald-400/10 dark:bg-zinc-900";
+const CARD =
+  "rounded-2xl border border-emerald-900/10 bg-white shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
 const ACTION_BUTTON =
   "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2";
 
@@ -325,14 +326,27 @@ export default function ManageDashboard({
   function actionButtons(record: ManageRecord, disposed: boolean) {
     return (
       <div className="flex flex-wrap items-center gap-1">
-        <button
-          type="button"
-          onClick={() => openEdit(record)}
-          className={`${ACTION_BUTTON} border-emerald-900/15 text-emerald-700 hover:bg-emerald-50 focus-visible:outline-[var(--brand)] dark:border-emerald-400/20 dark:text-emerald-300 dark:hover:bg-emerald-900/20`}
-        >
-          <Pencil size={12} strokeWidth={2} aria-hidden="true" />
-          แก้ไข
-        </button>
+        {disposed ? (
+          // Locked for admin and superadmin alike once a row is จำหน่าย —
+          // must ยกเลิกจำหน่าย (superadmin-only, below) first. Same rule
+          // enforced fresh server-side in the PATCH route, not just here.
+          <span
+            title="รายการนี้จำหน่ายแล้ว ต้องยกเลิกจำหน่ายก่อนจึงจะแก้ไขได้"
+            className={`${ACTION_BUTTON} cursor-not-allowed border-zinc-200 text-zinc-300 dark:border-zinc-800 dark:text-zinc-600`}
+          >
+            <Pencil size={12} strokeWidth={2} aria-hidden="true" />
+            แก้ไข
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => openEdit(record)}
+            className={`${ACTION_BUTTON} border-emerald-900/15 text-emerald-700 hover:bg-emerald-50 focus-visible:outline-[var(--brand)] dark:border-emerald-400/20 dark:text-emerald-300 dark:hover:bg-emerald-900/20`}
+          >
+            <Pencil size={12} strokeWidth={2} aria-hidden="true" />
+            แก้ไข
+          </button>
+        )}
         {isSuperadmin && !disposed && (
           <button
             type="button"
@@ -374,14 +388,22 @@ export default function ManageDashboard({
     <main className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 sm:px-6 lg:px-10">
       <div className="flex w-full max-w-[100rem] flex-col gap-6">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">
-              จัดการข้อมูลครุภัณฑ์
-            </h1>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              {session.username} ·{" "}
-              {isSuperadmin ? "superadmin (ทุกกลุ่มงาน)" : `admin · ${session.department}`}
-            </p>
+          <div className="flex items-center gap-3">
+            <span
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
+              aria-hidden="true"
+            >
+              <Package size={20} strokeWidth={2} />
+            </span>
+            <div>
+              <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">
+                จัดการข้อมูลครุภัณฑ์
+              </h1>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                {session.username} ·{" "}
+                {isSuperadmin ? "superadmin (ทุกกลุ่มงาน)" : `admin · ${session.department}`}
+              </p>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link
@@ -412,13 +434,13 @@ export default function ManageDashboard({
                 className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
               >
                 <Wrench size={16} strokeWidth={2} aria-hidden="true" />
-                แดชบอร์ด IT
+                ระบบงาน IT
               </Link>
             )}
             <button
               type="button"
               onClick={logout}
-              className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)]"
+              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-300"
             >
               <LogOut size={16} strokeWidth={2} aria-hidden="true" />
               ออกจากระบบ
@@ -504,7 +526,7 @@ export default function ManageDashboard({
                   <button
                     type="button"
                     onClick={openAdd}
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full bg-[var(--brand)] px-4 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)]"
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-4 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:from-[var(--brand-strong)]"
                   >
                     <Plus size={14} strokeWidth={2} aria-hidden="true" />
                     เพิ่มครุภัณฑ์ใหม่

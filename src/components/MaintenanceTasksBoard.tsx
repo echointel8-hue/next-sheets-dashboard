@@ -10,6 +10,7 @@ import {
   ClipboardList,
   FileText,
   Loader2,
+  LogOut,
   Printer,
   Save,
   Trash2,
@@ -22,7 +23,8 @@ import { actionColorVars, buildActionColorMap, colorForAction } from "@/lib/acti
 import MultiSelect from "@/components/MultiSelect";
 import MaintenanceStatusStrip from "@/components/MaintenanceStatusStrip";
 
-const CARD = "rounded-2xl border border-emerald-900/10 bg-white shadow-sm dark:border-emerald-400/10 dark:bg-zinc-900";
+const CARD =
+  "rounded-2xl border border-emerald-900/10 bg-white shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
 const INPUT_CLASS =
   "h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100";
 const CHECKBOX_CLASS = "h-4 w-4 shrink-0 rounded border-zinc-300 text-[var(--brand)] dark:border-zinc-600";
@@ -106,6 +108,16 @@ export default function MaintenanceTasksBoard({
   hiddenActionOptions: string[];
 }) {
   const router = useRouter();
+
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      router.push("/login");
+      router.refresh();
+    }
+  }
+
   const [tasks, setTasks] = useState(initialTasks);
   const [statusFilter, setStatusFilter] = useState<"all" | MaintenanceTaskStatus>("in_progress");
   const [search, setSearch] = useState("");
@@ -267,9 +279,17 @@ export default function MaintenanceTasksBoard({
     <main className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 sm:px-6 lg:px-10">
       <div className="flex w-full max-w-[75rem] flex-col gap-6">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">งานบำรุงรักษา (Task)</h1>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{session.displayName || session.username}</p>
+          <div className="flex items-center gap-3">
+            <span
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
+              aria-hidden="true"
+            >
+              <ClipboardList size={20} strokeWidth={2} />
+            </span>
+            <div>
+              <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">งานบำรุงรักษา (Task)</h1>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{session.displayName || session.username}</p>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link
@@ -277,15 +297,27 @@ export default function MaintenanceTasksBoard({
               className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
-              กลับไปแดชบอร์ด IT
+              กลับไประบบงาน IT
             </Link>
             <Link
               href="/manage/it/report"
-              className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)]"
+              className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:from-[var(--brand-strong)]"
             >
               <FileText size={16} strokeWidth={2} aria-hidden="true" />
               พิมพ์แบบฟอร์ม
             </Link>
+            {/* Logout — always the last (rightmost) control in every
+                authenticated page's header, per the hospital's request, so
+                it's in a predictable place no matter which screen someone
+                is on. */}
+            <button
+              type="button"
+              onClick={logout}
+              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-300"
+            >
+              <LogOut size={16} strokeWidth={2} aria-hidden="true" />
+              ออกจากระบบ
+            </button>
           </div>
         </header>
 
@@ -373,7 +405,7 @@ export default function MaintenanceTasksBoard({
                     aria-pressed={statusFilter === opt.value}
                     className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
                       statusFilter === opt.value
-                        ? "bg-[var(--brand)] text-[var(--brand-contrast)]"
+                        ? "bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)]"
                         : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
                     }`}
                   >
@@ -841,7 +873,7 @@ function TaskUpdateModal({
               type="button"
               onClick={() => save(true)}
               disabled={saving !== null}
-              className="inline-flex items-center gap-2 rounded-full bg-[var(--brand)] px-5 py-2.5 text-sm font-semibold text-[var(--brand-contrast)] shadow-sm transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-5 py-2.5 text-sm font-semibold text-[var(--brand-contrast)] shadow-sm transition-colors hover:from-[var(--brand-strong)] disabled:opacity-60"
             >
               {saving === "done" ? (
                 <Loader2 size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" />

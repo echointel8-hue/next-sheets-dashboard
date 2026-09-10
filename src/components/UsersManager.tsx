@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowLeft, LogOut, Pencil, Plus, ShieldCheck, UserRound, Wrench } from "lucide-react";
 import UserFormModal, { type ManagedUser } from "@/components/UserFormModal";
 
-const CARD = "rounded-2xl border border-emerald-900/10 bg-white shadow-sm dark:border-emerald-400/10 dark:bg-zinc-900";
+const CARD =
+  "rounded-2xl border border-emerald-900/10 bg-white shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
 const ACTION_BUTTON =
   "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2";
 
@@ -61,9 +62,17 @@ export default function UsersManager({
     <main className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 sm:px-8 lg:px-12">
       <div className="flex w-full max-w-4xl flex-col gap-6">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">จัดการผู้ใช้</h1>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{username} · superadmin</p>
+          <div className="flex items-center gap-3">
+            <span
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
+              aria-hidden="true"
+            >
+              <UserRound size={20} strokeWidth={2} />
+            </span>
+            <div>
+              <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">จัดการผู้ใช้</h1>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{username} · superadmin</p>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link
@@ -76,7 +85,7 @@ export default function UsersManager({
             <button
               type="button"
               onClick={logout}
-              className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)]"
+              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-300"
             >
               <LogOut size={16} strokeWidth={2} aria-hidden="true" />
               ออกจากระบบ
@@ -101,7 +110,7 @@ export default function UsersManager({
               <button
                 type="button"
                 onClick={() => setModal({ mode: "add" })}
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--brand)] px-5 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)]"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-5 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:from-[var(--brand-strong)]"
               >
                 <Plus size={16} strokeWidth={2} aria-hidden="true" />
                 เพิ่มผู้ใช้ใหม่

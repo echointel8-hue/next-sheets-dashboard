@@ -224,7 +224,7 @@ export default function BulkEditSpecModal({
                   type="button"
                   onClick={handleSave}
                   disabled={saving || !anyEnabled}
-                  className="flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--brand)] px-5 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-60"
+                  className="flex h-11 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-5 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:from-[var(--brand-strong)] disabled:opacity-60"
                 >
                   {saving ? (
                     <Loader2 size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" />
@@ -260,7 +260,7 @@ export default function BulkEditSpecModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="h-11 rounded-full bg-[var(--brand)] px-5 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)]"
+                  className="h-11 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-5 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:from-[var(--brand-strong)]"
                 >
                   ปิด
                 </button>

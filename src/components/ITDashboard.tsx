@@ -73,7 +73,8 @@ function resolveHeader(headers: string[], candidate: string): string | null {
   return headers.find((h) => h.trim() === target) ?? null;
 }
 
-const CARD = "rounded-2xl border border-emerald-900/10 bg-white shadow-sm dark:border-emerald-400/10 dark:bg-zinc-900";
+const CARD =
+  "rounded-2xl border border-emerald-900/10 bg-white shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
 
 interface SpecColumn {
   label: string;
@@ -523,11 +524,19 @@ export default function ITDashboard({
     <main className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 sm:px-6 lg:px-10">
       <div className="flex w-full max-w-[100rem] flex-col gap-6">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">
-              แดชบอร์ดงาน IT
-            </h1>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{session.username}</p>
+          <div className="flex items-center gap-3">
+            <span
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
+              aria-hidden="true"
+            >
+              <Wrench size={20} strokeWidth={2} />
+            </span>
+            <div>
+              <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">
+                ระบบงาน IT
+              </h1>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{session.username}</p>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link
@@ -556,7 +565,7 @@ export default function ITDashboard({
             <button
               type="button"
               onClick={logout}
-              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-300"
             >
               <LogOut size={16} strokeWidth={2} aria-hidden="true" />
               ออกจากระบบ
@@ -861,7 +870,7 @@ export default function ITDashboard({
                   <button
                     type="button"
                     onClick={() => setShowBulkEdit(true)}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-3 py-1.5 text-xs font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)]"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-3 py-1.5 text-xs font-medium text-[var(--brand-contrast)] transition-colors hover:from-[var(--brand-strong)]"
                   >
                     <Pencil size={13} strokeWidth={2} aria-hidden="true" />
                     แก้ไขที่เลือก ({selectedRowNumbers.size.toLocaleString("th-TH")})
@@ -1346,7 +1355,7 @@ function SpecStandardsPanel({
           type="button"
           onClick={save}
           disabled={saving}
-          className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:from-[var(--brand-strong)] disabled:opacity-60"
         >
           {saving ? (
             <Loader2 size={15} strokeWidth={2} className="animate-spin" aria-hidden="true" />

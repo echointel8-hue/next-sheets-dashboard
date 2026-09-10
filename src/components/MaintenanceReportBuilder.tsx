@@ -9,8 +9,10 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  FileText,
   Loader2,
   Lock,
+  LogOut,
   MapPin,
   Plus,
   Printer as PrinterIcon,
@@ -144,7 +146,8 @@ interface SelectedRow {
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
-const CARD = "rounded-2xl border border-emerald-900/10 bg-white shadow-sm dark:border-emerald-400/10 dark:bg-zinc-900";
+const CARD =
+  "rounded-2xl border border-emerald-900/10 bg-white shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
 const INPUT_CLASS =
   "h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100";
 
@@ -400,6 +403,16 @@ export default function MaintenanceReportBuilder({
   reprintTasks?: ReprintTaskInfo[];
 }) {
   const router = useRouter();
+
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      router.push("/login");
+      router.refresh();
+    }
+  }
+
   const [items, setItems] = useState(initialItems);
   // Multi-select — an empty array means "no filter on that dimension", same
   // convention as the department/equipment-type filters on /manage and
@@ -1167,7 +1180,13 @@ export default function MaintenanceReportBuilder({
             belt-and-suspenders backstop for browsers that ignore print:). */}
         <div className="no-print flex flex-col gap-6 print:hidden">
           <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
+            <div className="flex items-center gap-3">
+              <span
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
+                aria-hidden="true"
+              >
+                <FileText size={20} strokeWidth={2} />
+              </span>
               <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">
                 ออกรายงาน: แบบฟอร์มบำรุงรักษาเชิงป้องกัน
               </h1>
@@ -1187,6 +1206,16 @@ export default function MaintenanceReportBuilder({
               >
                 <Settings size={16} strokeWidth={2} aria-hidden="true" />
                 ตั้งค่าแบบฟอร์มรายงาน
+              </button>
+              {/* Logout — always the last (rightmost) control in every
+                  authenticated page's header, per the hospital's request. */}
+              <button
+                type="button"
+                onClick={logout}
+                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-300"
+              >
+                <LogOut size={16} strokeWidth={2} aria-hidden="true" />
+                ออกจากระบบ
               </button>
             </div>
           </header>
@@ -1472,7 +1501,7 @@ export default function MaintenanceReportBuilder({
                         aria-pressed={orientation === "portrait"}
                         className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
                           orientation === "portrait"
-                            ? "bg-[var(--brand)] text-[var(--brand-contrast)]"
+                            ? "bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)]"
                             : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
                         }`}
                       >
@@ -1485,7 +1514,7 @@ export default function MaintenanceReportBuilder({
                         aria-pressed={orientation === "landscape"}
                         className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
                           orientation === "landscape"
-                            ? "bg-[var(--brand)] text-[var(--brand-contrast)]"
+                            ? "bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)]"
                             : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
                         }`}
                       >
@@ -1501,7 +1530,7 @@ export default function MaintenanceReportBuilder({
                     type="button"
                     onClick={saveSettingsAsDefault}
                     disabled={settingsSaving}
-                    className="inline-flex items-center gap-2 rounded-full bg-[var(--brand)] px-5 py-2.5 text-sm font-semibold text-[var(--brand-contrast)] shadow-sm transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-60"
+                    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-5 py-2.5 text-sm font-semibold text-[var(--brand-contrast)] shadow-sm transition-colors hover:from-[var(--brand-strong)] disabled:opacity-60"
                   >
                     {settingsSaving ? (
                       <Loader2 size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" />
@@ -1616,8 +1645,14 @@ export default function MaintenanceReportBuilder({
                 เลือกแล้ว {selectedRowNumbers.length.toLocaleString("th-TH")} รายการ
               </span>
             </div>
-            <div className="max-h-80 overflow-y-auto rounded-lg border border-zinc-100 dark:border-zinc-800">
-              <table className="w-full table-fixed text-left text-xs sm:text-sm">
+            {/* max-w-full + overflow-x-auto here (on top of the existing
+                vertical max-h-80 overflow-y-auto) so this table scrolls
+                sideways on a narrow phone instead of squeezing every column
+                down to unreadably thin — table-fixed's percentage widths
+                below then apply against the table's own min-width, not the
+                viewport. */}
+            <div className="max-h-80 max-w-full overflow-x-auto overflow-y-auto rounded-lg border border-zinc-100 dark:border-zinc-800">
+              <table className="w-full min-w-[38rem] table-fixed text-left text-xs sm:text-sm">
                 {/* Explicit column widths — เดือนที่บำรุงรักษา gets the extra
                     room freed up from ผู้รับผิดชอบครุภัณฑ์, whose content
                     (a name) rarely needs as much width as an unconstrained
@@ -2102,7 +2137,7 @@ export default function MaintenanceReportBuilder({
                     type="button"
                     onClick={saveAllChanged}
                     disabled={dirtyRowCount === 0 || savingAll}
-                    className="inline-flex items-center gap-2 rounded-full bg-[var(--brand)] px-5 py-2.5 text-sm font-semibold text-[var(--brand-contrast)] shadow-sm transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-60"
+                    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-5 py-2.5 text-sm font-semibold text-[var(--brand-contrast)] shadow-sm transition-colors hover:from-[var(--brand-strong)] disabled:opacity-60"
                   >
                     {savingAll ? (
                       <Loader2 size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" />
@@ -2365,7 +2400,7 @@ export default function MaintenanceReportBuilder({
               type="button"
               onClick={handlePrint}
               disabled={selectedRows.length === 0 || creatingTasks}
-              className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:bg-[var(--brand-strong)] disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:from-[var(--brand-strong)] disabled:opacity-50"
             >
               {creatingTasks ? (
                 <Loader2 size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" />
