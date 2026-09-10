@@ -395,14 +395,20 @@ export default function MaintenanceReportBuilder({
   // round only — separate from the master list above (formSettings.
   // actionOptions), per the hospital's request to grow the master catalog
   // over time without every past entry having to appear on every single
-  // printout. Tracked as an exclude-list rather than an include-list so a
-  // newly-added master entry is "on" by default with no extra syncing —
-  // it's simply never in this list until someone turns it off. Not
-  // persisted anywhere (resets to "everything on" on reload) — the whole
-  // point is this can be freely re-toggled every time a form is printed,
-  // with zero effect on the master list or its colors. See the "เลือก
-  // รายการที่จะดำเนินการ" card below and printActionOptions further down.
-  const [excludedActionOptions, setExcludedActionOptions] = useState<string[]>([]);
+  // printout. Tracked as an exclude-list (not an include-list) purely so
+  // toggling one entry off never touches the master list or its colors —
+  // but the starting value now excludes every visible master entry, so
+  // the "เลือกรายการที่จะดำเนินการ" card below loads with nothing selected
+  // and IT has to deliberately pick what applies each round, rather than
+  // risk an unwanted item slipping onto the print because it defaulted to
+  // "on". Not persisted anywhere (resets to "everything off" on reload).
+  // See the "เลือกรายการที่จะดำเนินการ" card below and printActionOptions
+  // further down.
+  const [excludedActionOptions, setExcludedActionOptions] = useState<string[]>(() =>
+    cleanActionOptions(formSettings.actionOptions).filter(
+      (name) => !formSettings.hiddenActionOptions.includes(name)
+    )
+  );
 
   function toggleActiveAction(name: string) {
     setExcludedActionOptions((prev) =>
@@ -1901,15 +1907,17 @@ export default function MaintenanceReportBuilder({
               (พิมพ์ซ้ำเมื่อ {formatThaiDate(new Date().toISOString().slice(0, 10))})
             </p>
           )}
-          {/* leading-none (rather than each line's own default line-height
-              from text-base/text-sm) is what actually tightens this up —
-              the configured print font (see printFontFamily) can carry a
-              taller default line-height than the browser's own sans-serif,
-              which read as too airy between these lines even at
-              leading-tight. gap-0 removes the flex gap entirely so
-              leading-none is the only thing controlling the space between
-              lines. */}
-          <div className="flex flex-col items-center gap-0 text-center leading-none">
+          {/* Tailwind's tightest preset (leading-none, line-height: 1) still
+              left visible daylight between these lines — TH SarabunPSK (see
+              printFontFamily) bakes an unusually tall line box into its own
+              font metrics, taller than line-height: 1 alone can correct. An
+              explicit ratio below 1 on the inline style (which wins over
+              any leading-* class) is what actually closes that up; 0.9 was
+              picked as tight as it gets before Thai tone marks/vowel signs
+              risk visually touching the line above. gap-0 removes the flex
+              gap entirely so this line-height is the only thing controlling
+              the space between lines. */}
+          <div className="flex flex-col items-center gap-0 text-center" style={{ lineHeight: 0.9 }}>
             <p className="text-base font-bold">{formSettings.orgName}</p>
             <p className="text-base font-bold">{formSettings.maintenanceFormTitle}</p>
             <p className="text-sm">{formSettings.fiscalYearLabel}</p>
