@@ -447,28 +447,32 @@ export interface ReportSettings {
   acknowledgerName: string;
   acknowledgerPosition: string;
   acknowledgerDepartment: string;
-  /** CSS font-family value applied to the whole printed form (see
-   * MaintenanceReportBuilder's print-area) — a plain string so the
-   * hospital can type any font actually installed on the IT account's own
-   * computer (this only ever renders/prints client-side, there's no
-   * server-side font embedding here). Defaults to a Thai government
-   * document standard font with a close fallback, so a hospital that never
-   * touches this setting still gets a correct-looking, print-appropriate
-   * font instead of the browser's plain sans-serif default. */
-  printFontFamily: string;
   /** Font size (in pt — the unit print layouts are conventionally sized
-   * in, unlike on-screen px/rem) for the two blocks of the printed form
-   * that read as body text: the "ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา"
-   * section heading, and the วันที่ดำเนินการ/ช่วงเวลา/ผู้ดำเนินการ +
-   * signature block below the table. Deliberately NOT applied to the
-   * equipment table itself (see printTableFontSizePx just below, its own
-   * separate control) or to the org name/form title header (kept
-   * relatively sized to that heading). Stored as a string, same
+   * in, unlike on-screen px/rem) for the printed form's general body text:
+   * the "ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา" section heading, and the
+   * วันที่ดำเนินการ/ช่วงเวลา/ผู้ดำเนินการ + signature block below the
+   * table — i.e. everything on the page that ISN'T the header (see
+   * printHeaderFontSizePt below, its own separate control) or the
+   * equipment table itself (see printTableFontSizePx, likewise separate).
+   * Shown in the settings UI as just "ขนาดตัวอักษรภาพรวม" now that all
+   * three areas have their own control. Stored as a string, same
    * plain-text handling as every other field here — parsed with a
    * fallback at render time (see MaintenanceReportBuilder's
    * printBodyFontSizePt) so a blank or hand-edited non-numeric cell never
    * breaks the page. */
   printFontSizePt: string;
+  /** Font size (in pt) for the printed form's header block: หน่วยงาน,
+   * ชื่อแบบฟอร์ม, ปีงบประมาณ, and (when set) กลุ่มงาน — all four lines
+   * share this one size rather than each having its own control; หน่วยงาน
+   * /ชื่อแบบฟอร์ม stay bold and ปีงบประมาณ/กลุ่มงาน stay regular weight,
+   * same as before, only the size became adjustable. Kept separate from
+   * printFontSizePt (the rest of the page's body text) since a hospital
+   * wanting a more prominent — or more compact — header shouldn't have to
+   * resize the whole form to do it. Stored as a string, same plain-text
+   * handling as every other field here — parsed with a fallback at
+   * render time (see MaintenanceReportBuilder's printHeaderFontSizePt) so
+   * a blank or hand-edited non-numeric cell never breaks the page. */
+  printHeaderFontSizePt: string;
   /** Base font size (in px, not pt — the equipment table's columns are
    * laid out in px so its three internal sizes can stay in fixed
    * proportion to each other, see below) for the printed equipment table:
@@ -486,6 +490,20 @@ export interface ReportSettings {
    * Stored as a string, same plain-text handling as every other field
    * here. */
   printTableFontSizePx: string;
+  /** Letter-spacing (in px — CSS letter-spacing accepts the same units as
+   * font-size, and px keeps this consistent with printTableFontSizePx
+   * rather than mixing in yet another unit) applied to the whole printed
+   * form at once — header, table, and body text together — via the
+   * print-area container's own inline style (see
+   * MaintenanceReportBuilder's print-area div), same "whole page" scope
+   * the now-removed printFontFamily setting used to have. A small
+   * positive value can help a dense Thai form breathe a bit; a small
+   * negative value can claw back a bit of horizontal room. Stored as a
+   * string, same plain-text handling as every other field here — parsed
+   * with a fallback at render time (see MaintenanceReportBuilder's
+   * printLetterSpacingPx) so a blank or hand-edited non-numeric cell
+   * never breaks the page. */
+  printLetterSpacingPx: string;
   /** Checklist items shown under the "การดำเนินการ" column of a printed
    * maintenance report — editable by the hospital instead of hard-coded,
    * since this list is expected to grow (today just "บำรุงรักษา", later
@@ -517,9 +535,10 @@ export const DEFAULT_REPORT_SETTINGS: ReportSettings = {
   acknowledgerName: "นางขนัญธร เสียงล้ำ",
   acknowledgerPosition: "เจ้าพนักงานเวชสถิติชำนาญงาน",
   acknowledgerDepartment: "กลุ่มงานประกันสุขภาพและกลุ่มงานสุขภาพดิจิทัล",
-  printFontFamily: '"TH SarabunPSK", "TH Sarabun New", sans-serif',
   printFontSizePt: "14",
+  printHeaderFontSizePt: "16",
   printTableFontSizePx: "11",
+  printLetterSpacingPx: "0",
   actionOptions: ["บำรุงรักษา"],
   hiddenActionOptions: [],
 };

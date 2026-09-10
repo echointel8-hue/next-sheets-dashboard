@@ -184,6 +184,32 @@ function printTableFontSizePx(raw: string): number {
   return Number.isFinite(n) && n >= 7 && n <= 20 ? n : 11;
 }
 
+/** Parses ReportSettings.printHeaderFontSizePt into a safe pt number for
+ * the printed form's header block (หน่วยงาน/ชื่อแบบฟอร์ม/ปีงบประมาณ/
+ * กลุ่มงาน) — same "reject a bad stored value, don't break the page" role
+ * as printBodyFontSizePt above, and the same 8–36 range the API route
+ * validates on save. Falls back to "16", the field's own default. */
+function printHeaderFontSizePt(raw: string): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 8 && n <= 36 ? n : 16;
+}
+
+/** Parses ReportSettings.printLetterSpacingPx into a safe px number for
+ * the print-area's own inline letter-spacing style — same "reject a bad
+ * stored value, don't break the page" role as the size helpers above, and
+ * the same -2–5 range the API route validates on save. Falls back to "0"
+ * (browser default spacing), the field's own default. */
+function printLetterSpacingPx(raw: string): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= -2 && n <= 5 ? n : 0;
+}
+
+/** Fixed print font stack — used to be user-configurable
+ * (ReportSettings.printFontFamily), but the hospital never needed
+ * anything besides this, so it's now just a constant instead of a
+ * settings field + UI input to maintain. */
+const PRINT_FONT_FAMILY = '"TH SarabunPSK", "TH Sarabun New", sans-serif';
+
 /** The printed equipment table's column widths (% of table width, in
  * ลำดับ / หมายเลขครุภัณฑ์ / รายการครุภัณฑ์ / สถานที่ตั้ง /
  * ผู้รับผิดชอบครุภัณฑ์ / การดำเนินการ / ผลการตรวจสอบโดย IT order) before
@@ -213,7 +239,7 @@ interface AutoFitTableRow {
  * through a scratch, never-attached &lt;canvas&gt; 2D context, so the
  * measurement goes through the exact same font resolution (including TH
  * SarabunPSK's own fallback behavior on a computer that doesn't have it
- * installed, see printFontFamily) that the browser will use to actually
+ * installed, see PRINT_FONT_FAMILY) that the browser will use to actually
  * render/print the table. Converts those pixel widths into proportional
  * percentages that sum to 100, so a column with short content this round
  * (e.g. หมายเลขครุภัณฑ์) shrinks and a column with long content (e.g.
@@ -427,10 +453,12 @@ export default function MaintenanceReportBuilder({
   const [selectedRowNumbers, setSelectedRowNumbers] = useState<number[]>(() =>
     (reprintTasks ?? []).map((t) => t.equipmentRowNumber)
   );
-  const [formDepartment, setFormDepartment] = useState(() => {
-    const departments = new Set((reprintTasks ?? []).map((t) => t.department));
-    return departments.size === 1 ? [...departments][0] : "";
-  });
+  // Deliberately NOT prefilled from reprintTasks (unlike selectedRowNumbers
+  // and visitDate above/below) — per the hospital's request, กลุ่มงาน is
+  // left for the IT account preparing the printout to type in themselves
+  // every time, reprint or not, rather than carried over from whichever
+  // department the original task happened to be filed under.
+  const [formDepartment, setFormDepartment] = useState("");
   const [visitDate, setVisitDate] = useState(() => {
     const dates = new Set((reprintTasks ?? []).map((t) => t.createdAt.slice(0, 10)));
     return dates.size === 1 ? [...dates][0] : "";
@@ -1039,6 +1067,15 @@ export default function MaintenanceReportBuilder({
   // ReportSettings.printFontSizePt's own comment for why only those two,
   // not the whole print-area.
   const bodyFontSizePt = printBodyFontSizePt(formSettings.printFontSizePt);
+  // Drives all four lines of the print-area header (หน่วยงาน/ชื่อแบบฟอร์ม/
+  // ปีงบประมาณ/กลุ่มงาน) — one shared size rather than each having its own
+  // control; หน่วยงาน/ชื่อแบบฟอร์ม stay bold via a className, this only
+  // ever changes size.
+  const headerFontSizePt = printHeaderFontSizePt(formSettings.printHeaderFontSizePt);
+  // Applied to the whole print-area container (see the print-area div
+  // below) — the one letter-spacing knob covers header, table, and body
+  // text together.
+  const letterSpacingPx = printLetterSpacingPx(formSettings.printLetterSpacingPx);
   // Drives the equipment table's base font size (see
   // ReportSettings.printTableFontSizePx) — the two smaller in-table sizes
   // below are derived from it, offset by fixed px amounts, so the table's
@@ -1079,7 +1116,7 @@ export default function MaintenanceReportBuilder({
     const widths = computeAutoTableColumnWidths(
       selectedRows,
       printActionOptions,
-      formSettings.printFontFamily,
+      PRINT_FONT_FAMILY,
       tableBaseFontSizePx,
       tableSecondaryFontSizePx,
       tableTertiaryFontSizePx
@@ -1266,23 +1303,24 @@ export default function MaintenanceReportBuilder({
                   </div>
 
                   <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
-                    <p className="text-sm font-bold text-zinc-800 dark:text-zinc-100">แบบอักษรที่ใช้พิมพ์</p>
+                    <p className="text-sm font-bold text-zinc-800 dark:text-zinc-100">ขนาดตัวอักษรที่พิมพ์</p>
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-                        ชนิดตัวอักษร (CSS font-family)
+                        ขนาดตัวอักษรหัวแบบฟอร์ม (pt)
                         <input
-                          type="text"
-                          value={formSettings.printFontFamily}
+                          type="number"
+                          min={8}
+                          max={36}
+                          value={formSettings.printHeaderFontSizePt}
                           onChange={(e) => {
-                            setFormSettings((prev) => ({ ...prev, printFontFamily: e.target.value }));
+                            setFormSettings((prev) => ({ ...prev, printHeaderFontSizePt: e.target.value }));
                             setSettingsSaved(false);
                           }}
-                          placeholder='เช่น "TH SarabunPSK", "TH Sarabun New", sans-serif'
                           className={INPUT_CLASS}
                         />
                       </label>
                       <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-                        ขนาดตัวอักษร (pt) — เฉพาะหัวข้อ &quot;ข้อมูลครุภัณฑ์...&quot; และส่วนวันที่/ลายเซ็นใต้ตาราง
+                        ขนาดตัวอักษรภาพรวม (pt)
                         <input
                           type="number"
                           min={8}
@@ -1296,7 +1334,7 @@ export default function MaintenanceReportBuilder({
                         />
                       </label>
                       <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-                        ขนาดตัวอักษรในตาราง (px) — สเกลทั้งตารางครุภัณฑ์พร้อมกัน
+                        ขนาดตัวอักษรในตาราง (px)
                         <input
                           type="number"
                           min={7}
@@ -1309,10 +1347,22 @@ export default function MaintenanceReportBuilder({
                           className={INPUT_CLASS}
                         />
                       </label>
+                      <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                        ระยะห่างระหว่างตัวอักษรภาพรวม (px)
+                        <input
+                          type="number"
+                          min={-2}
+                          max={5}
+                          step={0.5}
+                          value={formSettings.printLetterSpacingPx}
+                          onChange={(e) => {
+                            setFormSettings((prev) => ({ ...prev, printLetterSpacingPx: e.target.value }));
+                            setSettingsSaved(false);
+                          }}
+                          className={INPUT_CLASS}
+                        />
+                      </label>
                     </div>
-                    <p className="text-xs text-zinc-400">
-                      ต้องเป็นฟอนต์ที่ติดตั้งอยู่ในเครื่องคอมพิวเตอร์ที่ใช้พิมพ์จริง มิฉะนั้นเบราว์เซอร์จะใช้ฟอนต์สำรองแทน — ตัวอย่างด้านล่าง (พรีวิวก่อนพิมพ์) จะแสดงผลตรงกับที่พิมพ์จริงเสมอ ขนาดตัวอักษรในตารางถูกตั้งเล็กไว้โดยเจตนาเพื่อให้รายการทั้งหมดพิมพ์พอดีหน้าเดียว — ปรับขึ้นมากอาจทำให้ตารางล้นไปหน้าที่ 2 หากเลือกครุภัณฑ์จำนวนมาก
-                    </p>
                   </div>
 
                   <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
@@ -2066,15 +2116,16 @@ export default function MaintenanceReportBuilder({
         </div>
 
         {/* The printable form itself — kept visible on screen too (as a live
-            preview) so what ends up on paper is never a surprise. The
-            configured font-family applies to the whole page (including the
-            table below, which keeps its own small fixed sizes — see
-            ReportSettings.printFontFamily's own comment) so the live
+            preview) so what ends up on paper is never a surprise. The fixed
+            print font (PRINT_FONT_FAMILY) and the configured letter-spacing
+            (ReportSettings.printLetterSpacingPx) both apply to the whole
+            page at once (including the table below, which keeps its own
+            small fixed sizes — see printTableFontSizePx) so the live
             preview matches what actually prints, same reasoning as
             everything else on this page staying visible pre-print. */}
         <div
           className="print-area relative rounded-2xl border border-zinc-200 bg-white p-8 text-zinc-900 shadow-sm print:rounded-none print:border-0 print:p-0 print:shadow-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
-          style={{ fontFamily: formSettings.printFontFamily }}
+          style={{ fontFamily: PRINT_FONT_FAMILY, letterSpacing: `${letterSpacingPx}px` }}
         >
           {/* Per the hospital's request, a reprinted copy stays visibly
               marked as such — including the date it was reprinted, not
@@ -2094,19 +2145,26 @@ export default function MaintenanceReportBuilder({
           )}
           {/* Tailwind's tightest preset (leading-none, line-height: 1) still
               left visible daylight between these lines — TH SarabunPSK (see
-              printFontFamily) bakes an unusually tall line box into its own
-              font metrics, taller than line-height: 1 alone can correct. An
-              explicit ratio below 1 on the inline style (which wins over
-              any leading-* class) is what actually closes that up; 0.9 was
-              picked as tight as it gets before Thai tone marks/vowel signs
-              risk visually touching the line above. gap-0 removes the flex
-              gap entirely so this line-height is the only thing controlling
-              the space between lines. */}
-          <div className="flex flex-col items-center gap-0 text-center" style={{ lineHeight: 0.9 }}>
-            <p className="text-base font-bold">{formSettings.orgName}</p>
-            <p className="text-base font-bold">{formSettings.maintenanceFormTitle}</p>
-            <p className="text-sm">{formSettings.fiscalYearLabel}</p>
-            {formDepartment && <p className="mt-0.5 text-sm">กลุ่มงาน: {formDepartment}</p>}
+              PRINT_FONT_FAMILY) bakes an unusually tall line box into its
+              own font metrics, taller than line-height: 1 alone can
+              correct. An explicit ratio below 1 on the inline style (which
+              wins over any leading-* class) is what actually closes that
+              up; 0.9 was picked as tight as it gets before Thai tone
+              marks/vowel signs risk visually touching the line above.
+              gap-0 removes the flex gap entirely, and fontSize here now
+              comes from ReportSettings.printHeaderFontSizePt (see
+              headerFontSizePt above) instead of the old fixed
+              text-base/text-sm classes, so this line-height is the only
+              thing controlling the space between lines regardless of that
+              setting's value. */}
+          <div
+            className="flex flex-col items-center gap-0 text-center"
+            style={{ lineHeight: 0.9, fontSize: `${headerFontSizePt}pt` }}
+          >
+            <p className="font-bold">{formSettings.orgName}</p>
+            <p className="font-bold">{formSettings.maintenanceFormTitle}</p>
+            <p>{formSettings.fiscalYearLabel}</p>
+            {formDepartment && <p className="mt-0.5">กลุ่มงาน: {formDepartment}</p>}
           </div>
 
           <div className="mt-4">

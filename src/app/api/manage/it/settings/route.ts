@@ -58,9 +58,10 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
     "acknowledgerName",
     "acknowledgerPosition",
     "acknowledgerDepartment",
-    "printFontFamily",
     "printFontSizePt",
+    "printHeaderFontSizePt",
     "printTableFontSizePx",
+    "printLetterSpacingPx",
   ];
   const out: Partial<ReportSettings> = {};
   for (const key of stringKeys) {
@@ -68,14 +69,16 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
     if (typeof b[key] !== "string") return null;
     out[key] = (b[key] as string).trim();
   }
-  // printFontFamily blank would silently undo the whole point of the
-  // setting (the print-area would just fall back to the browser's plain
-  // default), and printFontSizePt/printTableFontSizePx each have to
-  // actually parse to a sane size for MaintenanceReportBuilder's inline
-  // styles — reject the save rather than let any of them through broken.
-  if (out.printFontFamily !== undefined && out.printFontFamily === "") return null;
+  // Each of these has to actually parse to a sane size/offset for
+  // MaintenanceReportBuilder's inline styles — reject the save rather
+  // than let any of them through broken.
   if (out.printFontSizePt !== undefined) {
     const n = Number(out.printFontSizePt);
+    if (!Number.isFinite(n) || n < 8 || n > 36) return null;
+  }
+  if (out.printHeaderFontSizePt !== undefined) {
+    const n = Number(out.printHeaderFontSizePt);
+    // Same 8–36 range as printFontSizePt — kept in sync deliberately.
     if (!Number.isFinite(n) || n < 8 || n > 36) return null;
   }
   if (out.printTableFontSizePx !== undefined) {
@@ -83,6 +86,12 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
     // Same 7–20px range MaintenanceReportBuilder's printTableFontSizePx
     // helper clamps to at render time — kept in sync deliberately.
     if (!Number.isFinite(n) || n < 7 || n > 20) return null;
+  }
+  if (out.printLetterSpacingPx !== undefined) {
+    const n = Number(out.printLetterSpacingPx);
+    // Same -2–5px range MaintenanceReportBuilder's printLetterSpacingPx
+    // helper clamps to at render time — kept in sync deliberately.
+    if (!Number.isFinite(n) || n < -2 || n > 5) return null;
   }
   if (b.actionOptions !== undefined) {
     if (!Array.isArray(b.actionOptions) || !b.actionOptions.every((x) => typeof x === "string")) return null;
