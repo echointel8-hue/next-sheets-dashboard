@@ -18,6 +18,7 @@ import {
   RectangleVertical,
   Save,
   Settings,
+  Sparkles,
   Trash2,
   Wrench,
   X,
@@ -181,6 +182,128 @@ function printBodyFontSizePt(raw: string): number {
 function printTableFontSizePx(raw: string): number {
   const n = Number(raw);
   return Number.isFinite(n) && n >= 7 && n <= 20 ? n : 11;
+}
+
+/** The printed equipment table's column widths (% of table width, in
+ * ลำดับ / หมายเลขครุภัณฑ์ / รายการครุภัณฑ์ / สถานที่ตั้ง /
+ * ผู้รับผิดชอบครุภัณฑ์ / การดำเนินการ / ผลการตรวจสอบโดย IT order) before
+ * "ปรับความกว้างคอลัมน์ให้พอดีอัตโนมัติ" (see computeAutoTableColumnWidths
+ * and autoFitTableColumns below) is ever clicked, and what "คืนค่าเริ่มต้น"
+ * resets back to. A fixed best-guess, same as this table always used
+ * before the auto-fit button existed — it works reasonably for typical
+ * data but, unlike auto-fit, doesn't adapt to what's actually selected.
+ * Must sum to 100. */
+const DEFAULT_TABLE_COLUMN_WIDTHS = [4, 13, 20, 14, 14, 14, 21];
+
+/** One row's worth of the fields computeAutoTableColumnWidths actually
+ * needs to measure — a narrow slice of SelectedRow so the function isn't
+ * coupled to that whole type. */
+interface AutoFitTableRow {
+  assetNumber: string;
+  equipmentType: string;
+  brandModel: string;
+  department: string;
+  location: string;
+  responsiblePerson: string;
+}
+
+/** Measures every printed table column's actual current content — column
+ * headers, every selected row's cell text, and this round's
+ * printActionOptions/the (static) ผลการตรวจสอบโดย IT checkbox labels —
+ * through a scratch, never-attached &lt;canvas&gt; 2D context, so the
+ * measurement goes through the exact same font resolution (including TH
+ * SarabunPSK's own fallback behavior on a computer that doesn't have it
+ * installed, see printFontFamily) that the browser will use to actually
+ * render/print the table. Converts those pixel widths into proportional
+ * percentages that sum to 100, so a column with short content this round
+ * (e.g. หมายเลขครุภัณฑ์) shrinks and a column with long content (e.g.
+ * สถานที่ตั้ง, which otherwise wraps to two lines and looks cramped)
+ * grows — instead of every printout using the same fixed guess
+ * (DEFAULT_TABLE_COLUMN_WIDTHS) no matter what's actually in it. Returns
+ * null if canvas 2D isn't available (a locked-down browser) — the caller
+ * keeps whatever widths were already in effect rather than fail loudly
+ * over what's just a layout convenience. */
+function computeAutoTableColumnWidths(
+  rows: AutoFitTableRow[],
+  actionLabels: string[],
+  fontFamily: string,
+  baseSizePx: number,
+  secondarySizePx: number,
+  tertiarySizePx: number
+): number[] | null {
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) return null;
+
+  function widthOf(text: string, sizePx: number, weight: "400" | "500"): number {
+    ctx!.font = `${weight} ${sizePx}px ${fontFamily}`;
+    return ctx!.measureText(text).width;
+  }
+
+  // Cell padding (px-1 py-1) plus a little breathing room so measured
+  // text never sits flush against its own cell border.
+  const PAD = 14;
+
+  const headers = [
+    "ลำดับ",
+    "หมายเลขครุภัณฑ์",
+    "รายการครุภัณฑ์",
+    "สถานที่ตั้ง",
+    "ผู้รับผิดชอบครุภัณฑ์",
+    "การดำเนินการ",
+    "ผลการตรวจสอบโดย IT",
+  ];
+  const required = headers.map((h) => widthOf(h, baseSizePx, "500") + PAD);
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    required[0] = Math.max(required[0], widthOf(String(i + 1), baseSizePx, "400") + PAD);
+    required[1] = Math.max(required[1], widthOf(r.assetNumber || "—", secondarySizePx, "400") + PAD);
+    required[2] = Math.max(
+      required[2],
+      widthOf(r.equipmentType || "—", baseSizePx, "500") + PAD,
+      widthOf(r.brandModel, tertiarySizePx, "400") + PAD
+    );
+    required[3] = Math.max(
+      required[3],
+      widthOf(r.department, tertiarySizePx, "400") + PAD,
+      widthOf(r.location || "—", baseSizePx, "400") + PAD
+    );
+    required[4] = Math.max(required[4], widthOf(r.responsiblePerson || "—", baseSizePx, "400") + PAD);
+  }
+
+  const actionWidth = actionLabels.reduce(
+    (max, label) => Math.max(max, widthOf(`☐ ${label}`, secondarySizePx, "400")),
+    0
+  );
+  required[5] = Math.max(required[5], actionWidth + PAD);
+
+  // Static labels (never affected by the sheet's own data) — still
+  // measured rather than hard-coded so a locale/font change is reflected
+  // too. Laid out as a 2-column grid (grid-cols-2 gap-x-1), so the column
+  // needs roughly two of the widest single item side by side plus the
+  // gap between them.
+  const itCheckLabels = ["☐ ปกติ", "☐ เปลี่ยนอะไหล่ ................", "☐ ส่งซ่อม", "☐ อื่นๆ ระบุ ....................."];
+  const itCheckMax = itCheckLabels.reduce(
+    (max, label) => Math.max(max, widthOf(label, secondarySizePx, "400")),
+    0
+  );
+  required[6] = Math.max(required[6], itCheckMax * 2 + 4 + PAD);
+
+  const total = required.reduce((sum, w) => sum + w, 0);
+  if (total <= 0) return null;
+
+  const MIN_PCT = 4;
+  const raw = required.map((w) => (w / total) * 100);
+  // Every column gets its proportional share, except a floor of MIN_PCT%
+  // for whichever ends up thinnest (realistically only ลำดับ, a 1–3 digit
+  // index) — the shortfall to reach that floor is taken back out of every
+  // other column in proportion to how much room it has above the floor,
+  // so the whole row still sums to exactly 100.
+  const deficit = raw.reduce((sum, p) => sum + Math.max(MIN_PCT - p, 0), 0);
+  if (deficit === 0) return raw;
+  const donors = raw.reduce((sum, p) => sum + Math.max(p - MIN_PCT, 0), 0);
+  if (donors <= 0) return raw;
+  return raw.map((p) => (p < MIN_PCT ? MIN_PCT : p - ((p - MIN_PCT) / donors) * deficit));
 }
 
 /** Full names, in the same index order as THAI_MONTHS_SHORT — used only for
@@ -927,6 +1050,15 @@ export default function MaintenanceReportBuilder({
   const tableBaseFontSizePx = printTableFontSizePx(formSettings.printTableFontSizePx);
   const tableSecondaryFontSizePx = Math.max(tableBaseFontSizePx - 1, 6);
   const tableTertiaryFontSizePx = Math.max(tableBaseFontSizePx - 1.5, 6);
+  // null = DEFAULT_TABLE_COLUMN_WIDTHS (this table's original fixed
+  // guess). Set once "ปรับความกว้างคอลัมน์ให้พอดีอัตโนมัติ" is clicked
+  // below (see autoFitTableColumns) — deliberately not recomputed
+  // automatically on every selection/settings change, since re-measuring
+  // is only meaningful as an explicit "fit it now" action, not something
+  // that should silently reshuffle the table's layout while someone's
+  // still picking items. Not persisted — resets to the default on reload,
+  // same as excludedActionOptions above.
+  const [tableColumnWidths, setTableColumnWidths] = useState<number[] | null>(null);
   // Blank rows mid-edit in the settings modal never leak into the printed
   // table (cleanActionOptions), anything ซ่อน/hidden from the master list
   // (hiddenActionOptions) never appears on a printed form at all, and
@@ -936,6 +1068,24 @@ export default function MaintenanceReportBuilder({
   const printActionOptions = cleanActionOptions(formSettings.actionOptions)
     .filter((name) => !formSettings.hiddenActionOptions.includes(name))
     .filter((name) => !excludedActionOptions.includes(name));
+
+  /** "ปรับความกว้างคอลัมน์ให้พอดีอัตโนมัติ" button handler — measures the
+   * table exactly as it's about to render right now (current selectedRows,
+   * printActionOptions, font family/sizes) and applies the result. A no-op
+   * (silently, since this is just a layout convenience) if nothing's
+   * selected yet or canvas measurement isn't available. */
+  function autoFitTableColumns() {
+    if (selectedRows.length === 0) return;
+    const widths = computeAutoTableColumnWidths(
+      selectedRows,
+      printActionOptions,
+      formSettings.printFontFamily,
+      tableBaseFontSizePx,
+      tableSecondaryFontSizePx,
+      tableTertiaryFontSizePx
+    );
+    if (widths) setTableColumnWidths(widths);
+  }
   // One ผู้ตรวจสอบ block per department, then ผู้รับทราบ last — all rendered
   // from a single grid below so they pair up left/right instead of
   // ผู้รับทราบ always getting shoved onto its own row. See that grid's
@@ -1960,21 +2110,51 @@ export default function MaintenanceReportBuilder({
           </div>
 
           <div className="mt-4">
-            <p className="mb-2 font-semibold" style={{ fontSize: `${bodyFontSizePt}pt` }}>
-              ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา
-            </p>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 print:hidden">
+              <p className="font-semibold" style={{ fontSize: `${bodyFontSizePt}pt` }}>
+                ข้อมูลครุภัณฑ์ที่ดำเนินการบำรุงรักษา
+              </p>
+              {/* Screen-only controls (print:hidden) — a one-off "measure
+                  and fit now" action, not a live setting, so it never
+                  shows up on the printed page itself. See
+                  computeAutoTableColumnWidths/autoFitTableColumns above
+                  for what it actually does. */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={autoFitTableColumns}
+                  disabled={selectedRows.length === 0}
+                  title={
+                    selectedRows.length === 0
+                      ? "เลือกรายการครุภัณฑ์ก่อนจึงจะปรับความกว้างคอลัมน์ได้"
+                      : "วัดความกว้างข้อความจริงของแต่ละคอลัมน์ในรายการที่เลือกอยู่ แล้วปรับสัดส่วนให้พอดี"
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  <Sparkles size={13} strokeWidth={2} aria-hidden="true" />
+                  ปรับความกว้างคอลัมน์ให้พอดีอัตโนมัติ
+                </button>
+                {tableColumnWidths && (
+                  <button
+                    type="button"
+                    onClick={() => setTableColumnWidths(null)}
+                    title="คืนความกว้างคอลัมน์กลับเป็นค่าเริ่มต้น"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                  >
+                    <X size={12} strokeWidth={2.5} aria-hidden="true" />
+                    คืนค่าเริ่มต้น
+                  </button>
+                )}
+              </div>
+            </div>
             <table
               className="w-full border-collapse leading-snug"
               style={{ fontSize: `${tableBaseFontSizePx}px` }}
             >
               <colgroup>
-                <col className="w-[4%]" />
-                <col className="w-[13%]" />
-                <col className="w-[20%]" />
-                <col className="w-[14%]" />
-                <col className="w-[14%]" />
-                <col className="w-[14%]" />
-                <col className="w-[21%]" />
+                {(tableColumnWidths ?? DEFAULT_TABLE_COLUMN_WIDTHS).map((pct, i) => (
+                  <col key={i} style={{ width: `${pct}%` }} />
+                ))}
               </colgroup>
               <thead>
                 <tr>
