@@ -5,7 +5,12 @@ import { getSpecStandards, updateSpecStandards, type SpecOptionLists } from "@/l
 // Always live — a low-traffic settings screen, not a hot path.
 export const dynamic = "force-dynamic";
 
-const OPTION_KEYS: (keyof SpecOptionLists)[] = ["ramCapacityOptions", "ramSpeedOptions", "storageTypeOptions"];
+const OPTION_KEYS: (keyof SpecOptionLists)[] = [
+  "ramCapacityOptions",
+  "ramSpeedOptions",
+  "storageTypeOptions",
+  "storageCapacityOptions",
+];
 
 function requireSession(request: NextRequest) {
   const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
@@ -16,18 +21,19 @@ function requireSession(request: NextRequest) {
 }
 
 /**
- * Dropdown choices for "ความจุ RAM"/"ความเร็ว RAM"/"ประเภทหน่วยจัดเก็บ" —
- * shown in BulkEditSpecModal and EquipmentFormModal via EditableSelect.
- * Stored in the same SpecStandards tab as /manage/it's auto-evaluation
- * thresholds (see getSpecStandards/updateSpecStandards, lib/sheets.ts) but
- * this route is deliberately open to every logged-in account, not just
- * canAccessItDashboard — EquipmentFormModal is the shared add/edit form
- * reachable from the general /manage table too (admin/superadmin), and the
- * hospital asked that anyone filling in these fields can add a new choice
- * on the spot, not just IT. It only ever reads/writes these three list
- * fields — the numeric thresholds (minRamCapacityGb, minRamType,
- * requireSsd) stay editable through /api/manage/it/spec-standards alone,
- * which keeps its existing canAccessItDashboard gate untouched.
+ * Dropdown choices for "ความจุ RAM"/"ความเร็ว RAM"/"ประเภทหน่วยจัดเก็บ"/
+ * "ความจุจัดเก็บ" — shown in BulkEditSpecModal and EquipmentFormModal via
+ * EditableSelect. Stored in the same SpecStandards tab as /manage/it's
+ * auto-evaluation thresholds (see getSpecStandards/updateSpecStandards,
+ * lib/sheets.ts) but this route is deliberately open to every logged-in
+ * account, not just canAccessItDashboard — EquipmentFormModal is the shared
+ * add/edit form reachable from the general /manage table too
+ * (admin/superadmin), and the hospital asked that anyone filling in these
+ * fields can add a new choice on the spot, not just IT. It only ever
+ * reads/writes these four list fields — the numeric thresholds
+ * (minRamCapacityGb, minRamType, requireSsd) stay editable through
+ * /api/manage/it/spec-standards alone, which keeps its existing
+ * canAccessItDashboard gate untouched.
  */
 export async function GET(request: NextRequest) {
   const { session, response } = requireSession(request);
@@ -39,6 +45,7 @@ export async function GET(request: NextRequest) {
       ramCapacityOptions: standards.ramCapacityOptions,
       ramSpeedOptions: standards.ramSpeedOptions,
       storageTypeOptions: standards.storageTypeOptions,
+      storageCapacityOptions: standards.storageCapacityOptions,
     };
     return NextResponse.json(options);
   } catch (err: unknown) {
@@ -64,7 +71,7 @@ function readPayload(body: unknown): Partial<SpecOptionLists> | null {
   return out;
 }
 
-/** Adds/updates one or more of the three option lists — requires the
+/** Adds/updates one or more of the four option lists — requires the
  * SpecStandards tab to already exist (see updateSpecStandards), unlike GET
  * which tolerates a missing tab by returning defaults. */
 export async function PATCH(request: NextRequest) {
@@ -88,6 +95,7 @@ export async function PATCH(request: NextRequest) {
       ramCapacityOptions: standards.ramCapacityOptions,
       ramSpeedOptions: standards.ramSpeedOptions,
       storageTypeOptions: standards.storageTypeOptions,
+      storageCapacityOptions: standards.storageCapacityOptions,
     };
     return NextResponse.json(options);
   } catch (err: unknown) {

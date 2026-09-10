@@ -1151,11 +1151,17 @@ export async function getSpecStandards(): Promise<SpecStandards> {
     ramCapacityOptions: [...DEFAULT_SPEC_STANDARDS.ramCapacityOptions],
     ramSpeedOptions: [...DEFAULT_SPEC_STANDARDS.ramSpeedOptions],
     storageTypeOptions: [...DEFAULT_SPEC_STANDARDS.storageTypeOptions],
+    storageCapacityOptions: [...DEFAULT_SPEC_STANDARDS.storageCapacityOptions],
   };
   for (const key of SPEC_STANDARDS_KEYS) {
     const v = stored.get(key);
     if (v === undefined || v.trim() === "") continue;
-    if (key === "ramCapacityOptions" || key === "ramSpeedOptions" || key === "storageTypeOptions") {
+    if (
+      key === "ramCapacityOptions" ||
+      key === "ramSpeedOptions" ||
+      key === "storageTypeOptions" ||
+      key === "storageCapacityOptions"
+    ) {
       // JSON array, not plain text — same convention as
       // ReportSettings.actionOptions (see getReportSettings above).
       try {
@@ -1188,7 +1194,12 @@ export async function updateSpecStandards(updates: Partial<SpecStandards>): Prom
       valueInputOption: "USER_ENTERED",
       requestBody: {
         values: SPEC_STANDARDS_KEYS.map((key) => {
-          if (key === "ramCapacityOptions" || key === "ramSpeedOptions" || key === "storageTypeOptions") {
+          if (
+            key === "ramCapacityOptions" ||
+            key === "ramSpeedOptions" ||
+            key === "storageTypeOptions" ||
+            key === "storageCapacityOptions"
+          ) {
             return [key, JSON.stringify(merged[key])];
           }
           return [key, merged[key]];

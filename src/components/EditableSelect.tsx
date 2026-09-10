@@ -39,11 +39,15 @@ export default function EditableSelect({
   value: string;
   onChange: (value: string) => void;
   options: string[];
-  /** Persists `value` into the shared option list. Resolves to false (and
-   * the control stays in "adding" mode with an inline error) if the save
-   * failed — a network hiccup or a permission error never silently drops
-   * what the person just typed. */
-  onAddOption: (value: string) => Promise<boolean>;
+  /** Persists `value` into the shared option list. Resolves to
+   * `{ ok: true }` on success; on failure resolves to `{ ok: false, error }`
+   * with a message worth actually showing (e.g. "the SpecStandards tab
+   * doesn't exist yet — create it first") — the control stays in "adding"
+   * mode with that message shown inline, rather than a generic "failed, try
+   * again" that hides *why* and leaves someone guessing. A network hiccup
+   * or a permission error never silently drops what the person just typed
+   * either way. */
+  onAddOption: (value: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   placeholder?: string;
   addLabel?: string;
   newValuePlaceholder?: string;
@@ -61,10 +65,10 @@ export default function EditableSelect({
     if (!trimmed) return;
     setSaving(true);
     setError(null);
-    const ok = await onAddOption(trimmed);
+    const result = await onAddOption(trimmed);
     setSaving(false);
-    if (!ok) {
-      setError("เพิ่มตัวเลือกไม่สำเร็จ กรุณาลองใหม่");
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
     onChange(trimmed);

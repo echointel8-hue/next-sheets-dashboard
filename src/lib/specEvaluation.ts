@@ -48,6 +48,9 @@ export interface SpecStandards {
   /** Dropdown choices for "ประเภทของหน่วยจัดเก็บข้อมูล (Storage Type)" —
    * same extensible-list behavior as ramCapacityOptions above. */
   storageTypeOptions: string[];
+  /** Dropdown choices for "ขนาดความจุรวมของพื้นที่จัดเก็บข้อมูล (Capacity)"
+   * — same extensible-list behavior as ramCapacityOptions above. */
+  storageCapacityOptions: string[];
 }
 
 export const DEFAULT_SPEC_STANDARDS: SpecStandards = {
@@ -71,20 +74,26 @@ export const DEFAULT_SPEC_STANDARDS: SpecStandards = {
     "5600 MHz",
   ],
   storageTypeOptions: ["HDD", "SSD (SATA)", "SSD (M.2 NVMe)", "eMMC"],
+  // Common total-storage capacities across HDD/SSD, low to high.
+  storageCapacityOptions: ["120 GB", "128 GB", "240 GB", "250 GB", "256 GB", "500 GB", "512 GB", "1 TB", "2 TB", "4 TB"],
 };
 
-/** The three PC spec fields above that are wired to an extensible dropdown
+/** The four PC spec fields above that are wired to an extensible dropdown
  * (EditableSelect.tsx) instead of free text. Callers that only need to
  * read/offer the option lists — not the auto-evaluation thresholds above —
  * take this narrower shape rather than the full SpecStandards; see
  * ManageDashboard/ITDashboard, which pass it down to EquipmentFormModal/
  * BulkEditSpecModal. */
-export type SpecOptionLists = Pick<SpecStandards, "ramCapacityOptions" | "ramSpeedOptions" | "storageTypeOptions">;
+export type SpecOptionLists = Pick<
+  SpecStandards,
+  "ramCapacityOptions" | "ramSpeedOptions" | "storageTypeOptions" | "storageCapacityOptions"
+>;
 
 export const SPEC_OPTION_LIST_KEYS: (keyof SpecOptionLists)[] = [
   "ramCapacityOptions",
   "ramSpeedOptions",
   "storageTypeOptions",
+  "storageCapacityOptions",
 ];
 
 const RAM_TYPE_RANK: Record<string, number> = {

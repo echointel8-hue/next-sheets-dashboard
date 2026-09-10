@@ -39,14 +39,13 @@ function readStandardsPayload(body: unknown): Partial<SpecStandards> | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
   // Deliberately excludes ramCapacityOptions/ramSpeedOptions/
-  // storageTypeOptions — those three are edited through the more broadly
-  // reachable /api/manage/spec-options instead (see that route's own
-  // comment for why), not this it-only route.
-  const allowedKeys: Exclude<keyof SpecStandards, "ramCapacityOptions" | "ramSpeedOptions" | "storageTypeOptions">[] = [
-    "minRamCapacityGb",
-    "minRamType",
-    "requireSsd",
-  ];
+  // storageTypeOptions/storageCapacityOptions — those four are edited
+  // through the more broadly reachable /api/manage/spec-options instead
+  // (see that route's own comment for why), not this it-only route.
+  const allowedKeys: Exclude<
+    keyof SpecStandards,
+    "ramCapacityOptions" | "ramSpeedOptions" | "storageTypeOptions" | "storageCapacityOptions"
+  >[] = ["minRamCapacityGb", "minRamType", "requireSsd"];
   const out: Partial<SpecStandards> = {};
   for (const key of allowedKeys) {
     if (b[key] === undefined) continue;

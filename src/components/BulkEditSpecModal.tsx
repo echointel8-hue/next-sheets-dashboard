@@ -35,13 +35,13 @@ const FIELD_CONFIG: { key: BulkFieldKey; label: string; options?: string[]; exte
   { key: "model", label: "รุ่น" },
   { key: "processor", label: "หน่วยประมวลผล" },
   { key: "ramType", label: "ประเภท RAM", options: RAM_TYPE_CHOICES },
-  // These three used to be free text — now an EditableSelect (see
+  // These four used to be free text — now an EditableSelect (see
   // extensibleOptionsKey below) whose choices live in SpecStandards and can
   // be extended right from the dropdown, unlike ramType's fixed list above.
   { key: "ramCapacity", label: "ความจุ RAM", extensibleOptionsKey: "ramCapacityOptions" },
   { key: "ramSpeed", label: "ความเร็ว RAM", extensibleOptionsKey: "ramSpeedOptions" },
   { key: "storageType", label: "ประเภทหน่วยจัดเก็บ", extensibleOptionsKey: "storageTypeOptions" },
-  { key: "storageCapacity", label: "ความจุจัดเก็บ" },
+  { key: "storageCapacity", label: "ความจุจัดเก็บ", extensibleOptionsKey: "storageCapacityOptions" },
 ];
 
 /**
@@ -63,13 +63,15 @@ export default function BulkEditSpecModal({
   onSaved,
 }: {
   rowNumbers: number[];
-  /** Current choices for ความจุ RAM / ความเร็ว RAM / ประเภทหน่วยจัดเก็บ —
-   * see EditableSelect and /api/manage/spec-options. */
+  /** Current choices for ความจุ RAM / ความเร็ว RAM / ประเภทหน่วยจัดเก็บ /
+   * ความจุจัดเก็บ — see EditableSelect and /api/manage/spec-options. */
   specOptions: SpecOptionLists;
   /** Persists a newly-typed value into the shared list named by `key` —
    * see ITDashboard's addSpecOption, which PATCHes /api/manage/spec-options
-   * and keeps this modal's specOptions prop in sync afterward. */
-  onAddSpecOption: (key: keyof SpecOptionLists, value: string) => Promise<boolean>;
+   * and keeps this modal's specOptions prop in sync afterward. Resolves
+   * `{ ok: false, error }` (never a bare boolean) so EditableSelect can show
+   * the actual reason a save failed, not just "something went wrong". */
+  onAddSpecOption: (key: keyof SpecOptionLists, value: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   onClose: () => void;
   /** Fired once, right after a successful save, so the caller can patch its
    * own row state immediately — the modal stays open afterward to show the

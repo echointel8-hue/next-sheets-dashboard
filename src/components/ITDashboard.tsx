@@ -518,19 +518,24 @@ export default function ITDashboard({
   // Open to this account regardless of role (canAccessItDashboard already
   // gates this whole page) — see /api/manage/spec-options for why this
   // route itself has no extra permission check.
-  async function addSpecOption(key: keyof SpecOptionLists, value: string): Promise<boolean> {
+  async function addSpecOption(
+    key: keyof SpecOptionLists,
+    value: string
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
     try {
       const res = await fetch("/api/manage/spec-options", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [key]: [...specStandards[key], value] }),
       });
-      if (!res.ok) return false;
-      const json = await res.json();
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        return { ok: false, error: (json && json.error) || "เพิ่มตัวเลือกไม่สำเร็จ กรุณาลองใหม่" };
+      }
       setSpecStandards((prev) => ({ ...prev, ...json }));
-      return true;
+      return { ok: true };
     } catch {
-      return false;
+      return { ok: false, error: "เพิ่มตัวเลือกไม่สำเร็จ — ตรวจสอบการเชื่อมต่อแล้วลองใหม่" };
     }
   }
 

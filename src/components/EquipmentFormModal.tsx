@@ -16,11 +16,13 @@ import MultiSelectField from "@/components/MultiSelectField";
 import EditableSelect from "@/components/EditableSelect";
 import type { SpecOptionLists } from "@/lib/sheets";
 
-// Exact header text for the 3 PC spec fields wired to an extensible
+// Exact header text for the 4 PC spec fields wired to an extensible
 // dropdown (see EditableSelect) instead of free text — same indices
 // BulkEditSpecModal.tsx / lib/specEvaluation.ts use into
-// PC_ONLY_FIELD_HEADERS: 3 = storage type, 6 = RAM capacity, 7 = RAM speed.
+// PC_ONLY_FIELD_HEADERS: 3 = storage type, 4 = storage capacity, 6 = RAM
+// capacity, 7 = RAM speed.
 const STORAGE_TYPE_HEADER = PC_ONLY_FIELD_HEADERS[3];
+const STORAGE_CAPACITY_HEADER = PC_ONLY_FIELD_HEADERS[4];
 const RAM_CAPACITY_HEADER = PC_ONLY_FIELD_HEADERS[6];
 const RAM_SPEED_HEADER = PC_ONLY_FIELD_HEADERS[7];
 
@@ -77,14 +79,15 @@ export default function EquipmentFormModal({
    * entirely, the field just skips the live hint and relies on that
    * server check alone. */
   existingRows?: { rowNumber: number; values: Record<string, string> }[];
-  /** Current choices for ความจุ RAM / ความเร็ว RAM / ประเภทหน่วยจัดเก็บ —
-   * see EditableSelect and /api/manage/spec-options. */
+  /** Current choices for ความจุ RAM / ความเร็ว RAM / ประเภทหน่วยจัดเก็บ /
+   * ความจุจัดเก็บ — see EditableSelect and /api/manage/spec-options. */
   specOptions: SpecOptionLists;
   /** Persists a newly-typed value into the shared list named by `key` —
    * see ManageDashboard's/ITDashboard's addSpecOption, which PATCHes
    * /api/manage/spec-options and keeps this modal's specOptions prop in
-   * sync afterward. */
-  onAddSpecOption: (key: keyof SpecOptionLists, value: string) => Promise<boolean>;
+   * sync afterward. Resolves `{ ok: false, error }` (never a bare boolean)
+   * so EditableSelect can show the actual reason a save failed. */
+  onAddSpecOption: (key: keyof SpecOptionLists, value: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   onClose: () => void;
   onSaved: (result: EquipmentFormResult) => void;
 }) {
@@ -287,25 +290,27 @@ export default function EquipmentFormModal({
                 );
               }
 
-              // ความจุ RAM / ความเร็ว RAM / ประเภทหน่วยจัดเก็บ — used to be
-              // free text; now an extensible dropdown (see EditableSelect)
-              // seeded from SpecStandards.ramCapacityOptions/ramSpeedOptions/
-              // storageTypeOptions and growable right from the control by
-              // anyone filling in this form, not just IT (see
-              // /api/manage/spec-options). Kept separate from the
-              // SELECT_FIELD_CONFIGS-driven branch below since those lists
-              // are fixed and admin-only where extensible at all
-              // (actionOptions-style), while these three are meant to grow
-              // from ordinary use.
+              // ความจุ RAM / ความเร็ว RAM / ประเภทหน่วยจัดเก็บ / ความจุจัดเก็บ
+              // — used to be free text; now an extensible dropdown (see
+              // EditableSelect) seeded from SpecStandards.ramCapacityOptions/
+              // ramSpeedOptions/storageTypeOptions/storageCapacityOptions and
+              // growable right from the control by anyone filling in this
+              // form, not just IT (see /api/manage/spec-options). Kept
+              // separate from the SELECT_FIELD_CONFIGS-driven branch below
+              // since those lists are fixed and admin-only where extensible
+              // at all (actionOptions-style), while these four are meant to
+              // grow from ordinary use.
               const trimmedHeader = header.trim();
               const extensibleOptionsKey: keyof SpecOptionLists | null =
                 trimmedHeader === STORAGE_TYPE_HEADER.trim()
                   ? "storageTypeOptions"
-                  : trimmedHeader === RAM_CAPACITY_HEADER.trim()
-                    ? "ramCapacityOptions"
-                    : trimmedHeader === RAM_SPEED_HEADER.trim()
-                      ? "ramSpeedOptions"
-                      : null;
+                  : trimmedHeader === STORAGE_CAPACITY_HEADER.trim()
+                    ? "storageCapacityOptions"
+                    : trimmedHeader === RAM_CAPACITY_HEADER.trim()
+                      ? "ramCapacityOptions"
+                      : trimmedHeader === RAM_SPEED_HEADER.trim()
+                        ? "ramSpeedOptions"
+                        : null;
               if (extensibleOptionsKey) {
                 return (
                   <label key={header} className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">

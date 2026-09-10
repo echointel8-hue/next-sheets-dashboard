@@ -149,6 +149,7 @@ export default function ManageDashboard({
     ramCapacityOptions: DEFAULT_SPEC_STANDARDS.ramCapacityOptions,
     ramSpeedOptions: DEFAULT_SPEC_STANDARDS.ramSpeedOptions,
     storageTypeOptions: DEFAULT_SPEC_STANDARDS.storageTypeOptions,
+    storageCapacityOptions: DEFAULT_SPEC_STANDARDS.storageCapacityOptions,
   });
 
   useEffect(() => {
@@ -168,19 +169,24 @@ export default function ManageDashboard({
     };
   }, []);
 
-  async function addSpecOption(key: keyof SpecOptionLists, value: string): Promise<boolean> {
+  async function addSpecOption(
+    key: keyof SpecOptionLists,
+    value: string
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
     try {
       const res = await fetch("/api/manage/spec-options", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [key]: [...specOptions[key], value] }),
       });
-      if (!res.ok) return false;
-      const json = (await res.json()) as SpecOptionLists;
-      setSpecOptions((prev) => ({ ...prev, ...json }));
-      return true;
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        return { ok: false, error: (json && json.error) || "เพิ่มตัวเลือกไม่สำเร็จ กรุณาลองใหม่" };
+      }
+      setSpecOptions((prev) => ({ ...prev, ...(json as SpecOptionLists) }));
+      return { ok: true };
     } catch {
-      return false;
+      return { ok: false, error: "เพิ่มตัวเลือกไม่สำเร็จ — ตรวจสอบการเชื่อมต่อแล้วลองใหม่" };
     }
   }
 
