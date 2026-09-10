@@ -442,21 +442,6 @@ export default function MaintenanceReportBuilder({
 
   const colorForAction = (name: string): ActionColor => colorForActionShared(actionColorMap, name);
 
-  // Legend shown above the picker table — every action that got its own
-  // palette color, plus a single "อื่นๆ" entry standing in for however many
-  // additional distinct actions overflowed into ACTION_OTHER_COLOR (never
-  // one legend row per overflowing action — that would just repeat the same
-  // gray swatch over and over).
-  const actionLegend = useMemo(() => {
-    const primary: { name: string; color: ActionColor }[] = [];
-    let hasOther = false;
-    for (const [name, color] of actionColorMap.entries()) {
-      if (color === ACTION_OTHER_COLOR) hasOther = true;
-      else primary.push({ name, color });
-    }
-    return { primary, hasOther };
-  }, [actionColorMap]);
-
   // Re-derives the "กำลังบำรุงรักษาโดย ..." / "เสร็จสิ้นล่าสุดโดย ..." badge
   // lookups, plus a plain per-equipment visit count (visitCounts — every
   // task counts once regardless of status, since printing the report is
@@ -1312,34 +1297,6 @@ export default function MaintenanceReportBuilder({
                 />
               </label>
             </div>
-            {(actionLegend.primary.length > 0 || actionLegend.hasOther) && (
-              <div
-                className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500 dark:text-zinc-400"
-                aria-label="คำอธิบายสีของรายการที่ดำเนินการในแถบ 12 เดือน"
-              >
-                <span className="text-zinc-400 dark:text-zinc-500">สีในแถบเดือน:</span>
-                {actionLegend.primary.map(({ name, color }) => (
-                  <span key={name} className="inline-flex items-center gap-1">
-                    <span
-                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
-                      style={actionColorStyle(color)}
-                      aria-hidden="true"
-                    />
-                    {name}
-                  </span>
-                ))}
-                {actionLegend.hasOther && (
-                  <span className="inline-flex items-center gap-1">
-                    <span
-                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
-                      style={actionColorStyle(ACTION_OTHER_COLOR)}
-                      aria-hidden="true"
-                    />
-                    อื่นๆ
-                  </span>
-                )}
-              </div>
-            )}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -1574,9 +1531,6 @@ export default function MaintenanceReportBuilder({
               <div>
                 <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                   เลือกรายการที่จะดำเนินการ (แสดงในแบบฟอร์มที่พิมพ์รอบนี้)
-                </p>
-                <p className="text-xs text-zinc-400">
-                  สลับเปิด/ปิดได้ทุกครั้งที่พิมพ์ ไม่กระทบรายการทั้งหมดที่ตั้งไว้ — จัดการ/เพิ่มรายการทั้งหมดได้ที่ &quot;ตั้งค่าแบบฟอร์มรายงาน&quot;
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
