@@ -1901,7 +1901,14 @@ export default function MaintenanceReportBuilder({
               (พิมพ์ซ้ำเมื่อ {formatThaiDate(new Date().toISOString().slice(0, 10))})
             </p>
           )}
-          <div className="flex flex-col items-center gap-1 text-center">
+          {/* leading-tight (rather than each line's own default line-height
+              from text-base/text-sm) is what actually tightens this up —
+              the configured print font (see printFontFamily) can carry a
+              taller default line-height than the browser's own sans-serif,
+              which read as too airy between these lines. gap-0.5 (down
+              from gap-1) trims the remaining space between the lines on
+              top of that. */}
+          <div className="flex flex-col items-center gap-0.5 text-center leading-tight">
             <p className="text-base font-bold">{formSettings.orgName}</p>
             <p className="text-base font-bold">{formSettings.maintenanceFormTitle}</p>
             <p className="text-sm">{formSettings.fiscalYearLabel}</p>
@@ -2007,14 +2014,17 @@ export default function MaintenanceReportBuilder({
             {signatureBlocks.map((block, idx) => (
               <div
                 key={block.key}
-                className={`flex flex-col items-center gap-1.5 print:break-inside-avoid ${
+                className={`flex flex-col items-center gap-1 leading-tight print:break-inside-avoid ${
                   signatureBlocks.length % 2 === 1 && idx === signatureBlocks.length - 1 ? "sm:col-span-2" : ""
                 }`}
               >
                 {/* pt-6 leaves blank room above the dotted line for an
                     actual pen signature — the dots alone (no space above
                     them) left no room to sign without touching the block
-                    above. */}
+                    above. leading-tight on the block above tightens the
+                    four lines below it (name/ตำแหน่ง/กลุ่มงาน), same
+                    "the configured print font's own line-height reads too
+                    airy" fix as the page header above. */}
                 <p className="pt-6">{block.heading}</p>
                 <p>{block.nameLine}</p>
                 <p>{block.positionLine}</p>
