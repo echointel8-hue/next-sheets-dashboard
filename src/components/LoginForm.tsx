@@ -7,11 +7,12 @@ import { AlertTriangle, Loader2, LogIn } from "lucide-react";
 const INPUT_CLASS =
   "h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100";
 
-/** Login form for the /manage area. Takes the post-login destination as a
- * plain prop (resolved server-side in app/login/page.tsx from the "next"
- * search param) rather than reading it here with useSearchParams, which
- * would require wrapping this in a Suspense boundary for production
- * builds. */
+/** Login form shared by every protected area of the app. Takes the
+ * post-login destination as a plain prop — app/login/page.tsx always
+ * passes "/menu" (the system-choice page) now, per the hospital's explicit
+ * request that every login land there regardless of which URL triggered
+ * the login redirect — kept as a prop rather than hard-coded here so the
+ * one call site stays the single place that decides it. */
 export default function LoginForm({ next }: { next: string }) {
   const router = useRouter();
   const [username, setUsername] = useState("");

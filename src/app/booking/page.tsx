@@ -19,7 +19,9 @@ export default async function BookingPage({
   const cookieStore = await cookies();
   const session = verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
   if (!session) {
-    redirect("/login?next=/booking");
+    // No "?next=..." — /login always lands on /menu after a fresh login now
+    // (see that page's own comment), so there's nothing for this param to do.
+    redirect("/login");
   }
 
   // Lets /menu's "ระบบจองรถ" / "ระบบจองห้องประชุม" cards land directly on

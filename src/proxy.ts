@@ -53,9 +53,11 @@ export function proxy(request: NextRequest) {
     if (isManageApi || isBookingApi) {
       return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
     }
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("next", pathname);
-    return NextResponse.redirect(loginUrl);
+    // No "?next=..." attached here (there used to be one) — /login always
+    // sends a freshly logged-in account to /menu regardless of which
+    // protected URL it originally tried to reach, per the hospital's
+    // explicit request. See src/app/login/page.tsx's own comment.
+    return NextResponse.redirect(new URL("/login", request.url));
   }
 
   const response = NextResponse.next();

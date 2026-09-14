@@ -1,22 +1,17 @@
 import LoginForm from "@/components/LoginForm";
 
-// Reads the request's search params fresh every time — nothing here should
-// ever be prerendered/cached.
-export const dynamic = "force-dynamic";
-
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ next?: string }>;
-}) {
-  const { next } = await searchParams;
-  // Only accept an in-app path — a "next" value like "https://evil.example"
-  // would otherwise turn this into an open redirect. Falls back to /menu —
-  // the post-login system-choice page — rather than straight into /manage,
-  // per the hospital's explicit request; a deep link into a specific
-  // protected page (proxy.ts redirecting to /login?next=...) still lands
-  // back on that exact page after login, unaffected by this default.
-  const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : "/menu";
-
-  return <LoginForm next={safeNext} />;
+// Every login always lands on /menu — the post-login system-choice page —
+// regardless of which URL the browser happened to be on when it hit the
+// login gate (a bookmarked /manage link, an idle-session bounce-back from
+// /booking, or just /login itself). This used to preserve a "next" deep
+// link (proxy.ts still attaches ?next=... when it redirects an
+// unauthenticated request here) so a session that expired mid-work on
+// /manage would land back on /manage after logging back in — but the
+// hospital found that surprising in practice (any bookmarked /manage URL
+// skipped the new menu entirely) and asked for the simpler, unconditional
+// behavior instead. Deliberately ignores any "next" search param rather
+// than reading it — see proxy.ts's own comment on why it's harmless that
+// it's still attached.
+export default function LoginPage() {
+  return <LoginForm next="/menu" />;
 }

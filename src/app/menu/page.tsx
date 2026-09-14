@@ -22,7 +22,10 @@ export default async function MenuPage() {
   const cookieStore = await cookies();
   const session = verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value);
   if (!session) {
-    redirect("/login?next=/menu");
+    // No "?next=..." needed — landing back on /login with no session just
+    // re-enters the normal flow, which already ends up here (/menu) once
+    // login succeeds.
+    redirect("/login");
   }
 
   return <MenuHub session={session} />;
