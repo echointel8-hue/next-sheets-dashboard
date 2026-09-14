@@ -28,6 +28,7 @@ import {
  *    /booking and /api/booking/* (vehicle/meeting-room booking) share this
  *    same "logged in or not" gate — every role is equally allowed in once
  *    logged in, so there's no additional role check anywhere for it.
+ *    /menu (the post-login system-choice page) shares the same gate too.
  *
  * Next.js 16 renamed the "middleware" file convention to "proxy", and
  * defaults it to the Node.js runtime (not Edge) — which is what makes it
@@ -42,10 +43,13 @@ export function proxy(request: NextRequest) {
   const isManageApi = pathname === "/api/manage" || pathname.startsWith("/api/manage/");
   const isBookingPage = pathname === "/booking" || pathname.startsWith("/booking/");
   const isBookingApi = pathname === "/api/booking" || pathname.startsWith("/api/booking/");
+  // The post-login system-choice page (see src/app/menu/page.tsx) — no API
+  // routes of its own, it just links out to /manage and /booking.
+  const isMenuPage = pathname === "/menu" || pathname.startsWith("/menu/");
 
   const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
 
-  if ((isManagePage || isManageApi || isBookingPage || isBookingApi) && !session) {
+  if ((isManagePage || isManageApi || isBookingPage || isBookingApi || isMenuPage) && !session) {
     if (isManageApi || isBookingApi) {
       return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
     }

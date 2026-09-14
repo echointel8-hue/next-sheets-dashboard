@@ -10,6 +10,7 @@ import {
   CalendarPlus,
   Car,
   DoorOpen,
+  LayoutGrid,
   Loader2,
   LogOut,
   MapPin,
@@ -65,13 +66,18 @@ function formatDateTime(raw: string): string {
 export default function BookingDashboard({
   session,
   initial,
+  initialType = "car",
 }: {
   session: { username: string; role: Role; department: string; isBootstrap: boolean };
   initial: BookingLoadResult;
+  /** Which tab to open on — set from the page's own ?type= search param so
+   * /menu's "ระบบจองรถ" / "ระบบจองห้องประชุม" cards land directly on the
+   * matching section instead of always opening on "จองรถ". */
+  initialType?: BookingResourceType;
 }) {
   const router = useRouter();
   const [data, setData] = useState<BookingLoadResult>(initial);
-  const [activeType, setActiveType] = useState<BookingResourceType>("car");
+  const [activeType, setActiveType] = useState<BookingResourceType>(initialType);
   const [resourceModal, setResourceModal] = useState<{ mode: "add" | "edit"; resource?: BookingResource } | null>(
     null
   );
@@ -202,6 +208,13 @@ export default function BookingDashboard({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/menu"
+              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              <LayoutGrid size={16} strokeWidth={2} aria-hidden="true" />
+              เมนูหลัก
+            </Link>
             {session.role === "it" ? (
               <Link
                 href="/manage/it"
