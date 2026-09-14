@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, requestAuditTag, verifySessionToken, type SessionPayload } from "@/lib/auth";
+import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog, createBookingResource, getBookingResources } from "@/lib/sheets";
 import type { BookingResourceType } from "@/lib/booking";
 
@@ -10,8 +10,18 @@ export const dynamic = "force-dynamic";
 /** Every logged-in account, any role — resource management was explicitly
  * opened up equally, see lib/booking.ts's top comment. Only "must be
  * logged in" is required, same shape as requireItAccess in
- * /api/manage/it/tasks but without the extra role check. */
-function requireSession(request: NextRequest): { session: SessionPayload | null; response: NextResponse | null } {
+ * /api/manage/it/tasks but without the extra role check.
+ *
+ * No explicit return type annotation here on purpose — leaving it to be
+ * inferred keeps the two branches a true discriminated union (session:
+ * null paired with a real response, vs. session: SessionPayload paired
+ * with response: null), which is what lets `if (!session) return
+ * response;` below narrow `response` to a non-null NextResponse. An
+ * explicit `{ session: ...; response: NextResponse | null }` annotation
+ * would flatten that into one shape and make `response` look possibly
+ * null everywhere, which Next's route-handler type (Response, never null)
+ * rejects. */
+function requireSession(request: NextRequest) {
   const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session) {
     return { session: null, response: NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 }) };

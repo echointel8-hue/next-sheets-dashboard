@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, requestAuditTag, verifySessionToken, type SessionPayload } from "@/lib/auth";
+import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { canCancelBooking } from "@/lib/booking";
 import { appendEditLog, cancelBooking, getBookings } from "@/lib/sheets";
 
 export const dynamic = "force-dynamic";
 
-function requireSession(request: NextRequest): { session: SessionPayload | null; response: NextResponse | null } {
+// No explicit return type here — see the identical helper's doc comment in
+// ../../resources/route.ts for why that matters for Next's route-handler
+// type checking.
+function requireSession(request: NextRequest) {
   const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session) {
     return { session: null, response: NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 }) };
