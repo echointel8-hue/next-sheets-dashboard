@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArrowLeft,
+  Calendar,
   Cpu,
   FileSpreadsheet,
   Filter,
@@ -517,6 +518,17 @@ export default function ManageDashboard({
             >
               <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
               แดชบอร์ดสาธารณะ
+            </Link>
+            {/* /booking (จองรถ/ห้องประชุม) is reachable by every logged-in
+                account, any role — not gated by isBootstrap like the links
+                below, per the hospital's explicit request that booking
+                rights are equal across every role. */}
+            <Link
+              href="/booking"
+              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              <Calendar size={16} strokeWidth={2} aria-hidden="true" />
+              จองรถ/ห้องประชุม
             </Link>
             {session.isBootstrap && (
               <Link

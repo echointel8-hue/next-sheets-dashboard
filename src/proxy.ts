@@ -25,6 +25,9 @@ import {
  *    logging in, same as before. Role-specific checks (superadmin-only
  *    routes like /manage/users) happen inside each page/route handler
  *    itself, not here — this layer only establishes "logged in or not."
+ *    /booking and /api/booking/* (vehicle/meeting-room booking) share this
+ *    same "logged in or not" gate — every role is equally allowed in once
+ *    logged in, so there's no additional role check anywhere for it.
  *
  * Next.js 16 renamed the "middleware" file convention to "proxy", and
  * defaults it to the Node.js runtime (not Edge) — which is what makes it
@@ -37,11 +40,13 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isManagePage = pathname === "/manage" || pathname.startsWith("/manage/");
   const isManageApi = pathname === "/api/manage" || pathname.startsWith("/api/manage/");
+  const isBookingPage = pathname === "/booking" || pathname.startsWith("/booking/");
+  const isBookingApi = pathname === "/api/booking" || pathname.startsWith("/api/booking/");
 
   const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
 
-  if ((isManagePage || isManageApi) && !session) {
-    if (isManageApi) {
+  if ((isManagePage || isManageApi || isBookingPage || isBookingApi) && !session) {
+    if (isManageApi || isBookingApi) {
       return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
     }
     const loginUrl = new URL("/login", request.url);

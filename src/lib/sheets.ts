@@ -5,17 +5,24 @@ import type { Role } from "@/lib/auth";
 import { DEFAULT_SPEC_STANDARDS, type SpecOptionLists, type SpecStandards } from "@/lib/specEvaluation";
 import { getLatestMaintenanceLogByAsset, type MaintenanceLogEntry } from "@/lib/maintenanceLog";
 import { resolveColorOrder } from "@/lib/actionColors";
+import {
+  hasBookingConflict,
+  isBookingCancelled,
+  type Booking,
+  type BookingResource,
+  type BookingResourceType,
+} from "@/lib/booking";
 
 export type { EquipmentRow, FieldMap };
 // Re-exported so existing callers can keep importing these types (and the
 // spec-standards defaults) from lib/sheets, where the Google Sheets
 // read/write for them lives — the definitions themselves live in the pure
-// lib/specEvaluation.ts / lib/maintenanceLog.ts modules so those stay safely
-// importable from client components (see each file's top comment). Server
-// code should generally still prefer importing the read/write functions
-// (getSpecStandards, getMaintenanceLog, etc.) from here.
+// lib/specEvaluation.ts / lib/maintenanceLog.ts / lib/booking.ts modules so
+// those stay safely importable from client components (see each file's top
+// comment). Server code should generally still prefer importing the
+// read/write functions (getSpecStandards, getMaintenanceLog, etc.) from here.
 export { DEFAULT_SPEC_STANDARDS, getLatestMaintenanceLogByAsset };
-export type { SpecStandards, SpecOptionLists, MaintenanceLogEntry };
+export type { SpecStandards, SpecOptionLists, MaintenanceLogEntry, Booking, BookingResource, BookingResourceType };
 
 // Each record pairs a row's data with its 1-based row number in the sheet
 // (data row index + 2, accounting for the header row at row 1). This is the
@@ -240,7 +247,13 @@ export type EditLogAction =
   | "จัดการผู้ใช้"
   | "เข้าสู่ระบบสำเร็จ"
   | "เข้าสู่ระบบล้มเหลว"
-  | "ออกจากระบบ";
+  | "ออกจากระบบ"
+  // Vehicle/meeting-room booking feature — see the BookingResources/
+  // Bookings tab section near the end of this file.
+  | "เพิ่มทรัพยากรจอง"
+  | "แก้ไขทรัพยากรจอง"
+  | "จองทรัพยากร"
+  | "ยกเลิกการจอง";
 
 /** Appends one row to the EditLog tab — header row (created ahead of time
  * by the sheet owner, not by this app; see the project setup notes) must be:
@@ -1423,4 +1436,353 @@ function columnLetter(index: number): string {
     n = Math.floor((n - 1) / 26);
   }
   return letters;
+}
+
+// ---------------------------------------------------------------------------
+// BookingResources / Bookings tabs — vehicle + meeting-room booking feature
+// ("ระบบจองรถ จองห้องประชุม"). Same manually-created-tab convention as every
+// other tab here: the sheet owner creates both by hand before anyone can
+// add a resource or make a booking. Reading tolerates either tab being
+// missing (just means "no resources/bookings yet"); writing requires the
+// relevant tab to exist. Any logged-in account, any role, can read/write
+// both — see lib/booking.ts's top comment for why there's no role gate.
+// ---------------------------------------------------------------------------
+
+const BOOKING_RESOURCES_HEADER_ROW = [
+  "ResourceId", "Type", "Name", "Detail", "Active", "CreatedAt", "CreatedByUsername",
+];
+
+const BOOKINGS_HEADER_ROW = [
+  "BookingId", "ResourceId", "ResourceType", "ResourceName", "StartTime", "EndTime",
+  "Purpose", "Destination", "Participants", "ContactPhone", "BookedByUsername",
+  "BookedByDisplayName", "Department", "CreatedAt", "CancelledAt", "CancelledByUsername",
+];
+
+function getBookingResourcesTab(): string {
+  return process.env.GOOGLE_SHEET_BOOKING_RESOURCES_TAB?.trim() || "BookingResources";
+}
+
+function getBookingsTab(): string {
+  return process.env.GOOGLE_SHEET_BOOKINGS_TAB?.trim() || "Bookings";
+}
+
+function parseBookingResourceType(raw: string): BookingResourceType {
+  return raw.trim() === "room" ? "room" : "car";
+}
+
+function rowToBookingResource(row: string[]): BookingResource {
+  const col = (i: number) => (row[i] ?? "").toString();
+  return {
+    resourceId: col(0).trim(),
+    type: parseBookingResourceType(col(1)),
+    name: col(2),
+    detail: col(3),
+    active: parseActive(col(4)),
+    createdAt: col(5),
+    createdByUsername: col(6),
+  };
+}
+
+function bookingResourceToRow(r: BookingResource): (string | number)[] {
+  return [r.resourceId, r.type, r.name, r.detail, r.active ? "Y" : "N", r.createdAt, r.createdByUsername];
+}
+
+function rowToBooking(row: string[]): Booking {
+  const col = (i: number) => (row[i] ?? "").toString();
+  return {
+    bookingId: col(0).trim(),
+    resourceId: col(1),
+    resourceType: parseBookingResourceType(col(2)),
+    resourceName: col(3),
+    startTime: col(4),
+    endTime: col(5),
+    purpose: col(6),
+    destination: col(7),
+    participants: Number(col(8)) || 0,
+    contactPhone: col(9),
+    bookedByUsername: col(10),
+    bookedByDisplayName: col(11),
+    department: col(12),
+    createdAt: col(13),
+    cancelledAt: col(14),
+    cancelledByUsername: col(15),
+  };
+}
+
+function bookingToRow(b: Booking): (string | number)[] {
+  return [
+    b.bookingId, b.resourceId, b.resourceType, b.resourceName, b.startTime, b.endTime,
+    b.purpose, b.destination, b.participants, b.contactPhone, b.bookedByUsername,
+    b.bookedByDisplayName, b.department, b.createdAt, b.cancelledAt, b.cancelledByUsername,
+  ];
+}
+
+/** Every resource (car + room, active + deactivated) — callers filter by
+ * type/active themselves, same rationale as getMaintenanceTasks. */
+export async function getBookingResources(): Promise<BookingResource[]> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getBookingResourcesTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:G100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      // Tab doesn't exist yet — no resources have ever been added.
+      return [];
+    }
+    throw new Error(`อ่านรายการรถ/ห้องประชุมไม่สำเร็จ: ${message}`);
+  }
+
+  return (values ?? [])
+    .filter((row) => (row[0] ?? "").toString().trim() !== "")
+    .map(rowToBookingResource);
+}
+
+/** Adds one new vehicle or meeting room. Throws a clear "create the tab
+ * first" Thai error if the BookingResources tab doesn't exist yet. */
+export async function createBookingResource(input: {
+  type: BookingResourceType;
+  name: string;
+  detail: string;
+  createdByUsername: string;
+}): Promise<BookingResource> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getBookingResourcesTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  const resource: BookingResource = {
+    resourceId: randomUUID(),
+    type: input.type,
+    name: input.name,
+    detail: input.detail,
+    active: true,
+    createdAt: new Date().toISOString(),
+    createdByUsername: input.createdByUsername,
+  };
+
+  try {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: `${tab}!A1`,
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: [bookingResourceToRow(resource)] },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      throw new Error(
+        `ยังไม่พบแท็บชื่อ "${tab}" ในสเปรดชีต — สร้างแท็บนี้ก่อน (หัวตาราง: ${BOOKING_RESOURCES_HEADER_ROW.join(" | ")}) หรือตั้งค่า GOOGLE_SHEET_BOOKING_RESOURCES_TAB ให้ตรงกับชื่อแท็บจริง`
+      );
+    }
+    throw new Error(`เพิ่มรถ/ห้องประชุมไม่สำเร็จ: ${message}`);
+  }
+
+  return resource;
+}
+
+/** Merges `updates` into the resource identified by `resourceId` and
+ * rewrites just that one sheet row — find-by-id scan, same reasoning as
+ * updateMaintenanceTask (another account could have added/removed a
+ * resource in between). Renaming/editing detail never touches past
+ * bookings' snapshotted resourceName; toggling `active` to false just
+ * removes it from the choosable list for *new* bookings (see
+ * getBookingResources callers in the API routes). */
+export async function updateBookingResource(
+  resourceId: string,
+  updates: Partial<Pick<BookingResource, "name" | "detail" | "active">>
+): Promise<BookingResource> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getBookingResourcesTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:G100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`อ่านรายการรถ/ห้องประชุมไม่สำเร็จ: ${message}`);
+  }
+
+  const rows = values ?? [];
+  const idx = rows.findIndex((row) => (row[0] ?? "").toString().trim() === resourceId);
+  if (idx === -1) {
+    throw new Error("ไม่พบรายการนี้ — อาจถูกลบไปแล้ว");
+  }
+  const merged: BookingResource = { ...rowToBookingResource(rows[idx]), ...updates };
+  const sheetRow = idx + 2;
+
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${tab}!A${sheetRow}:G${sheetRow}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [bookingResourceToRow(merged)] },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`บันทึกรถ/ห้องประชุมไม่สำเร็จ: ${message}`);
+  }
+
+  return merged;
+}
+
+/** Every booking (live + cancelled) across every resource — callers filter
+ * by resource/type/date range themselves, same rationale as
+ * getMaintenanceTasks. */
+export async function getBookings(): Promise<Booking[]> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getBookingsTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:P100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      // Tab doesn't exist yet — no bookings have ever been made.
+      return [];
+    }
+    throw new Error(`อ่านรายการจองไม่สำเร็จ: ${message}`);
+  }
+
+  return (values ?? [])
+    .filter((row) => (row[0] ?? "").toString().trim() !== "")
+    .map(rowToBooking);
+}
+
+/** Creates one booking, after re-checking for a time conflict against the
+ * *current* Bookings tab (never trust a conflict check the caller may have
+ * done earlier against a stale list — two accounts could race to book the
+ * same slot). Throws a clear Thai error on conflict, or a "create the tab
+ * first" error if the Bookings tab doesn't exist yet. Bookings confirm
+ * immediately — there is no approval step. */
+export async function createBooking(input: {
+  resourceId: string;
+  resourceType: BookingResourceType;
+  resourceName: string;
+  startTime: string;
+  endTime: string;
+  purpose: string;
+  destination: string;
+  participants: number;
+  contactPhone: string;
+  bookedByUsername: string;
+  bookedByDisplayName: string;
+  department: string;
+}): Promise<Booking> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getBookingsTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  const existing = await getBookings();
+  if (hasBookingConflict(existing, input.resourceId, input.startTime, input.endTime)) {
+    throw new Error("ช่วงเวลาที่เลือกถูกจองไปแล้ว กรุณาเลือกช่วงเวลาอื่นหรือทรัพยากรอื่น");
+  }
+
+  const booking: Booking = {
+    bookingId: randomUUID(),
+    resourceId: input.resourceId,
+    resourceType: input.resourceType,
+    resourceName: input.resourceName,
+    startTime: input.startTime,
+    endTime: input.endTime,
+    purpose: input.purpose,
+    destination: input.destination,
+    participants: input.participants,
+    contactPhone: input.contactPhone,
+    bookedByUsername: input.bookedByUsername,
+    bookedByDisplayName: input.bookedByDisplayName,
+    department: input.department,
+    createdAt: new Date().toISOString(),
+    cancelledAt: "",
+    cancelledByUsername: "",
+  };
+
+  try {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: `${tab}!A1`,
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: [bookingToRow(booking)] },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      throw new Error(
+        `ยังไม่พบแท็บชื่อ "${tab}" ในสเปรดชีต — สร้างแท็บนี้ก่อน (หัวตาราง: ${BOOKINGS_HEADER_ROW.join(" | ")}) หรือตั้งค่า GOOGLE_SHEET_BOOKINGS_TAB ให้ตรงกับชื่อแท็บจริง`
+      );
+    }
+    throw new Error(`บันทึกการจองไม่สำเร็จ: ${message}`);
+  }
+
+  return booking;
+}
+
+/** Soft-cancels one booking (sets CancelledAt/CancelledByUsername) rather
+ * than deleting the row — keeps the slot's history visible and matches the
+ * "จำหน่าย/ยกเลิกการจำหน่าย" pattern used for equipment elsewhere in this
+ * app. Find-by-id scan, same reasoning as updateMaintenanceTask. The
+ * permission check (creator or superadmin — see lib/booking.ts
+ * canCancelBooking) is the API route's job, not this function's; this just
+ * performs the write once the caller has already decided it's allowed. */
+export async function cancelBooking(bookingId: string, cancelledByUsername: string): Promise<Booking> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getBookingsTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:P100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`อ่านรายการจองไม่สำเร็จ: ${message}`);
+  }
+
+  const rows = values ?? [];
+  const idx = rows.findIndex((row) => (row[0] ?? "").toString().trim() === bookingId);
+  if (idx === -1) {
+    throw new Error("ไม่พบรายการจองนี้ — อาจถูกยกเลิกไปแล้ว");
+  }
+  const current = rowToBooking(rows[idx]);
+  if (isBookingCancelled(current)) {
+    throw new Error("รายการจองนี้ถูกยกเลิกไปแล้ว");
+  }
+  const merged: Booking = { ...current, cancelledAt: new Date().toISOString(), cancelledByUsername };
+  const sheetRow = idx + 2;
+
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${tab}!A${sheetRow}:P${sheetRow}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [bookingToRow(merged)] },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`ยกเลิกการจองไม่สำเร็จ: ${message}`);
+  }
+
+  return merged;
 }
