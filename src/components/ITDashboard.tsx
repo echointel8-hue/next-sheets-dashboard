@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Cpu,
+  FileSpreadsheet,
   Filter,
   Loader2,
   LogOut,
@@ -21,6 +22,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import {
   PC_ONLY_FIELD_HEADERS,
   PRINTER_ONLY_FIELD_HEADERS,
@@ -554,6 +556,42 @@ export default function ITDashboard({
     }
   }
 
+  /** Exports exactly what's currently on screen in both spec tables —
+   * pcRows/printerRows, i.e. after every active filter above (กลุ่มงาน,
+   * ประเภทครุภัณฑ์, สถานะ, เดือน/ปีบำรุงรักษา, and the RAM/หน่วยจัดเก็บ
+   * filters that only apply to the PC table) — as one .xlsx workbook with
+   * two sheets ("คอมพิวเตอร์" / "เครื่องพิมพ์"), using the exact same columns
+   * each SpecTable renders (see buildSpecTableExportRows above) plus
+   * เลขครุภัณฑ์. Runs entirely client-side, same pattern as
+   * ManageDashboard's own exportVisibleRowsToExcel. */
+  function exportSpecTablesToExcel() {
+    const pcExportRows = buildSpecTableExportRows({
+      rows: pcRows,
+      fields,
+      headers,
+      specColumns: pcSpecColumns,
+      showSpecStatus: true,
+      specStandards,
+      latestMaintenanceByAsset,
+      tasksByRowNumber,
+    });
+    const printerExportRows = buildSpecTableExportRows({
+      rows: printerRows,
+      fields,
+      headers,
+      specColumns: printerSpecColumns,
+      showSpecStatus: false,
+      specStandards,
+      latestMaintenanceByAsset,
+      tasksByRowNumber,
+    });
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(pcExportRows), "คอมพิวเตอร์");
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(printerExportRows), "เครื่องพิมพ์");
+    const stamp = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(workbook, `ครุภัณฑ์ไอที-${stamp}.xlsx`);
+  }
+
   return (
     <main className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 sm:px-6 lg:px-10">
       <div className="flex w-full max-w-[100rem] flex-col gap-6">
@@ -741,19 +779,32 @@ export default function ITDashboard({
                   <Filter size={15} strokeWidth={2} aria-hidden="true" />
                   ตัวกรองข้อมูล
                 </div>
-                {/* Report-template text settings (org name/form title/
-                    acknowledger) live on /manage/it/report itself now — that
-                    page already edits and can print with those values in
-                    the same place, so a separate entry point here would
-                    just be a second, easy-to-miss place to look for it. */}
-                <button
-                  type="button"
-                  onClick={() => setShowSpecSettings((v) => !v)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                  <Cpu size={14} strokeWidth={2} aria-hidden="true" />
-                  ตั้งค่ามาตรฐานสเปก
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={exportSpecTablesToExcel}
+                    disabled={pcRows.length === 0 && printerRows.length === 0}
+                    title="ส่งออกทั้งสองตารางที่กำลังแสดงอยู่ (ตามตัวกรองปัจจุบัน) เป็นไฟล์ Excel"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    <FileSpreadsheet size={14} strokeWidth={2} aria-hidden="true" />
+                    ส่งออก Excel
+                  </button>
+                  {/* Report-template text settings (org name/form title/
+                      acknowledger) live on /manage/it/report itself now —
+                      that page already edits and can print with those
+                      values in the same place, so a separate entry point
+                      here would just be a second, easy-to-miss place to
+                      look for it. */}
+                  <button
+                    type="button"
+                    onClick={() => setShowSpecSettings((v) => !v)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    <Cpu size={14} strokeWidth={2} aria-hidden="true" />
+                    ตั้งค่ามาตรฐานสเปก
+                  </button>
+                </div>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
                 <MultiSelect
@@ -964,6 +1015,100 @@ export default function ITDashboard({
       </div>
     </main>
   );
+}
+
+/** Plain-text equivalent of <SpecStatusBadge>'s visible label just below —
+ * same priority (a manual call always wins over the automatic evaluation)
+ * and exact same wording, used by the Excel export (exportSpecTablesToExcel)
+ * so its "สถานะสเปก" column reads identically to what's on screen. */
+function specStatusLabelText(
+  row: EquipmentRow,
+  headers: string[],
+  standards: SpecStandards,
+  manualStatus: MaintenanceLogEntry["manualSpecStatus"] | undefined
+): string {
+  if (manualStatus === "ต่ำกว่ามาตรฐาน") return "ต่ำกว่ามาตรฐาน (ประเมินเอง)";
+  if (manualStatus === "ปกติ") return "ปกติ (ประเมินเอง)";
+  const auto = evaluateRowSpec(row, headers, standards);
+  if (auto.unknown) return "ไม่ทราบ";
+  if (auto.belowStandard) return "ต่ำกว่ามาตรฐาน (ระบบประเมิน)";
+  return "ผ่านมาตรฐาน";
+}
+
+/** Plain-text equivalent of the "กำลังบำรุงรักษาโดย .../เสร็จสิ้นล่าสุดโดย
+ * ..." badge shown next to ยี่ห้อ/รุ่น in SpecTable's rows below — same
+ * pickInProgressTask/pickLastCompletedTask priority, used by the Excel
+ * export's "สถานะบำรุงรักษา" column. Returns "" when the row has no
+ * maintenance history at all (nothing shown on screen either). */
+function maintenanceStatusLabelText(rowNumber: number, tasksByRowNumber: Map<number, MaintenanceTask[]>): string {
+  const rowTasks = tasksByRowNumber.get(rowNumber) ?? [];
+  const inProgressTask = pickInProgressTask(rowTasks);
+  if (inProgressTask) {
+    return `กำลังบำรุงรักษาโดย ${inProgressTask.assignedToDisplayName || inProgressTask.assignedToUsername || "ไม่ทราบผู้ดำเนินการ"}`;
+  }
+  const lastCompletedTask = pickLastCompletedTask(rowTasks);
+  if (lastCompletedTask) {
+    const who = lastCompletedTask.assignedToDisplayName || lastCompletedTask.assignedToUsername || "ไม่ทราบผู้ดำเนินการ";
+    const when = lastCompletedTask.completedAt
+      ? ` เมื่อ ${new Date(lastCompletedTask.completedAt).toLocaleDateString("th-TH")}`
+      : "";
+    return `เสร็จสิ้นล่าสุดโดย ${who}${when}`;
+  }
+  return "";
+}
+
+interface SpecTableExportInput {
+  rows: ITRecord[];
+  fields: FieldMap | null;
+  headers: string[];
+  specColumns: SpecColumn[];
+  showSpecStatus: boolean;
+  specStandards: SpecStandards;
+  latestMaintenanceByAsset: Map<string, MaintenanceLogEntry>;
+  tasksByRowNumber: Map<number, MaintenanceTask[]>;
+}
+
+/** Builds one export row per equipment row, in the same column order
+ * SpecTable itself renders (see that component's <thead>/<tbody> below) —
+ * plus เลขครุภัณฑ์ up front, which SpecTable's own table doesn't carry as a
+ * column (department + ยี่ห้อ/รุ่น + the maintenance-status strip already
+ * identify a row well enough on screen) but which a real spreadsheet export
+ * needs to actually be useful, and a "สถานะบำรุงรักษา"/"สถานะสเปก" plain-text
+ * summary of what the strip/badge show visually. Used by
+ * exportSpecTablesToExcel for both the PC and printer tables — the only
+ * difference between the two calls is which rows/specColumns/showSpecStatus
+ * get passed in, same as the two <SpecTable> elements below. */
+function buildSpecTableExportRows({
+  rows,
+  fields,
+  headers,
+  specColumns,
+  showSpecStatus,
+  specStandards,
+  latestMaintenanceByAsset,
+  tasksByRowNumber,
+}: SpecTableExportInput): Record<string, string>[] {
+  return rows.map((r) => {
+    const disposed = fields ? cell(r.values, fields.status) === STATUS_DISPOSED : false;
+    const assetNumber = fields ? getAssetNumber(r.values, fields) : "";
+    const out: Record<string, string> = {
+      "เลขครุภัณฑ์": assetNumber,
+      "กลุ่มงาน": (fields && cell(r.values, fields.department)) || "",
+      "ยี่ห้อ / รุ่น": (fields && getBrandModel(r.values, fields)) || "",
+    };
+    for (const c of specColumns) {
+      out[c.label] = cell(r.values, c.header) || "";
+    }
+    out["สถานที่ / จุดติดตั้ง"] = (fields && cell(r.values, fields.installLocation)) || "";
+    out["ผู้ใช้งาน"] = (fields && getFullName(r.values, fields)) || "";
+    out["สถานะ"] = disposed ? "จำหน่ายแล้ว" : "ใช้งาน";
+    if (showSpecStatus && fields) {
+      const latest = assetNumber ? latestMaintenanceByAsset.get(assetNumber) : undefined;
+      out["สถานะสเปก"] = specStatusLabelText(r.values, headers, specStandards, latest?.manualSpecStatus);
+    }
+    out["สถานะบำรุงรักษา"] = maintenanceStatusLabelText(r.rowNumber, tasksByRowNumber);
+    return out;
+  });
 }
 
 /** สถานะสเปก badge — combines IT's own per-visit judgment call

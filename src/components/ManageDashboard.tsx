@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Cpu,
+  FileSpreadsheet,
   Filter,
   LogOut,
   Package,
@@ -20,6 +21,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import {
   STATUS_DISPOSED,
   classifyEquipmentType,
@@ -267,6 +269,46 @@ export default function ManageDashboard({
       router.push("/login");
       router.refresh();
     }
+  }
+
+  /** Exports exactly what's currently on screen — visibleRows, i.e. after
+   * the กลุ่มงาน/ประเภทครุภัณฑ์ filters above (and, for an admin account,
+   * already scoped server-side to their own department) — as one .xlsx
+   * file, using the exact same 9 columns/values the table itself renders
+   * (rowDisplay + dateOnly), not the raw underlying sheet headers, so the
+   * export always matches what a person is actually looking at. Runs
+   * entirely client-side (no server round-trip): builds the workbook with
+   * the `xlsx` (SheetJS) library and XLSX.writeFile triggers the browser's
+   * own download, same as an "hidden anchor -> click()" pattern. */
+  function exportVisibleRowsToExcel() {
+    if (!fields) return;
+    const exportRows = visibleRows.map((record) => {
+      const d = rowDisplay(record, fields);
+      return {
+        "ประทับเวลา": dateOnly(d.timestamp),
+        "กลุ่มงาน": d.department,
+        "ผู้ใช้งาน / ผู้รับผิดชอบ": d.fullName,
+        "เลขครุภัณฑ์": d.assetNumber,
+        "ประเภทครุภัณฑ์": d.equipmentType,
+        "ยี่ห้อ / รุ่น": d.brandModel,
+        "สถานที่ / จุดติดตั้งอุปกรณ์": d.installLocation,
+        "วันที่จัดซื้อ": d.purchaseDate,
+        "สถานะ": d.disposed ? "จำหน่ายแล้ว" : "ใช้งาน",
+      };
+    });
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    // Rough best-guess column widths (characters) — same 9 headers every
+    // time, so a fixed table beats measuring content like
+    // MaintenanceReportBuilder's canvas-based auto-fit does for its very
+    // different (print-layout) use case.
+    worksheet["!cols"] = [
+      { wch: 12 }, { wch: 18 }, { wch: 24 }, { wch: 14 }, { wch: 18 },
+      { wch: 20 }, { wch: 26 }, { wch: 12 }, { wch: 12 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "ครุภัณฑ์");
+    const stamp = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(workbook, `ครุภัณฑ์-${stamp}.xlsx`);
   }
 
   function openAdd() {
@@ -585,16 +627,28 @@ export default function ManageDashboard({
                   <Filter size={15} strokeWidth={2} aria-hidden="true" />
                   ตัวกรองข้อมูล
                 </div>
-                {isSuperadmin && (
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={openAdd}
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-4 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:from-[var(--brand-strong)]"
+                    onClick={exportVisibleRowsToExcel}
+                    disabled={visibleRows.length === 0}
+                    title="ส่งออกตารางที่กำลังแสดงอยู่ (ตามตัวกรองปัจจุบัน) เป็นไฟล์ Excel"
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-zinc-200 px-4 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                   >
-                    <Plus size={14} strokeWidth={2} aria-hidden="true" />
-                    เพิ่มครุภัณฑ์ใหม่
+                    <FileSpreadsheet size={14} strokeWidth={2} aria-hidden="true" />
+                    ส่งออก Excel
                   </button>
-                )}
+                  {isSuperadmin && (
+                    <button
+                      type="button"
+                      onClick={openAdd}
+                      className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-4 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:from-[var(--brand-strong)]"
+                    >
+                      <Plus size={14} strokeWidth={2} aria-hidden="true" />
+                      เพิ่มครุภัณฑ์ใหม่
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
                 {isSuperadmin && (
