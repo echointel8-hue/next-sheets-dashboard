@@ -51,6 +51,20 @@ export interface SessionPayload {
    * the Users tab / /manage/users UI always gets false here, even though
    * their role is also "superadmin". */
   isBootstrap: boolean;
+  /** Real Thai name (Users tab column E) looked up once at login time and
+   * carried in the session from then on — every authenticated page reads
+   * this straight off the already-verified cookie instead of each doing
+   * its own separate getUsers() lookup just to show a name (that used to
+   * happen on /manage/it/tasks and /manage/it/report specifically, and was
+   * also why the same account could show a different name — displayName
+   * on one page, bare username on another — depending on which page did
+   * or didn't bother with the lookup). Falls back to the bare username for
+   * the bootstrap account (env-configured, not a Users-tab row) and for
+   * any account with a blank displayName cell. Baked in at login rather
+   * than re-verified on every request — a superadmin renaming someone
+   * through /manage/users won't be reflected until that account's next
+   * login, an accepted tradeoff given the 5-minute idle session timeout. */
+  displayName: string;
   exp: number; // epoch ms
 }
 
@@ -151,6 +165,15 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
   ) {
     return null;
   }
+  // A cookie signed before displayName existed on SessionPayload simply
+  // won't have this field — tolerate that (fall back to the username)
+  // rather than rejecting the whole session and force-logging everyone out
+  // the moment this deploys. Resolves itself the next time that account
+  // logs in (a fresh cookie, minted with the real Users-tab displayName);
+  // until then this session just shows the bare username, same as before
+  // this feature existed — never worse, and self-limiting given the
+  // 5-minute idle session timeout.
+  if (typeof payload.displayName !== "string") payload.displayName = payload.username;
   if (Date.now() > payload.exp) return null;
   return payload;
 }

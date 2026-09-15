@@ -1,13 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, canAccessItDashboard, verifySessionToken } from "@/lib/auth";
-import {
-  getMaintenanceTasks,
-  getReportSettings,
-  getUsers,
-  DEFAULT_REPORT_SETTINGS,
-  type MaintenanceTask,
-} from "@/lib/sheets";
+import { getMaintenanceTasks, getReportSettings, DEFAULT_REPORT_SETTINGS, type MaintenanceTask } from "@/lib/sheets";
 import MaintenanceTasksBoard from "@/components/MaintenanceTasksBoard";
 
 export const dynamic = "force-dynamic";
@@ -32,10 +26,15 @@ export default async function ManageItTasksPage() {
     redirect("/manage");
   }
 
+  // These two reads don't depend on each other — run them together
+  // instead of one after the other so this page's total wait is however
+  // long the slower of the two takes, not their sum.
+  const [tasksResult, settingsResult] = await Promise.allSettled([getMaintenanceTasks(), getReportSettings()]);
+
   let tasks: MaintenanceTask[] = [];
   let loadError: string | null = null;
-  try {
-    const allTasks = await getMaintenanceTasks();
+  if (tasksResult.status === "fulfilled") {
+    const allTasks = tasksResult.value;
     // Per the hospital's request, a regular "it" account only ever sees its
     // own tasks here — "งานบำรุงรักษา" of one's own, not the whole team's.
     // The bootstrap superadmin account is the one exception, keeping the
@@ -43,44 +42,26 @@ export default async function ManageItTasksPage() {
     // stats/byAssignee comment) since that's still the only way anyone
     // leads/oversees the team here — there's no separate "หัวหน้า" role.
     tasks = session.isBootstrap ? allTasks : allTasks.filter((t) => t.assignedToUsername === session.username);
-  } catch (err) {
-    loadError = err instanceof Error ? err.message : String(err);
+  } else {
+    loadError = tasksResult.reason instanceof Error ? tasksResult.reason.message : String(tasksResult.reason);
   }
 
-  let actionOptions = DEFAULT_REPORT_SETTINGS.actionOptions;
-  let hiddenActionOptions = DEFAULT_REPORT_SETTINGS.hiddenActionOptions;
-  let detailRequiredActionOptions = DEFAULT_REPORT_SETTINGS.detailRequiredActionOptions;
-  let actionColorOrder = DEFAULT_REPORT_SETTINGS.actionColorOrder;
-  try {
-    const settings = await getReportSettings();
-    actionOptions = settings.actionOptions;
-    hiddenActionOptions = settings.hiddenActionOptions;
-    detailRequiredActionOptions = settings.detailRequiredActionOptions;
-    actionColorOrder = settings.actionColorOrder;
-  } catch {
-    // Fall back to the default single option — same tolerance as every
-    // other ReportSettings reader in this app.
-  }
-
-  // Shows a real Thai name in the page header instead of the bare login —
-  // same lookup/fallback as /manage/it/report's "ผู้ดำเนินการ" auto-fill.
-  let displayName = session.username;
-  try {
-    const users = await getUsers();
-    displayName = users.find((u) => u.username === session.username)?.displayName || session.username;
-  } catch {
-    // fall through with the bare username
-  }
+  // Falls back to the default single option — same tolerance as every
+  // other ReportSettings reader in this app.
+  const settings = settingsResult.status === "fulfilled" ? settingsResult.value : DEFAULT_REPORT_SETTINGS;
 
   return (
     <MaintenanceTasksBoard
-      session={{ username: session.username, displayName, isBootstrap: session.isBootstrap }}
+      // displayName comes straight off the session cookie now (looked up
+      // once at login — see the SessionPayload comment in lib/auth.ts)
+      // instead of a separate getUsers() call on every visit to this page.
+      session={{ username: session.username, displayName: session.displayName, isBootstrap: session.isBootstrap }}
       initialTasks={tasks}
       loadError={loadError}
-      actionOptions={actionOptions}
-      hiddenActionOptions={hiddenActionOptions}
-      detailRequiredActionOptions={detailRequiredActionOptions}
-      actionColorOrder={actionColorOrder}
+      actionOptions={settings.actionOptions}
+      hiddenActionOptions={settings.hiddenActionOptions}
+      detailRequiredActionOptions={settings.detailRequiredActionOptions}
+      actionColorOrder={settings.actionColorOrder}
     />
   );
 }

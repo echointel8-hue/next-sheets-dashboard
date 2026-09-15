@@ -24,9 +24,11 @@ function isError(data: LoadResult): data is { error: string } {
  */
 export default function UsersManager({
   username,
+  displayName,
   initial,
 }: {
   username: string;
+  displayName: string;
   initial: LoadResult;
 }) {
   const [data, setData] = useState<LoadResult>(initial);
@@ -51,6 +53,7 @@ export default function UsersManager({
     <AppShell
       roleLabel="Superadmin (Bootstrap)"
       username={username}
+      displayName={displayName}
       canAccessManage
       canManageUsers
       canAccessIt
@@ -66,7 +69,7 @@ export default function UsersManager({
           </span>
           <div>
             <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">จัดการผู้ใช้</h1>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{username} · superadmin</p>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{displayName || username} · superadmin</p>
           </div>
         </header>
 

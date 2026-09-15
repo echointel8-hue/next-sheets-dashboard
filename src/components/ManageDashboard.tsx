@@ -118,7 +118,7 @@ export default function ManageDashboard({
   session,
   initial,
 }: {
-  session: { username: string; role: Role; department: string; isBootstrap: boolean };
+  session: { username: string; displayName: string; role: Role; department: string; isBootstrap: boolean };
   initial: ManageLoadResult;
 }) {
   const [data, setData] = useState<ManageLoadResult>(initial);
@@ -479,6 +479,7 @@ export default function ManageDashboard({
     <AppShell
       roleLabel={roleLabelFor(session.role, session.department, session.isBootstrap)}
       username={session.username}
+      displayName={session.displayName}
       canAccessManage={session.role !== "it"}
       canManageUsers={session.isBootstrap}
       canAccessIt={canAccessItDashboardClient(session.role, session.isBootstrap)}
@@ -497,7 +498,7 @@ export default function ManageDashboard({
               จัดการข้อมูลครุภัณฑ์
             </h1>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              {session.username} ·{" "}
+              {session.displayName || session.username} ·{" "}
               {isSuperadmin ? "superadmin (ทุกกลุ่มงาน)" : `admin · ${session.department}`}
             </p>
           </div>

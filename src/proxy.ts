@@ -80,6 +80,7 @@ function refreshSessionCookie(response: NextResponse, session: SessionPayload) {
     role: session.role,
     department: session.department,
     isBootstrap: session.isBootstrap,
+    displayName: session.displayName,
   });
   response.cookies.set(SESSION_COOKIE, refreshed, {
     httpOnly: true,

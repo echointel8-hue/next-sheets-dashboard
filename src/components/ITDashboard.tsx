@@ -146,7 +146,7 @@ export default function ITDashboard({
   actionColorOrder,
   initialSpecStandards,
 }: {
-  session: { username: string; isBootstrap: boolean };
+  session: { username: string; displayName: string; isBootstrap: boolean };
   initial: ITLoadResult;
   initialMaintenanceLog: MaintenanceLogEntry[];
   /** Every MaintenanceTask ever created (any equipment, any ปี) — feeds the
@@ -583,6 +583,7 @@ export default function ITDashboard({
     <AppShell
       roleLabel={session.isBootstrap ? "Superadmin (Bootstrap)" : "IT"}
       username={session.username}
+      displayName={session.displayName}
       canAccessManage={session.isBootstrap}
       canManageUsers={session.isBootstrap}
       canAccessIt
@@ -600,7 +601,7 @@ export default function ITDashboard({
             <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">
               ระบบงาน IT
             </h1>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{session.username}</p>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{session.displayName || session.username}</p>
           </div>
         </header>
 

@@ -50,7 +50,21 @@ function getEnv(name: string): string {
   return value;
 }
 
-function sheetsAuth() {
+// Reused across every getXxx()/appendXxx()/updateXxx() call in this module
+// (25+ call sites) instead of constructing a fresh GoogleAuth every time —
+// GoogleAuth caches its OAuth2 access token internally and only re-fetches
+// once it's near expiry, so sharing one instance turns "N sheet reads on
+// one page load" from N separate token-exchange-then-API-call round trips
+// into one token fetch (or zero, once warm) plus N plain API calls. This is
+// the biggest lever on this app's page-load latency — a page like
+// /manage/it makes 5 of these calls on a single load. Safe to share: this
+// module holds no per-request state, and every call still goes through its
+// own getEnv() checks either way. Module-level, so it lives for the life of
+// the server process (or, on Vercel, however long that serverless instance
+// stays warm) — never per-request.
+let cachedAuth: ReturnType<typeof createSheetsAuth> | null = null;
+
+function createSheetsAuth() {
   const clientEmail = getEnv("GOOGLE_SERVICE_ACCOUNT_EMAIL");
   const privateKey = getEnv("GOOGLE_PRIVATE_KEY").replace(/\\n/g, "\n");
 
@@ -66,6 +80,13 @@ function sheetsAuth() {
     // will fail write calls with 403.
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
+}
+
+function sheetsAuth() {
+  if (!cachedAuth) {
+    cachedAuth = createSheetsAuth();
+  }
+  return cachedAuth;
 }
 
 /**

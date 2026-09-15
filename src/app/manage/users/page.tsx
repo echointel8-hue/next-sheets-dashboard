@@ -39,5 +39,5 @@ export default async function ManageUsersPage() {
     initial = { error: err instanceof Error ? err.message : String(err) };
   }
 
-  return <UsersManager username={session.username} initial={initial} />;
+  return <UsersManager username={session.username} displayName={session.displayName} initial={initial} />;
 }

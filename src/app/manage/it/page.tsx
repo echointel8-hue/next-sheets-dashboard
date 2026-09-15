@@ -35,14 +35,22 @@ export default async function ManageItPage() {
     redirect("/manage");
   }
 
+  // Five independent reads — none of them depend on another's result, so
+  // run them all together instead of one after another. This page used to
+  // await each in turn (5 separate round trips to Google Sheets back to
+  // back); now its total wait is however long the single slowest one
+  // takes, which is what actually made /manage/it feel slow to load.
+  const [equipmentResult, logResult, specResult, tasksResult, settingsResult] = await Promise.allSettled([
+    getEquipmentDataUnredacted(),
+    getMaintenanceLog(),
+    getSpecStandards(),
+    getMaintenanceTasks(),
+    getReportSettings(),
+  ]);
+
   let initial: ITDashboardData | { error: string };
-  let maintenanceLog: MaintenanceLogEntry[] = [];
-  let specStandards: SpecStandards | null = null;
-  let maintenanceTasks: MaintenanceTask[] = [];
-  let actionOptions: string[] = [];
-  let actionColorOrder: string[] = [];
-  try {
-    const snapshot = await getEquipmentDataUnredacted();
+  if (equipmentResult.status === "fulfilled") {
+    const snapshot = equipmentResult.value;
     // Deleted rows never reach any /manage view, IT included — same rule
     // as /api/manage/records and the general /manage table.
     const notDeleted = snapshot.rows.filter((r) => !isDeleted(r.data, snapshot.fields));
@@ -55,21 +63,18 @@ export default async function ManageItPage() {
         snapshotHash: rowSnapshotHash(snapshot.headers, r.data),
       })),
     };
-  } catch (err) {
-    initial = { error: err instanceof Error ? err.message : String(err) };
+  } else {
+    initial = { error: equipmentResult.reason instanceof Error ? equipmentResult.reason.message : String(equipmentResult.reason) };
   }
 
   // Report-template text (org name/form title/acknowledger) is fetched by
   // /manage/it/report itself now, not here — see that page. Both of these
   // tolerate a missing sheet tab on their own (empty history / default
-  // thresholds); this try/catch only guards an unexpected network/auth
-  // failure from also breaking the rest of this page.
-  try {
-    maintenanceLog = await getMaintenanceLog();
-    specStandards = await getSpecStandards();
-  } catch {
-    // Fall back to empty history + defaults, same rationale as above.
-  }
+  // thresholds); falling back to an empty/null value here only covers an
+  // unexpected network/auth failure from also breaking the rest of this
+  // page.
+  const maintenanceLog: MaintenanceLogEntry[] = logResult.status === "fulfilled" ? logResult.value : [];
+  const specStandards: SpecStandards | null = specResult.status === "fulfilled" ? specResult.value : null;
 
   // Feeds the new "แดชบอร์ดงานบำรุงรักษา" summary (per-IT-account totals)
   // and the read-only status strip embedded in each spec table's
@@ -77,23 +82,14 @@ export default async function ManageItPage() {
   // as maintenanceLog/specStandards above: a missing/unreachable
   // MaintenanceTasks or ReportSettings tab just means an empty dashboard
   // section and colorless strips, not a broken page.
-  try {
-    maintenanceTasks = await getMaintenanceTasks();
-  } catch {
-    // Fall through with an empty list.
-  }
-  try {
-    const settings = await getReportSettings();
-    actionOptions = settings.actionOptions;
-    actionColorOrder = settings.actionColorOrder;
-  } catch {
-    // Fall through with no colors — MaintenanceStatusStrip still renders
-    // fine (everything just falls into ACTION_OTHER_COLOR).
-  }
+  const maintenanceTasks: MaintenanceTask[] = tasksResult.status === "fulfilled" ? tasksResult.value : [];
+  const actionOptions: string[] = settingsResult.status === "fulfilled" ? settingsResult.value.actionOptions : [];
+  const actionColorOrder: string[] =
+    settingsResult.status === "fulfilled" ? settingsResult.value.actionColorOrder : [];
 
   return (
     <ITDashboard
-      session={{ username: session.username, isBootstrap: session.isBootstrap }}
+      session={{ username: session.username, displayName: session.displayName, isBootstrap: session.isBootstrap }}
       initial={initial}
       initialMaintenanceLog={maintenanceLog}
       initialMaintenanceTasks={maintenanceTasks}

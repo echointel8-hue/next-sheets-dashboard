@@ -28,7 +28,7 @@ interface MenuItem {
 export default function MenuHub({
   session,
 }: {
-  session: { username: string; role: Role; department: string; isBootstrap: boolean };
+  session: { username: string; displayName: string; role: Role; department: string; isBootstrap: boolean };
 }) {
   const items: MenuItem[] = [
     {
@@ -55,6 +55,7 @@ export default function MenuHub({
     <AppShell
       roleLabel={roleLabelFor(session.role, session.department, session.isBootstrap)}
       username={session.username}
+      displayName={session.displayName}
       canAccessManage={session.role !== "it"}
       canManageUsers={session.isBootstrap}
       canAccessIt={canAccessItDashboardClient(session.role, session.isBootstrap)}
@@ -66,7 +67,7 @@ export default function MenuHub({
               เลือกระบบที่ต้องการใช้งาน
             </h1>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              {session.username} · {session.role}
+              {session.displayName || session.username} · {session.role}
               {session.department ? ` · ${session.department}` : ""}
             </p>
           </header>

@@ -62,7 +62,7 @@ export default function BookingDashboard({
   initial,
   initialType = "car",
 }: {
-  session: { username: string; role: Role; department: string; isBootstrap: boolean };
+  session: { username: string; displayName: string; role: Role; department: string; isBootstrap: boolean };
   initial: BookingLoadResult;
   /** Which tab to open on — set from the page's own ?type= search param so
    * /menu's "ระบบจองรถ" / "ระบบจองห้องประชุม" cards land directly on the
@@ -197,6 +197,7 @@ export default function BookingDashboard({
     <AppShell
       roleLabel={roleLabelFor(session.role, session.department, session.isBootstrap)}
       username={session.username}
+      displayName={session.displayName}
       canAccessManage={session.role !== "it"}
       canManageUsers={session.isBootstrap}
       canAccessIt={canAccessItDashboardClient(session.role, session.isBootstrap)}
@@ -215,7 +216,7 @@ export default function BookingDashboard({
               ระบบจองรถ / ห้องประชุม
             </h1>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              {session.username} · {session.role}
+              {session.displayName || session.username} · {session.role}
               {session.department ? ` · ${session.department}` : ""}
             </p>
           </div>

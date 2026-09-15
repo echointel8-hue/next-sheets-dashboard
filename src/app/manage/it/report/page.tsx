@@ -5,8 +5,8 @@ import {
   getEquipmentDataUnredacted,
   getMaintenanceTasks,
   getReportSettings,
-  getUsers,
   DEFAULT_REPORT_SETTINGS,
+  type MaintenanceTask,
 } from "@/lib/sheets";
 import { isDeleted, isDisposed, TITLE_PREFIX_OPTIONS } from "@/lib/fields";
 import { rowSnapshotHash } from "@/lib/recordHash";
@@ -70,10 +70,19 @@ export default async function ManageItReportPage({
     redirect("/manage");
   }
 
+  // These three reads are independent of each other — run them together
+  // instead of one after another so this page's total wait is however long
+  // the slowest of the three takes, not their sum.
+  const [equipmentResult, settingsResult, tasksResult] = await Promise.allSettled([
+    getEquipmentDataUnredacted(),
+    getReportSettings(),
+    getMaintenanceTasks(),
+  ]);
+
   let items: ReportEquipmentItem[] = [];
   let loadError: string | null = null;
-  try {
-    const snapshot = await getEquipmentDataUnredacted();
+  if (equipmentResult.status === "fulfilled") {
+    const snapshot = equipmentResult.value;
     items = snapshot.rows
       .filter((r) => !isDeleted(r.data, snapshot.fields) && !isDisposed(r.data, snapshot.fields))
       .map((r) => {
@@ -115,30 +124,14 @@ export default async function ManageItReportPage({
           canSaveResponsiblePerson: Boolean(f.fullNameHeader) || Boolean(f.titlePrefixHeader && f.nameHeader),
         };
       });
-  } catch (err) {
-    loadError = err instanceof Error ? err.message : String(err);
+  } else {
+    loadError = equipmentResult.reason instanceof Error ? equipmentResult.reason.message : String(equipmentResult.reason);
   }
 
-  let settings = DEFAULT_REPORT_SETTINGS;
-  try {
-    settings = await getReportSettings();
-  } catch {
-    // Fall back to defaults — getReportSettings already does this
-    // internally for a missing tab, so this only guards an unexpected
-    // network/auth failure from also breaking the report page.
-  }
-
-  // Auto-fills "ผู้ดำเนินการ" on the printed form with a real Thai name
-  // instead of a blank line to hand-fill — falls back to the bare login
-  // string if the Users tab is unreachable or has no matching row (e.g. the
-  // env-configured bootstrap account, which isn't a Users-tab row at all).
-  let displayName = session.username;
-  try {
-    const users = await getUsers();
-    displayName = users.find((u) => u.username === session.username)?.displayName || session.username;
-  } catch {
-    // fall through with the bare username
-  }
+  // Falls back to defaults either way — getReportSettings already does
+  // this internally for a missing tab, so this only guards an unexpected
+  // network/auth failure from also breaking the report page.
+  const settings = settingsResult.status === "fulfilled" ? settingsResult.value : DEFAULT_REPORT_SETTINGS;
 
   // Feeds the "กำลังบำรุงรักษาโดย ..." / "เสร็จสิ้นล่าสุดโดย ..." badges in
   // the equipment picker below. Every task is sent down (not just the
@@ -153,10 +146,10 @@ export default async function ManageItReportPage({
   // One entry per taskId named in reprintTaskIds that still exists — see
   // MaintenanceReportBuilder's ReprintTaskInfo/isReprint for what this
   // drives. Deliberately looked up from the very same getMaintenanceTasks()
-  // call as taskHistory just below, rather than a second read.
+  // result as taskHistory just below, rather than a second read.
   let reprintTasks: ReprintTaskInfo[] = [];
-  try {
-    const tasks = await getMaintenanceTasks();
+  if (tasksResult.status === "fulfilled") {
+    const tasks: MaintenanceTask[] = tasksResult.value;
     taskHistory = tasks.map((t) => ({
       equipmentRowNumber: t.equipmentRowNumber,
       status: t.status,
@@ -210,16 +203,20 @@ export default async function ManageItReportPage({
         ];
       }
     }
-  } catch {
-    // Fall through with no badges, and no reprint pre-fill.
   }
+  // else: fall through with no badges, and no reprint pre-fill — same
+  // tolerance as before (a missing MaintenanceTasks tab, or any other read
+  // failure, just means no badges this load, not a broken report page).
 
   return (
     <MaintenanceReportBuilder
       items={items}
       loadError={loadError}
       settings={settings}
-      currentUser={{ username: session.username, displayName, isBootstrap: session.isBootstrap }}
+      // displayName comes straight off the session cookie now (looked up
+      // once at login — see the SessionPayload comment in lib/auth.ts)
+      // instead of a separate getUsers() call on every visit to this page.
+      currentUser={{ username: session.username, displayName: session.displayName, isBootstrap: session.isBootstrap }}
       taskHistory={taskHistory}
       reprintTasks={reprintTasks}
     />

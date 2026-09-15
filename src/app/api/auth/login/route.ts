@@ -57,6 +57,10 @@ interface Matched {
   role: Role;
   department: string;
   isBootstrap: boolean;
+  /** See the displayName comment on SessionPayload (lib/auth.ts) — looked
+   * up once, right here, from the very same Users-tab row this function
+   * already fetched to check the password, so it costs nothing extra. */
+  displayName: string;
 }
 
 /** The bootstrap account (env-configured) always works, independent of the
@@ -69,7 +73,9 @@ function checkBootstrapAccount(username: string, password: string): Matched | nu
   if (!bootstrapUsername || !bootstrapHash) return null;
   if (username !== bootstrapUsername) return null;
   if (!verifyPassword(password, bootstrapHash)) return null;
-  return { username, role: "superadmin", department: "", isBootstrap: true };
+  // No Users-tab row backs the bootstrap account, so there's no display
+  // name to look up — the bare username is the best available label.
+  return { username, role: "superadmin", department: "", isBootstrap: true, displayName: username };
 }
 
 export async function POST(request: NextRequest) {
@@ -107,7 +113,13 @@ export async function POST(request: NextRequest) {
         // Always false here — even a "superadmin" role user from the
         // Users tab is not the bootstrap account, so it can't manage
         // other users. See the isBootstrap comment on SessionPayload.
-        matched = { username: user.username, role: user.role, department: user.department, isBootstrap: false };
+        matched = {
+          username: user.username,
+          role: user.role,
+          department: user.department,
+          isBootstrap: false,
+          displayName: user.displayName || user.username,
+        };
       }
     } catch (err: unknown) {
       // Users tab missing/misconfigured — fall through to the generic
