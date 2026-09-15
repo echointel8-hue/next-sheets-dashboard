@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Loader2, LogIn } from "lucide-react";
 
@@ -47,9 +48,22 @@ export default function LoginForm({ next }: { next: string }) {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[var(--page-bg)] px-4">
       <div className="w-full max-w-sm rounded-2xl border border-emerald-900/10 bg-white p-6 shadow-sm dark:border-emerald-400/10 dark:bg-zinc-900">
-        <h1 className="mb-6 text-xl font-bold text-zinc-950 dark:text-zinc-50">
-          เข้าสู่ระบบบริหารจัดการ โรงพยาบาลท่าตะเกียบ
-        </h1>
+        <div className="mb-6 flex flex-col items-center text-center">
+          {/* เดียวกับตราสัญลักษณ์ที่ใช้บนแดชบอร์ดสาธารณะ (Dashboard.tsx) —
+              public/logo.png ไฟล์เดียวกัน ใช้ซ้ำแทนการอัปโหลดไฟล์ใหม่ */}
+          <Image
+            src="/logo.png"
+            alt="ตราสัญลักษณ์โรงพยาบาลท่าตะเกียบ"
+            width={64}
+            height={64}
+            priority
+            className="h-16 w-16 object-contain"
+          />
+          <h1 className="mt-3 text-xl font-bold text-zinc-950 dark:text-zinc-50">
+            ระบบบริการอิเล็กทรอนิกส์กลางสำหรับบุคลากร
+          </h1>
+          <p className="mt-1 text-sm font-medium text-zinc-500 dark:text-zinc-400">โรงพยาบาลท่าตะเกียบ</p>
+        </div>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
             ชื่อผู้ใช้
