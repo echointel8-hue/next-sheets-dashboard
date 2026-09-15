@@ -1763,7 +1763,7 @@ export async function createBooking(input: {
 
   const existing = await getBookings();
   if (hasBookingConflict(existing, input.resourceId, input.startTime, input.endTime)) {
-    throw new Error("ช่วงเวลาที่เลือกถูกจองไปแล้ว กรุณาเลือกช่วงเวลาอื่นหรือทรัพยากรอื่น");
+    throw new Error("ช่วงเวลาที่เลือกถูกจองไปแล้ว กรุณาเลือกช่วงเวลาอื่น");
   }
 
   const booking: Booking = {
