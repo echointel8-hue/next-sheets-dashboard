@@ -387,10 +387,10 @@ function cleanActionOptions(list: string[]): string[] {
 const SETTINGS_FIELDS: { key: keyof ReportSettings; label: string }[] = [
   { key: "orgName", label: "ชื่อหน่วยงาน" },
   { key: "maintenanceFormTitle", label: "ชื่อแบบฟอร์ม" },
-  { key: "fiscalYearLabel", label: "ปีงบประมาณ (ข้อความแสดงผล)" },
+  { key: "fiscalYearLabel", label: "ปีงบประมาณ" },
   { key: "acknowledgerName", label: "ชื่อผู้รับทราบ" },
   { key: "acknowledgerPosition", label: "ตำแหน่งผู้รับทราบ" },
-  { key: "acknowledgerDepartment", label: "สังกัดผู้รับทราบ (แสดงใต้ตำแหน่ง)" },
+  { key: "acknowledgerDepartment", label: "สังกัดผู้รับทราบ" },
 ];
 
 export default function MaintenanceReportBuilder({
@@ -1452,7 +1452,7 @@ export default function MaintenanceReportBuilder({
                         />
                       </label>
                       <label className="flex flex-col gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-                        ระยะห่างระหว่างบรรทัดภาพรวม (เท่าของขนาดตัวอักษร)
+                        ระยะห่างระหว่างบรรทัดภาพรวม
                         <input
                           type="number"
                           min={0.7}
