@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -8,7 +9,6 @@ import {
   ClipboardList,
   DoorOpen,
   Globe,
-  Hospital,
   LayoutGrid,
   LogOut,
   Menu,
@@ -57,7 +57,9 @@ export interface AppShellProps {
   displayName?: string;
   /** Show "ครุภัณฑ์คอมพิวเตอร์" (/manage) in the sidebar. */
   canAccessManage: boolean;
-  /** Show "จัดการผู้ใช้" (/manage/users) in the sidebar — bootstrap only. */
+  /** Show "จัดการผู้ใช้" (/manage/users) in the sidebar — bootstrap only.
+   * Rendered in its own "ผู้ดูแลระบบ" section, separate from "ทะเบียนครุภัณฑ์"
+   * — user management isn't an equipment-registry function. */
   canManageUsers: boolean;
   /** Show "ระบบงาน IT" (/manage/it), with "งานบำรุงรักษา" (/manage/it/tasks)
    * nested underneath it as a sub-item — งานบำรุงรักษา (and its report at
@@ -107,14 +109,14 @@ export default function AppShell({
   const registryItems = canAccessManage
     ? [{ href: "/manage", label: "ครุภัณฑ์คอมพิวเตอร์", icon: Package, active: pathname === "/manage" }]
     : [];
-  if (canManageUsers) {
-    registryItems.push({
-      href: "/manage/users",
-      label: "จัดการผู้ใช้",
-      icon: Users,
-      active: pathname.startsWith("/manage/users"),
-    });
-  }
+
+  // "จัดการผู้ใช้" is an administration function (superadmin/bootstrap
+  // account management), not part of the equipment registry — kept as its
+  // own section instead of living under "ทะเบียนครุภัณฑ์", per explicit
+  // feedback that the two don't belong together.
+  const adminItems = canManageUsers
+    ? [{ href: "/manage/users", label: "จัดการผู้ใช้", icon: Users, active: pathname.startsWith("/manage/users") }]
+    : [];
 
   // "งานบำรุงรักษา" (and the report it prints, /manage/it/report) is a
   // sub-feature of "ระบบงาน IT", not a system of its own — nested as a
@@ -143,9 +145,15 @@ export default function AppShell({
   const sidebarBody = (
     <>
       <div className="flex h-16 shrink-0 items-center gap-3 border-b border-emerald-900/10 bg-white px-6 dark:border-emerald-400/10 dark:bg-zinc-900">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm">
-          <Hospital size={18} strokeWidth={2} aria-hidden="true" />
-        </div>
+        {/* ตราสัญลักษณ์จริงของโรงพยาบาล (ไฟล์เดียวกับที่ใช้บนแดชบอร์ดสาธารณะ
+            และหน้า login) แทนไอคอน Hospital ทั่วไปที่ใช้อยู่เดิม */}
+        <Image
+          src="/logo.png"
+          alt="ตราสัญลักษณ์โรงพยาบาลท่าตะเกียบ"
+          width={36}
+          height={36}
+          className="h-9 w-9 shrink-0 rounded-lg object-cover ring-1 ring-emerald-900/10 dark:ring-emerald-400/10"
+        />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold leading-tight text-zinc-900 dark:text-zinc-50">รพ.ท่าตะเกียบ</p>
           <p className="text-[11px] leading-tight text-emerald-700 dark:text-emerald-400">ระบบบริหารจัดการภายใน</p>
@@ -156,6 +164,7 @@ export default function AppShell({
         <NavSection label="บริการทั่วไป" items={generalItems} />
         {registryItems.length > 0 && <NavSection label="ทะเบียนครุภัณฑ์" items={registryItems} />}
         {itItems.length > 0 && <NavSection label="งานศูนย์คอมพิวเตอร์ (IT)" items={itItems} />}
+        {adminItems.length > 0 && <NavSection label="ผู้ดูแลระบบ" items={adminItems} />}
       </nav>
 
       <div className="shrink-0 border-t border-emerald-900/10 px-3 py-3 dark:border-emerald-400/10">
