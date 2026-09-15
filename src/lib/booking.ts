@@ -166,12 +166,39 @@ export function bookingStatusLabel(
  * string matching — never `new Date(...)`, so this never shifts by the
  * viewer's or server's timezone, matching the "local wall-clock, no
  * conversion" convention documented on Booking above. Returns null for
- * anything that doesn't match (a blank or malformed cell). */
+ * anything that doesn't match (a blank or malformed cell).
+ *
+ * Also accepts "2026-08-25 14:30[:00]" — a space instead of "T", an
+ * optional seconds part, and an hour that isn't zero-padded. That's the
+ * shape Google Sheets can silently rewrite a date-looking string into when
+ * it's written with valueInputOption "USER_ENTERED" (it recognizes the
+ * text as a date and reformats it on save; a later read-back then sees the
+ * reformatted text, not what was written). Every booking write now uses
+ * "RAW" instead precisely to stop that from happening going forward — see
+ * the note on createBooking in lib/sheets.ts — but tolerating the
+ * space-separated shape here means a booking written before that fix still
+ * parses correctly instead of silently disappearing from the calendar
+ * (which needs this to succeed) while still showing, garbled, in the flat
+ * list (which just prints the raw string when this returns null). */
 export function splitBookingDateTime(raw: string): { dateKey: string; time: string } | null {
-  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})/);
   if (!m) return null;
   const [, y, mo, d, h, mi] = m;
-  return { dateKey: `${y}-${mo}-${d}`, time: `${h}:${mi}` };
+  return { dateKey: `${y}-${mo}-${d}`, time: `${h.padStart(2, "0")}:${mi}` };
+}
+
+/** startTime/endTime -> epoch milliseconds, via splitBookingDateTime so it
+ * tolerates the same two shapes that function does — never `new
+ * Date(raw).getTime()` directly, which isn't guaranteed to parse a
+ * non-standard "YYYY-MM-DD HH:MM" string the same way across JS engines.
+ * Returns NaN for anything unparseable, same contract as Date#getTime(),
+ * so existing NaN checks at every call site keep working unchanged. */
+function bookingDateTimeToMillis(raw: string): number {
+  const parts = splitBookingDateTime(raw);
+  if (!parts) return NaN;
+  const [y, mo, d] = parts.dateKey.split("-").map(Number);
+  const [h, mi] = parts.time.split(":").map(Number);
+  return new Date(y, mo - 1, d, h, mi).getTime();
 }
 
 /** "2026-08-25T14:30" -> "25/08/2026 14:30" — display formatting shared by
@@ -204,8 +231,8 @@ export function hasBookingConflict(
   endTime: string,
   excludeBookingId?: string
 ): boolean {
-  const start = new Date(startTime).getTime();
-  const end = new Date(endTime).getTime();
+  const start = bookingDateTimeToMillis(startTime);
+  const end = bookingDateTimeToMillis(endTime);
   if (Number.isNaN(start) || Number.isNaN(end) || start >= end) return false;
 
   return existingBookings.some((b) => {
@@ -213,8 +240,8 @@ export function hasBookingConflict(
     if (excludeBookingId && b.bookingId === excludeBookingId) return false;
     if (isBookingCancelled(b)) return false;
     if (b.approvalStatus === "rejected") return false;
-    const bStart = new Date(b.startTime).getTime();
-    const bEnd = new Date(b.endTime).getTime();
+    const bStart = bookingDateTimeToMillis(b.startTime);
+    const bEnd = bookingDateTimeToMillis(b.endTime);
     if (Number.isNaN(bStart) || Number.isNaN(bEnd)) return false;
     return bStart < end && bEnd > start;
   });

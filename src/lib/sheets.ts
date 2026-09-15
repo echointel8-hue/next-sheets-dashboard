@@ -1631,7 +1631,12 @@ export async function createBookingResource(input: {
     await sheets.spreadsheets.values.append({
       spreadsheetId,
       range: `${tab}!A1`,
-      valueInputOption: "USER_ENTERED",
+      // RAW, not USER_ENTERED — CreatedAt is a plain ISO datetime string
+      // (2026-09-15T08:33:00.000Z); USER_ENTERED lets Sheets "helpfully"
+      // recognize and reformat date-looking text, which silently changes
+      // what a later values.get() reads back (see the same note on
+      // createBooking below, where this actually broke the app).
+      valueInputOption: "RAW",
       insertDataOption: "INSERT_ROWS",
       requestBody: { values: [bookingResourceToRow(resource)] },
     });
@@ -1687,7 +1692,8 @@ export async function updateBookingResource(
     await sheets.spreadsheets.values.update({
       spreadsheetId,
       range: `${tab}!A${sheetRow}:I${sheetRow}`,
-      valueInputOption: "USER_ENTERED",
+      // RAW — see the note on the append() above.
+      valueInputOption: "RAW",
       requestBody: { values: [bookingResourceToRow(merged)] },
     });
   } catch (err: unknown) {
@@ -1786,7 +1792,18 @@ export async function createBooking(input: {
     await sheets.spreadsheets.values.append({
       spreadsheetId,
       range: `${tab}!A1`,
-      valueInputOption: "USER_ENTERED",
+      // RAW, not USER_ENTERED — StartTime/EndTime are plain
+      // "2026-09-15T08:33" strings the app parses itself (see
+      // splitBookingDateTime in lib/booking.ts). USER_ENTERED lets Sheets
+      // recognize that text as a date and silently reformat it (commonly to
+      // something like "2026-09-15 8:33:00"), which a later values.get()
+      // reads back instead of what was written — the app's date parsing
+      // then fails to match, and the booking quietly vanishes from the
+      // calendar (which needs a parseable date) while still showing in the
+      // list view (which just falls back to printing the raw string
+      // unchanged). RAW writes the string byte-for-byte, so this can't
+      // happen for anything created from here on.
+      valueInputOption: "RAW",
       insertDataOption: "INSERT_ROWS",
       requestBody: { values: [bookingToRow(booking)] },
     });
@@ -1843,7 +1860,8 @@ export async function cancelBooking(bookingId: string, cancelledByUsername: stri
     await sheets.spreadsheets.values.update({
       spreadsheetId,
       range: `${tab}!A${sheetRow}:S${sheetRow}`,
-      valueInputOption: "USER_ENTERED",
+      // RAW — see the note on createBooking's append() above.
+      valueInputOption: "RAW",
       requestBody: { values: [bookingToRow(merged)] },
     });
   } catch (err: unknown) {
@@ -1907,7 +1925,8 @@ export async function setBookingApprovalStatus(
     await sheets.spreadsheets.values.update({
       spreadsheetId,
       range: `${tab}!A${sheetRow}:S${sheetRow}`,
-      valueInputOption: "USER_ENTERED",
+      // RAW — see the note on createBooking's append() above.
+      valueInputOption: "RAW",
       requestBody: { values: [bookingToRow(merged)] },
     });
   } catch (err: unknown) {
