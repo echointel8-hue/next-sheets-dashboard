@@ -59,16 +59,17 @@ export default function LoginForm({ next }: { next: string }) {
         {/* แถบหัวการ์ด — จัดผังตามตัวอย่าง e-GP ที่ผู้ใช้ส่งมา (โลโก้ + ชื่อระบบ
             ชิดซ้ายในแถบสี) แต่คงโทนสีเขียวของโรงพยาบาลไว้ตามที่เลือก */}
         <div className="flex items-center gap-3 bg-gradient-to-br from-[var(--brand)] to-[var(--brand-strong)] px-6 py-5">
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/95 shadow-sm">
-            <Image
-              src="/logo.png"
-              alt="ตราสัญลักษณ์โรงพยาบาลท่าตะเกียบ"
-              width={44}
-              height={44}
-              priority
-              className="h-11 w-11 object-contain"
-            />
-          </div>
+          {/* ครอปโลโก้เป็นวงกลมเต็มกรอบ (object-cover ทับขอบ) แทนการวางไอคอน
+              เล็กลอยอยู่กลางป้ายวงกลมสีขาว ให้ดูเป็นตราวงกลมชิ้นเดียว
+              เหมือนแพตเทิร์นที่ Dashboard.tsx ใช้อยู่แล้ว (rounded + object-cover) */}
+          <Image
+            src="/logo.png"
+            alt="ตราสัญลักษณ์โรงพยาบาลท่าตะเกียบ"
+            width={56}
+            height={56}
+            priority
+            className="h-14 w-14 shrink-0 rounded-full bg-white object-cover ring-2 ring-white/80"
+          />
           <div className="h-10 w-px shrink-0 bg-white/30" aria-hidden="true" />
           <div className="min-w-0">
             <h1 className="text-lg font-bold leading-5 text-white">ระบบบริการอิเล็กทรอนิกส์กลาง</h1>
