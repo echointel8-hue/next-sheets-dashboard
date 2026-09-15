@@ -47,10 +47,9 @@ export default function LoginForm({ next }: { next: string }) {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[var(--page-bg)] px-4">
       <div className="w-full max-w-sm rounded-2xl border border-emerald-900/10 bg-white p-6 shadow-sm dark:border-emerald-400/10 dark:bg-zinc-900">
-        <h1 className="mb-1 text-xl font-bold text-zinc-950 dark:text-zinc-50">เข้าสู่ระบบจัดการ</h1>
-        <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">
-          สำหรับผู้ดูแลระบบและผู้รับผิดชอบครุภัณฑ์แต่ละกลุ่มงาน
-        </p>
+        <h1 className="mb-6 text-xl font-bold text-zinc-950 dark:text-zinc-50">
+          เข้าสู่ระบบบริหารจัดการ โรงพยาบาลท่าตะเกียบ
+        </h1>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
             ชื่อผู้ใช้
