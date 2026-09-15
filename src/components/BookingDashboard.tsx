@@ -357,7 +357,12 @@ export default function BookingDashboard({
                         )}
                       </div>
                       {resource.detail && (
-                        <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">{resource.detail}</p>
+                        // whitespace-pre-line: เก็บการขึ้นบรรทัดใหม่ตามที่ผู้ดูแลพิมพ์ไว้ในช่อง
+                        // "รายละเอียดเพิ่มเติม" (textarea) — ก่อนหน้านี้ <p> ปกติจะยุบทุกบรรทัด
+                        // รวมเป็นย่อหน้าเดียว ทำให้ข้อความที่แยกบรรทัด/หัวข้อย่อยอ่านยาก
+                        <p className="whitespace-pre-line text-[11px] leading-5 text-zinc-500 dark:text-zinc-400">
+                          {resource.detail}
+                        </p>
                       )}
                       {type === "car" && !!resource.seatCount && (
                         <span className="inline-flex w-fit items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">

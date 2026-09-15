@@ -209,7 +209,10 @@ export default function BookingFormModal({
                   </div>
                   <div className="min-w-0 text-xs text-zinc-500 dark:text-zinc-400">
                     {selectedResource?.detail ? (
-                      <p className="leading-5">{selectedResource.detail}</p>
+                      // whitespace-pre-line: คงการขึ้นบรรทัดใหม่ตามที่พิมพ์ไว้ในช่อง
+                      // "รายละเอียดเพิ่มเติม" เช่นเดียวกับที่การ์ดรายการทรัพยากรใน
+                      // BookingDashboard ทำ — ดูคอมเมนต์ที่นั่นสำหรับรายละเอียดปัญหา
+                      <p className="whitespace-pre-line leading-5">{selectedResource.detail}</p>
                     ) : (
                       <p className="italic">ไม่มีรายละเอียดเพิ่มเติม</p>
                     )}
