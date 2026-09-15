@@ -7,10 +7,12 @@ import {
   AlertTriangle,
   Ban,
   Calendar,
+  CalendarDays,
   CalendarPlus,
   Car,
   DoorOpen,
   LayoutGrid,
+  List,
   Loader2,
   LogOut,
   MapPin,
@@ -23,9 +25,18 @@ import {
   Wrench,
 } from "lucide-react";
 import type { Role } from "@/lib/auth";
-import { canCancelBooking, type Booking, type BookingResource, type BookingResourceType } from "@/lib/booking";
+import { buildActionColorMap, actionColorVars, type ActionColor } from "@/lib/actionColors";
+import {
+  canCancelBooking,
+  formatBookingDateTime,
+  isBookingCancelled,
+  type Booking,
+  type BookingResource,
+  type BookingResourceType,
+} from "@/lib/booking";
 import BookingResourceFormModal from "@/components/BookingResourceFormModal";
 import BookingFormModal from "@/components/BookingFormModal";
+import BookingCalendar from "@/components/BookingCalendar";
 
 export interface BookingDashboardData {
   resources: BookingResource[];
@@ -41,19 +52,6 @@ const CARD =
   "rounded-2xl border border-emerald-900/10 bg-white shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
 const ACTION_BUTTON =
   "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60";
-
-/** "2026-08-25T14:30" (this app's storage format for
- * Booking.startTime/endTime — the raw <input type="datetime-local"> value,
- * local wall-clock with no timezone conversion, see lib/booking.ts) ->
- * "25/08/2026 14:30". Parsed by string slicing, not `new Date(...)`, so the
- * display never shifts by the viewer's or server's timezone — same
- * rationale as ManageDashboard's own dateOnly() helper. */
-function formatDateTime(raw: string): string {
-  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-  if (!m) return raw;
-  const [, y, mo, d, h, mi] = m;
-  return `${d}/${mo}/${y} ${h}:${mi}`;
-}
 
 /**
  * Top-level page for the vehicle / meeting-room booking feature. Every
@@ -85,6 +83,7 @@ export default function BookingDashboard({
   const [togglingResourceId, setTogglingResourceId] = useState<string | null>(null);
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
 
   async function logout() {
     try {
@@ -116,6 +115,28 @@ export default function BookingDashboard({
         .sort((a, b) => (a.startTime < b.startTime ? 1 : -1)),
     [data, activeType] // eslint-disable-line react-hooks/exhaustive-deps
   );
+
+  // Color each resource of the current type by when it was *created*
+  // (createdAt, append-only) rather than by typeResources' own
+  // alphabetical display order — the same "index-based assignment must
+  // survive reordering/renaming" lesson as ReportSettings.actionColorOrder
+  // in lib/sheets.ts: if colors were assigned by alphabetical position,
+  // adding a resource that happens to sort earlier (or renaming one) would
+  // silently reshuffle every other resource's color too. Built from every
+  // resource of this type, active or not, so a cancelled booking against a
+  // since-deactivated resource still shows a stable, decodable color.
+  const resourceColorMap: Map<string, ActionColor> = useMemo(() => {
+    const byCreatedAt = resources
+      .filter((r) => r.type === activeType)
+      .slice()
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map((r) => r.name);
+    return buildActionColorMap(byCreatedAt);
+    // `resources` is freshly re-derived from `data` every render (see the
+    // comment above typeResources); `data`/`activeType` are the real,
+    // stable dependencies.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, activeType]);
 
   function handleResourceSaved(resource: BookingResource) {
     setData((prev) => {
@@ -158,7 +179,7 @@ export default function BookingDashboard({
 
   async function handleCancelBooking(booking: Booking) {
     const confirmed = window.confirm(
-      `ยืนยันยกเลิกการจอง "${booking.resourceName}"\nช่วง ${formatDateTime(booking.startTime)} - ${formatDateTime(booking.endTime)} ใช่หรือไม่?`
+      `ยืนยันยกเลิกการจอง "${booking.resourceName}"\nช่วง ${formatBookingDateTime(booking.startTime)} - ${formatBookingDateTime(booking.endTime)} ใช่หรือไม่?`
     );
     if (!confirmed) return;
 
@@ -393,21 +414,65 @@ export default function BookingDashboard({
                   <Calendar size={15} strokeWidth={2} aria-hidden="true" />
                   รายการจอง{typeLabel}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setBookingModalOpen(true)}
-                  disabled={activeTypeResources.length === 0}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] px-3 py-1.5 text-xs font-medium text-[var(--brand-contrast)] shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
-                >
-                  <CalendarPlus size={14} strokeWidth={2} aria-hidden="true" />
-                  จอง{typeLabel}ใหม่
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* ปฏิทิน/รายการ — สถานะการจองแสดงเป็นปฏิทินเป็นค่าเริ่มต้น
+                      ตามที่ขอ (เห็นวันและช่วงเวลาที่จองพร้อมสีแยกตามทรัพยากร)
+                      คงมุมมองตารางเดิมไว้เป็นทางเลือกสำหรับดูรายละเอียดรวด
+                      เดียวทั้งหมด — ไม่ตัดของเดิมออก แค่เพิ่มมุมมองใหม่ */}
+                  <div className="inline-flex gap-0.5 rounded-full border border-zinc-200 bg-white p-0.5 dark:border-zinc-700 dark:bg-zinc-900">
+                    <button
+                      type="button"
+                      onClick={() => setViewMode("calendar")}
+                      aria-pressed={viewMode === "calendar"}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                        viewMode === "calendar"
+                          ? "bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)]"
+                          : "text-zinc-500 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                      }`}
+                    >
+                      <CalendarDays size={13} strokeWidth={2} aria-hidden="true" />
+                      ปฏิทิน
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode("list")}
+                      aria-pressed={viewMode === "list"}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                        viewMode === "list"
+                          ? "bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)]"
+                          : "text-zinc-500 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                      }`}
+                    >
+                      <List size={13} strokeWidth={2} aria-hidden="true" />
+                      รายการ
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setBookingModalOpen(true)}
+                    disabled={activeTypeResources.length === 0}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] px-3 py-1.5 text-xs font-medium text-[var(--brand-contrast)] shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
+                  >
+                    <CalendarPlus size={14} strokeWidth={2} aria-hidden="true" />
+                    จอง{typeLabel}ใหม่
+                  </button>
+                </div>
               </div>
 
               {typeBookings.length === 0 ? (
                 <p className="py-4 text-center text-sm text-zinc-500 dark:text-zinc-400">
                   ยังไม่มีการจอง{typeLabel}
                 </p>
+              ) : viewMode === "calendar" ? (
+                <BookingCalendar
+                  typeLabel={typeLabel}
+                  bookings={typeBookings}
+                  resourceColorMap={resourceColorMap}
+                  session={session}
+                  onCancel={handleCancelBooking}
+                  cancellingBookingId={cancellingBookingId}
+                  showDestination={activeType === "car"}
+                />
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[640px] border-collapse text-sm">
@@ -425,18 +490,28 @@ export default function BookingDashboard({
                     </thead>
                     <tbody>
                       {typeBookings.map((booking) => {
-                        const cancelled = booking.cancelledAt.trim() !== "";
+                        const cancelled = isBookingCancelled(booking);
+                        const color = resourceColorMap.get(booking.resourceName);
                         return (
                           <tr
                             key={booking.bookingId}
                             className="border-b border-zinc-50 align-top last:border-0 dark:border-zinc-800/60"
                           >
                             <td className="px-2 py-2.5 font-medium text-zinc-800 dark:text-zinc-100">
-                              {booking.resourceName}
+                              <span className="inline-flex items-center gap-1.5">
+                                {color && (
+                                  <span
+                                    className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                                    style={actionColorVars(color)}
+                                    aria-hidden="true"
+                                  />
+                                )}
+                                {booking.resourceName}
+                              </span>
                             </td>
                             <td className="px-2 py-2.5 whitespace-nowrap text-zinc-600 dark:text-zinc-300">
-                              {formatDateTime(booking.startTime)}
-                              <br />– {formatDateTime(booking.endTime)}
+                              {formatBookingDateTime(booking.startTime)}
+                              <br />– {formatBookingDateTime(booking.endTime)}
                             </td>
                             <td className="px-2 py-2.5 text-zinc-600 dark:text-zinc-300">{booking.purpose}</td>
                             {activeType === "car" && (

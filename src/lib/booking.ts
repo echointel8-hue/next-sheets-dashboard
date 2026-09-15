@@ -76,6 +76,31 @@ export function isBookingCancelled(booking: Pick<Booking, "cancelledAt">): boole
   return booking.cancelledAt.trim() !== "";
 }
 
+/** Splits a startTime/endTime string ("2026-08-25T14:30", the raw
+ * <input type="datetime-local"> value) into its date and time parts by
+ * string matching — never `new Date(...)`, so this never shifts by the
+ * viewer's or server's timezone, matching the "local wall-clock, no
+ * conversion" convention documented on Booking above. Returns null for
+ * anything that doesn't match (a blank or malformed cell). */
+export function splitBookingDateTime(raw: string): { dateKey: string; time: string } | null {
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!m) return null;
+  const [, y, mo, d, h, mi] = m;
+  return { dateKey: `${y}-${mo}-${d}`, time: `${h}:${mi}` };
+}
+
+/** "2026-08-25T14:30" -> "25/08/2026 14:30" — display formatting shared by
+ * the flat list (BookingDashboard) and the calendar view
+ * (BookingCalendar), both of which show the exact same underlying data in
+ * a different shape. Falls back to the raw string unchanged if it doesn't
+ * match the expected format. */
+export function formatBookingDateTime(raw: string): string {
+  const parts = splitBookingDateTime(raw);
+  if (!parts) return raw;
+  const [y, mo, d] = parts.dateKey.split("-");
+  return `${d}/${mo}/${y} ${parts.time}`;
+}
+
 /** True if [startTime, endTime) would overlap any existing, non-cancelled
  * booking on the same resource — the only gate a new booking has to clear,
  * since there is no approval step. Half-open interval overlap test:

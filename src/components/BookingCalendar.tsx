@@ -1,0 +1,409 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { Ban, ChevronLeft, ChevronRight, Loader2, MapPin, Phone, Users, X } from "lucide-react";
+import type { Role } from "@/lib/auth";
+import { actionColorVars, type ActionColor } from "@/lib/actionColors";
+import {
+  canCancelBooking,
+  formatBookingDateTime,
+  isBookingCancelled,
+  splitBookingDateTime,
+  type Booking,
+} from "@/lib/booking";
+
+const THAI_MONTHS = [
+  "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
+];
+const THAI_WEEKDAYS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
+
+/** Local-calendar-date key ("YYYY-MM-DD") for a plain JS Date, built from
+ * its local getFullYear/getMonth/getDate — never toISOString(), which is
+ * UTC-based and would shift the date near midnight depending on the
+ * viewer's timezone. Every date this component works with is a "local
+ * wall-clock date" the same way Booking.startTime/endTime are (see
+ * lib/booking.ts), so this keeps the same convention. */
+function dateKeyFromDate(d: Date): string {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${day}`;
+}
+
+function addDaysToKey(dateKey: string, days: number): string {
+  const [y, mo, d] = dateKey.split("-").map(Number);
+  const dt = new Date(y, mo - 1, d);
+  dt.setDate(dt.getDate() + days);
+  return dateKeyFromDate(dt);
+}
+
+/** Every calendar date a booking's [startTime, endTime) touches — almost
+ * always just one date, but a booking that crosses midnight (e.g. an
+ * overnight car trip 20:00 -> 08:00 the next day) shows up on both dates
+ * it actually spans. Drops a trailing end-date whose time is exactly
+ * "00:00" — a booking ending right at midnight doesn't really occupy that
+ * next date. Capped at 60 days as a safety guard against a malformed row. */
+function bookingDateKeys(booking: Booking): string[] {
+  const start = splitBookingDateTime(booking.startTime);
+  const end = splitBookingDateTime(booking.endTime);
+  if (!start) return [];
+  if (!end || end.dateKey === start.dateKey) return [start.dateKey];
+
+  const keys: string[] = [];
+  let cur = start.dateKey;
+  for (let i = 0; i < 60; i++) {
+    keys.push(cur);
+    if (cur === end.dateKey) break;
+    cur = addDaysToKey(cur, 1);
+  }
+  if (keys.length > 1 && keys[keys.length - 1] === end.dateKey && end.time === "00:00") {
+    keys.pop();
+  }
+  return keys;
+}
+
+/** All 42 dates (6 full Sun-Sat weeks) covering the given month, including
+ * the leading/trailing days borrowed from the adjacent months — a fixed
+ * cell count keeps every month's grid the same height. */
+function monthGrid(monthCursor: Date): Date[] {
+  const year = monthCursor.getFullYear();
+  const month = monthCursor.getMonth();
+  const firstOfMonth = new Date(year, month, 1);
+  const gridStart = new Date(year, month, 1 - firstOfMonth.getDay());
+  const days: Date[] = [];
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(gridStart);
+    d.setDate(gridStart.getDate() + i);
+    days.push(d);
+  }
+  return days;
+}
+
+function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+/**
+ * Month-view calendar for one resource type's bookings — each day cell
+ * shows a colored chip per booking that touches that date (color keyed by
+ * resource, via resourceColorMap, so which vehicle/room is booked reads at
+ * a glance), clicking a day with bookings opens a detail panel with the
+ * full information and a cancel action, same as the flat list view this
+ * sits alongside in BookingDashboard.
+ */
+export default function BookingCalendar({
+  typeLabel,
+  bookings,
+  resourceColorMap,
+  session,
+  onCancel,
+  cancellingBookingId,
+  showDestination,
+}: {
+  typeLabel: string;
+  bookings: Booking[];
+  resourceColorMap: Map<string, ActionColor>;
+  session: { username: string; role: Role };
+  onCancel: (booking: Booking) => void;
+  cancellingBookingId: string | null;
+  showDestination: boolean;
+}) {
+  const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
+  const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
+
+  const days = useMemo(() => monthGrid(monthCursor), [monthCursor]);
+  const todayKey = useMemo(() => dateKeyFromDate(new Date()), []);
+
+  const bookingsByDate = useMemo(() => {
+    const map = new Map<string, Booking[]>();
+    for (const b of bookings) {
+      for (const key of bookingDateKeys(b)) {
+        const list = map.get(key) ?? [];
+        list.push(b);
+        map.set(key, list);
+      }
+    }
+    for (const list of map.values()) list.sort((a, b) => (a.startTime < b.startTime ? -1 : 1));
+    return map;
+  }, [bookings]);
+
+  const legendNames = useMemo(() => Array.from(resourceColorMap.keys()), [resourceColorMap]);
+  const selectedBookings = selectedDateKey ? (bookingsByDate.get(selectedDateKey) ?? []) : [];
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setMonthCursor((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+            aria-label="เดือนก่อนหน้า"
+            className="rounded-full p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          >
+            <ChevronLeft size={18} strokeWidth={2} aria-hidden="true" />
+          </button>
+          <span className="min-w-[9rem] text-center text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+            {THAI_MONTHS[monthCursor.getMonth()]} {monthCursor.getFullYear()}
+          </span>
+          <button
+            type="button"
+            onClick={() => setMonthCursor((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+            aria-label="เดือนถัดไป"
+            className="rounded-full p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          >
+            <ChevronRight size={18} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => setMonthCursor(startOfMonth(new Date()))}
+          className="rounded-full border border-zinc-200 px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          วันนี้
+        </button>
+      </div>
+
+      {legendNames.length > 0 && (
+        <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+          {legendNames.map((name) => {
+            const color = resourceColorMap.get(name);
+            if (!color) return null;
+            return (
+              <span key={name} className="inline-flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                  style={actionColorVars(color)}
+                  aria-hidden="true"
+                />
+                {name}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="grid grid-cols-7 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
+        {THAI_WEEKDAYS.map((wd) => (
+          <div
+            key={wd}
+            className="border-b border-r border-zinc-100 bg-zinc-50 px-1.5 py-1.5 text-center text-xs font-medium text-zinc-400 last:border-r-0 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-500"
+          >
+            {wd}
+          </div>
+        ))}
+        {days.map((day) => {
+          const key = dateKeyFromDate(day);
+          const inMonth = day.getMonth() === monthCursor.getMonth();
+          const dayBookings = bookingsByDate.get(key) ?? [];
+          const isToday = key === todayKey;
+          const visible = dayBookings.slice(0, 3);
+          const extra = dayBookings.length - visible.length;
+          return (
+            <button
+              type="button"
+              key={key}
+              onClick={() => dayBookings.length > 0 && setSelectedDateKey(key)}
+              disabled={dayBookings.length === 0}
+              className={`flex min-h-[5.5rem] flex-col items-stretch gap-1 border-b border-r border-zinc-100 p-1.5 text-left last:border-r-0 dark:border-zinc-800 ${
+                inMonth ? "bg-white dark:bg-zinc-900" : "bg-zinc-50/60 dark:bg-zinc-950/30"
+              } ${
+                dayBookings.length > 0
+                  ? "cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                  : "cursor-default"
+              }`}
+            >
+              <span
+                className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-xs ${
+                  isToday
+                    ? "bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] font-semibold text-[var(--brand-contrast)]"
+                    : inMonth
+                      ? "text-zinc-600 dark:text-zinc-300"
+                      : "text-zinc-300 dark:text-zinc-600"
+                }`}
+              >
+                {day.getDate()}
+              </span>
+              <div className="flex flex-col gap-0.5">
+                {visible.map((b) => {
+                  const cancelled = isBookingCancelled(b);
+                  const color = resourceColorMap.get(b.resourceName);
+                  const time = splitBookingDateTime(b.startTime)?.time ?? "";
+                  return (
+                    <span
+                      key={b.bookingId}
+                      style={!cancelled && color ? actionColorVars(color) : undefined}
+                      className={`truncate rounded px-1 py-0.5 text-[10px] leading-tight ${
+                        cancelled
+                          ? "bg-zinc-200 text-zinc-500 line-through dark:bg-zinc-800 dark:text-zinc-500"
+                          : "bg-[var(--seg-c)] text-white dark:bg-[var(--seg-c-dark)]"
+                      }`}
+                    >
+                      {time} {b.resourceName}
+                    </span>
+                  );
+                })}
+                {extra > 0 && (
+                  <span className="text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
+                    +{extra} เพิ่มเติม
+                  </span>
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedDateKey && (
+        <DayDetailModal
+          dateKey={selectedDateKey}
+          typeLabel={typeLabel}
+          bookings={selectedBookings}
+          resourceColorMap={resourceColorMap}
+          session={session}
+          onCancel={onCancel}
+          cancellingBookingId={cancellingBookingId}
+          showDestination={showDestination}
+          onClose={() => setSelectedDateKey(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function DayDetailModal({
+  dateKey,
+  typeLabel,
+  bookings,
+  resourceColorMap,
+  session,
+  onCancel,
+  cancellingBookingId,
+  showDestination,
+  onClose,
+}: {
+  dateKey: string;
+  typeLabel: string;
+  bookings: Booking[];
+  resourceColorMap: Map<string, ActionColor>;
+  session: { username: string; role: Role };
+  onCancel: (booking: Booking) => void;
+  cancellingBookingId: string | null;
+  showDestination: boolean;
+  onClose: () => void;
+}) {
+  const [y, mo, d] = dateKey.split("-");
+  const dateLabel = `${d}/${mo}/${y}`;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="booking-day-detail-title"
+        className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-zinc-900"
+      >
+        <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+          <h2 id="booking-day-detail-title" className="text-base font-semibold text-zinc-800 dark:text-zinc-100">
+            การจอง{typeLabel} วันที่ {dateLabel}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="ปิดหน้าต่าง"
+            className="rounded-full p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+          >
+            <X size={18} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
+        <div className="flex flex-col gap-3 overflow-y-auto px-5 py-4">
+          {bookings.length === 0 ? (
+            <p className="py-4 text-center text-sm text-zinc-500 dark:text-zinc-400">ไม่มีการจองในวันนี้</p>
+          ) : (
+            bookings.map((b) => {
+              const cancelled = isBookingCancelled(b);
+              const color = resourceColorMap.get(b.resourceName);
+              return (
+                <div
+                  key={b.bookingId}
+                  className={`flex flex-col gap-1.5 rounded-xl border p-3 ${
+                    cancelled
+                      ? "border-zinc-200 opacity-70 dark:border-zinc-800"
+                      : "border-zinc-200 dark:border-zinc-700"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      {color && (
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                          style={actionColorVars(color)}
+                          aria-hidden="true"
+                        />
+                      )}
+                      <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                        {b.resourceName}
+                      </span>
+                    </div>
+                    {cancelled ? (
+                      <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                        ยกเลิกแล้ว
+                      </span>
+                    ) : (
+                      <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                        ยืนยันแล้ว
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {formatBookingDateTime(b.startTime)} – {formatBookingDateTime(b.endTime)}
+                  </p>
+                  <p className="text-sm text-zinc-700 dark:text-zinc-200">{b.purpose}</p>
+                  {showDestination && b.destination && (
+                    <span className="inline-flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      <MapPin size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                      {b.destination}
+                    </span>
+                  )}
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+                    <span className="inline-flex items-center gap-1">
+                      <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                      {b.participants.toLocaleString("th-TH")}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <Phone size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                      {b.contactPhone}
+                    </span>
+                    <span>{b.bookedByDisplayName || b.bookedByUsername}</span>
+                  </div>
+                  {!cancelled && canCancelBooking(b, session) && (
+                    <button
+                      type="button"
+                      onClick={() => onCancel(b)}
+                      disabled={cancellingBookingId === b.bookingId}
+                      className="mt-1 inline-flex w-fit items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-60 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
+                    >
+                      {cancellingBookingId === b.bookingId ? (
+                        <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Ban size={12} strokeWidth={2} aria-hidden="true" />
+                      )}
+                      ยกเลิก
+                    </button>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
