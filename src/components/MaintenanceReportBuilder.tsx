@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Eye,
   EyeOff,
@@ -149,7 +151,7 @@ interface SelectedRow {
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 const CARD =
-  "rounded-2xl border border-emerald-900/10 bg-white shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
+  "rounded-2xl border border-emerald-900/10 bg-gradient-to-b from-white to-emerald-50/60 shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:from-zinc-900 dark:to-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
 const INPUT_CLASS =
   "h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100";
 
@@ -1254,6 +1256,21 @@ export default function MaintenanceReportBuilder({
             below, which also hides anything with the .no-print class as a
             belt-and-suspenders backstop for browsers that ignore print:). */}
         <div className="no-print flex flex-col gap-6 print:hidden">
+          {/* ออกรายงานเป็นขั้นตอนย่อยของงานบำรุงรักษา ซึ่งเป็นส่วนย่อยของ
+              "ระบบงาน IT" อีกที — breadcrumb นี้ยืนยันบริบทนั้นให้ตรงกับ
+              ลำดับชั้นใน sidebar และปุ่ม "พิมพ์แบบฟอร์ม" ที่พาเข้ามาหน้านี้. */}
+          <nav aria-label="breadcrumb" className="-mb-2 flex items-center gap-1.5 text-xs font-medium text-zinc-400 dark:text-zinc-500">
+            <Link href="/manage/it" className="inline-flex items-center gap-1 hover:text-[var(--brand)] hover:underline">
+              <Wrench size={12} strokeWidth={2} aria-hidden="true" />
+              ระบบงาน IT
+            </Link>
+            <ChevronRight size={12} strokeWidth={2} aria-hidden="true" />
+            <Link href="/manage/it/tasks" className="hover:text-[var(--brand)] hover:underline">
+              งานบำรุงรักษา
+            </Link>
+            <ChevronRight size={12} strokeWidth={2} aria-hidden="true" />
+            <span className="text-zinc-500 dark:text-zinc-400">ออกรายงาน</span>
+          </nav>
           <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
               <span

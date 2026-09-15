@@ -38,8 +38,11 @@
 
   /* Page wash: a barely-there sage tint behind the white cards, instead of
      flat neutral gray — reads as clinical/modern without fighting the
-     white card surfaces or the categorical chart colors. */
+     white card surfaces or the categorical chart colors. --page-bg-2 pairs
+     with it as a very subtle top-to-bottom gradient (see .app-shell-page-bg
+     below) rather than a flat fill, for a brighter, more modern feel. */
   --page-bg: #f5f9f7;
+  --page-bg-2: #eaf4ee;
 
   /* Chart tokens (dataviz skill palette) — categorical fallback for
      status values that don't match a known semantic role. */
@@ -80,6 +83,7 @@
     --brand-bar-to: #059669;
 
     --page-bg: #07120d;
+    --page-bg-2: #0b1912;
 
     --cat-1: #3987e5;
     --cat-2: #d95926;
@@ -96,6 +100,17 @@
     --chart-border: rgba(255, 255, 255, 0.1);
     --chart-grid: #2c2c2a;
   }
+}
+
+/* Used by AppShell (src/components/AppShell.tsx) in place of a flat
+   bg-[var(--page-bg)] fill — a barely-there top-to-bottom gradient across
+   the two page-wash tokens above, so the canvas behind every authenticated
+   page's cards has a little depth instead of reading as a single flat
+   color. Kept as plain CSS (not a Tailwind arbitrary gradient utility)
+   since it needs to repaint between the light/dark --page-bg* values
+   above without duplicating them. */
+.app-shell-page-bg {
+  background: linear-gradient(180deg, var(--page-bg), var(--page-bg-2));
 }
 
 body {

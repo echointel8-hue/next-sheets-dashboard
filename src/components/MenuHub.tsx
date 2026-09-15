@@ -7,7 +7,7 @@ import { canAccessItDashboardClient, roleLabelFor } from "@/lib/roleLabel";
 import AppShell from "@/components/AppShell";
 
 const CARD =
-  "rounded-2xl border border-emerald-900/10 bg-white shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
+  "rounded-2xl border border-emerald-900/10 bg-gradient-to-b from-white to-emerald-50/60 shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:from-zinc-900 dark:to-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
 
 interface MenuItem {
   href: string;

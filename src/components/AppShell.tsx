@@ -35,9 +35,15 @@ import {
  * link, same as before.
  *
  * Colors intentionally stay inside the existing green brand family
- * (--brand/--brand-2/--brand-strong, plus Tailwind's built-in emerald
- * scale for the sidebar's dark surface) rather than adopting a new palette
- * — only the layout/spacing/shadow language changes.
+ * (--brand/--brand-2/--brand-strong, plus Tailwind's built-in emerald and
+ * zinc scales) rather than adopting a new palette. The sidebar itself is a
+ * light surface with a soft white→emerald-50 gradient wash (previously a
+ * fixed dark emerald-950 "anchor" regardless of theme) — per an explicit
+ * request for a brighter, airier feel across the whole system, sidebar
+ * included, with subtle gradients rather than flat fills for a more modern
+ * look. It still follows the app's existing prefers-color-scheme dark mode
+ * (dark: variants) exactly like every card elsewhere, it just no longer
+ * *always* renders dark the way it used to.
  */
 
 export interface AppShellProps {
@@ -52,7 +58,11 @@ export interface AppShellProps {
   canAccessManage: boolean;
   /** Show "จัดการผู้ใช้" (/manage/users) in the sidebar — bootstrap only. */
   canManageUsers: boolean;
-  /** Show "ระบบงาน IT" (/manage/it) + "งานบำรุงรักษา" (/manage/it/tasks). */
+  /** Show "ระบบงาน IT" (/manage/it), with "งานบำรุงรักษา" (/manage/it/tasks)
+   * nested underneath it as a sub-item — งานบำรุงรักษา (and its report at
+   * /manage/it/report, reached from inside these two pages rather than its
+   * own sidebar entry) is part of the IT system, not a separate one, so the
+   * nav shows that hierarchy instead of listing them as equal siblings. */
   canAccessIt: boolean;
   children: ReactNode;
 }
@@ -101,19 +111,24 @@ export default function AppShell({
     });
   }
 
-  const itItems = canAccessIt
+  // "งานบำรุงรักษา" (and the report it prints, /manage/it/report) is a
+  // sub-feature of "ระบบงาน IT", not a system of its own — nested as a
+  // child of the IT item below rather than listed as a same-level sibling.
+  const itItems: NavItem[] = canAccessIt
     ? [
         {
           href: "/manage/it",
           label: "ระบบงาน IT",
           icon: Wrench,
           active: pathname === "/manage/it" || pathname.startsWith("/manage/it/report"),
-        },
-        {
-          href: "/manage/it/tasks",
-          label: "งานบำรุงรักษา",
-          icon: ClipboardList,
-          active: pathname.startsWith("/manage/it/tasks"),
+          children: [
+            {
+              href: "/manage/it/tasks",
+              label: "งานบำรุงรักษา",
+              icon: ClipboardList,
+              active: pathname.startsWith("/manage/it/tasks"),
+            },
+          ],
         },
       ]
     : [];
@@ -122,13 +137,13 @@ export default function AppShell({
 
   const sidebarBody = (
     <>
-      <div className="flex h-16 shrink-0 items-center gap-3 border-b border-emerald-800/60 bg-emerald-950 px-6">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)]">
+      <div className="flex h-16 shrink-0 items-center gap-3 border-b border-emerald-900/10 bg-white px-6 dark:border-emerald-400/10 dark:bg-zinc-900">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm">
           <Hospital size={18} strokeWidth={2} aria-hidden="true" />
         </div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold leading-tight text-white">รพ.ท่าตะเกียบ</p>
-          <p className="text-[11px] leading-tight text-emerald-300">ระบบบริหารจัดการภายใน</p>
+          <p className="truncate text-sm font-semibold leading-tight text-zinc-900 dark:text-zinc-50">รพ.ท่าตะเกียบ</p>
+          <p className="text-[11px] leading-tight text-emerald-700 dark:text-emerald-400">ระบบบริหารจัดการภายใน</p>
         </div>
       </div>
 
@@ -138,24 +153,24 @@ export default function AppShell({
         {itItems.length > 0 && <NavSection label="งานศูนย์คอมพิวเตอร์ (IT)" items={itItems} />}
       </nav>
 
-      <div className="shrink-0 border-t border-emerald-800/60 px-3 py-3">
+      <div className="shrink-0 border-t border-emerald-900/10 px-3 py-3 dark:border-emerald-400/10">
         <Link
           href="/"
-          className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-900 hover:text-white"
+          className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-zinc-500 transition-colors hover:bg-emerald-50 hover:text-emerald-700 dark:text-zinc-400 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-300"
         >
           <Globe size={14} strokeWidth={2} aria-hidden="true" />
           แดชบอร์ดสาธารณะ
         </Link>
       </div>
 
-      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-emerald-800/60 bg-emerald-950/60 p-3">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-emerald-900/10 bg-gradient-to-r from-emerald-50/70 to-white p-3 dark:border-emerald-400/10 dark:from-zinc-900 dark:to-zinc-900">
         <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-xs font-bold text-white">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-xs font-bold text-white shadow-sm">
             {initialsOf(displayText)}
           </div>
           <div className="min-w-0 text-xs">
-            <p className="truncate font-medium text-white">{displayText}</p>
-            <span className="mt-0.5 inline-block truncate rounded bg-emerald-800/70 px-1.5 py-0.5 text-[10px] text-emerald-200">
+            <p className="truncate font-medium text-zinc-800 dark:text-zinc-100">{displayText}</p>
+            <span className="mt-0.5 inline-block truncate rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
               {roleLabel}
             </span>
           </div>
@@ -164,7 +179,7 @@ export default function AppShell({
           type="button"
           onClick={logout}
           title="ออกจากระบบ"
-          className="shrink-0 rounded-lg p-2 text-emerald-300 transition-colors hover:bg-emerald-900 hover:text-rose-300"
+          className="shrink-0 rounded-lg p-2 text-zinc-400 transition-colors hover:bg-rose-50 hover:text-rose-600 dark:text-zinc-500 dark:hover:bg-rose-950/30 dark:hover:text-rose-400"
         >
           <LogOut size={16} strokeWidth={2} aria-hidden="true" />
         </button>
@@ -173,9 +188,12 @@ export default function AppShell({
   );
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--page-bg)]">
-      {/* Desktop sidebar — persistent, always visible at lg+. */}
-      <aside className="app-shell-sidebar hidden w-64 shrink-0 flex-col bg-emerald-950 text-emerald-100 lg:flex">
+    <div className="app-shell-page-bg flex h-screen overflow-hidden">
+      {/* Desktop sidebar — persistent, always visible at lg+. A light
+          surface with a soft top-to-bottom white→emerald-50 wash rather
+          than a flat fill, so it reads as bright and airy but still has a
+          little depth/dimension to it. */}
+      <aside className="app-shell-sidebar hidden w-64 shrink-0 flex-col border-r border-emerald-900/10 bg-gradient-to-b from-white via-white to-emerald-50/70 text-zinc-700 lg:flex dark:border-emerald-400/10 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-900 dark:text-zinc-300">
         {sidebarBody}
       </aside>
 
@@ -188,12 +206,12 @@ export default function AppShell({
             onClick={() => setMobileOpen(false)}
             aria-hidden="true"
           />
-          <aside className="relative flex w-64 max-w-[80vw] flex-col bg-emerald-950 text-emerald-100 shadow-xl">
+          <aside className="relative flex w-64 max-w-[80vw] flex-col border-r border-emerald-900/10 bg-gradient-to-b from-white via-white to-emerald-50/70 text-zinc-700 shadow-xl dark:border-emerald-400/10 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-900 dark:text-zinc-300">
             <button
               type="button"
               onClick={() => setMobileOpen(false)}
               aria-label="ปิดเมนู"
-              className="absolute right-2 top-2 rounded-lg p-2 text-emerald-300 hover:bg-emerald-900 hover:text-white"
+              className="absolute right-2 top-2 rounded-lg p-2 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
             >
               <X size={18} strokeWidth={2} aria-hidden="true" />
             </button>
@@ -206,16 +224,16 @@ export default function AppShell({
         {/* Slim mobile-only topbar — the desktop sidebar already carries
             the brand mark + nav, so this only needs to exist below the lg
             breakpoint to expose the drawer toggle. */}
-        <div className="app-shell-topbar flex h-14 shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-4 lg:hidden">
+        <div className="app-shell-topbar flex h-14 shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-900 lg:hidden">
           <button
             type="button"
             onClick={() => setMobileOpen(true)}
             aria-label="เปิดเมนู"
-            className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100"
+            className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             <Menu size={20} strokeWidth={2} aria-hidden="true" />
           </button>
-          <span className="text-sm font-semibold text-zinc-800">รพ.ท่าตะเกียบ</span>
+          <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">รพ.ท่าตะเกียบ</span>
         </div>
 
         <div className="app-shell-scroll flex-1 overflow-y-auto">{children}</div>
@@ -224,37 +242,58 @@ export default function AppShell({
   );
 }
 
-function NavSection({
-  label,
-  items,
-}: {
+interface NavItem {
+  href: string;
   label: string;
-  items: { href: string; label: string; icon: typeof LayoutGrid; active: boolean }[];
-}) {
+  icon: typeof LayoutGrid;
+  active: boolean;
+  /** Sub-pages nested under this item (e.g. งานบำรุงรักษา under ระบบงาน
+   * IT) — rendered indented, under a connecting rule, instead of as a
+   * same-level item, so the sidebar reflects that they're part of the
+   * parent feature rather than a separate one. */
+  children?: NavItem[];
+}
+
+function NavSection({ label, items }: { label: string; items: NavItem[] }) {
   return (
     <div>
-      <p className="px-3 pb-2 text-[11px] font-medium uppercase tracking-wider text-emerald-400/80">{label}</p>
+      <p className="px-3 pb-2 text-[11px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">{label}</p>
       <ul className="space-y-1">
-        {items.map((item) => {
-          const Icon = item.icon;
-          return (
-            <li key={item.href}>
-              <Link
-                href={item.href}
-                aria-current={item.active ? "page" : undefined}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                  item.active
-                    ? "bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] text-white shadow-sm"
-                    : "text-emerald-200/90 hover:bg-emerald-900 hover:text-white"
-                }`}
-              >
-                <Icon size={16} strokeWidth={2} aria-hidden="true" />
-                <span className="truncate">{item.label}</span>
-              </Link>
-            </li>
-          );
-        })}
+        {items.map((item) => (
+          <li key={item.href}>
+            <NavLink item={item} />
+            {item.children && item.children.length > 0 && (
+              <ul className="ml-[1.15rem] mt-1 space-y-1 border-l border-emerald-900/15 pl-3.5 dark:border-emerald-400/15">
+                {item.children.map((child) => (
+                  <li key={child.href}>
+                    <NavLink item={child} sub />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
       </ul>
     </div>
+  );
+}
+
+function NavLink({ item, sub = false }: { item: NavItem; sub?: boolean }) {
+  const Icon = item.icon;
+  return (
+    <Link
+      href={item.href}
+      aria-current={item.active ? "page" : undefined}
+      className={`flex items-center gap-3 rounded-lg font-medium transition-colors ${
+        sub ? "px-3 py-1.5 text-[13px]" : "px-3 py-2 text-sm"
+      } ${
+        item.active
+          ? "bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] text-white shadow-sm"
+          : "text-zinc-600 hover:bg-emerald-50 hover:text-emerald-800 dark:text-zinc-300 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-200"
+      }`}
+    >
+      <Icon size={sub ? 14 : 16} strokeWidth={2} aria-hidden="true" />
+      <span className="truncate">{item.label}</span>
+    </Link>
   );
 }
