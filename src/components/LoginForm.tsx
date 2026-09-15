@@ -59,10 +59,12 @@ export default function LoginForm({ next }: { next: string }) {
             priority
             className="h-16 w-16 object-contain"
           />
-          <h1 className="mt-3 text-xl font-bold text-zinc-950 dark:text-zinc-50">
-            ระบบบริการอิเล็กทรอนิกส์กลางสำหรับบุคลากร
-          </h1>
-          <p className="mt-1 text-sm font-medium text-zinc-500 dark:text-zinc-400">โรงพยาบาลท่าตะเกียบ</p>
+          <h1 className="mt-3 text-xl font-bold text-zinc-950 dark:text-zinc-50">โรงพยาบาลท่าตะเกียบ</h1>
+          <p className="mt-1 text-sm font-medium leading-5 text-zinc-500 dark:text-zinc-400">
+            ระบบบริการอิเล็กทรอนิกส์กลาง
+            <br />
+            สำหรับบุคลากร
+          </p>
         </div>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
