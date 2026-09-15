@@ -81,6 +81,23 @@ export function canAccessItDashboard(session: Pick<SessionPayload, "role" | "isB
   return session.role === "it" || (session.role === "superadmin" && session.isBootstrap);
 }
 
+/**
+ * Managing booking resources (adding a car/meeting room, editing one,
+ * toggling it active/inactive) — per the hospital's explicit request, only
+ * the "it" role or the single env-configured bootstrap superadmin account
+ * may do this, exactly the same rule as canAccessItDashboard above. A
+ * superadmin created later through /manage/users has full add/edit/dispose
+ * rights everywhere else, but not here. *Making* a booking itself stays
+ * open to every logged-in account regardless — see lib/booking.ts's top
+ * comment — this only gates the resource list itself. Kept as its own
+ * named function (rather than reusing canAccessItDashboard directly) so
+ * the two rules can diverge later without one silently changing the other,
+ * even though they start out identical.
+ */
+export function canManageBookingResources(session: Pick<SessionPayload, "role" | "isBootstrap">): boolean {
+  return session.role === "it" || (session.role === "superadmin" && session.isBootstrap);
+}
+
 /** Hashes a plaintext password for storage (in the Users sheet tab or the
  * BOOTSTRAP_SUPERADMIN_PASSWORD_HASH env var) — "<saltHex>:<hashHex>".
  * Called server-side only, from the add/reset-user flow; the plaintext

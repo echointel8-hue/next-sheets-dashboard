@@ -38,13 +38,13 @@ export default function MenuHub({
       icon: <Package size={22} strokeWidth={2} aria-hidden="true" />,
     },
     {
-      href: "/booking?type=car",
+      href: "/booking/car",
       title: "ระบบจองรถ",
       description: "จองรถของโรงพยาบาล ดูช่วงเวลาที่ว่าง และรายการที่จองไว้",
       icon: <Car size={22} strokeWidth={2} aria-hidden="true" />,
     },
     {
-      href: "/booking?type=room",
+      href: "/booking/room",
       title: "ระบบจองห้องประชุม",
       description: "จองห้องประชุม ดูช่วงเวลาที่ว่าง และรายการที่จองไว้",
       icon: <DoorOpen size={22} strokeWidth={2} aria-hidden="true" />,

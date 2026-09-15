@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Loader2, Save, X } from "lucide-react";
+import { AlertTriangle, ImageOff, Loader2, Save, X } from "lucide-react";
 import type { Booking, BookingResource, BookingResourceType } from "@/lib/booking";
 
 const INPUT_CLASS =
@@ -46,6 +46,14 @@ export default function BookingFormModal({
   useEffect(() => {
     firstInputRef.current?.focus();
   }, []);
+
+  // Live photo preview of whichever resource is currently selected, so the
+  // booker can look at what they're about to book before confirming — per
+  // the hospital's explicit request.
+  const selectedResource = useMemo(
+    () => resources.find((r) => r.resourceId === resourceId),
+    [resources, resourceId]
+  );
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -154,22 +162,47 @@ export default function BookingFormModal({
                 ยังไม่มี{typeLabel}ที่เปิดให้จอง — เพิ่ม{typeLabel}ก่อน
               </p>
             ) : (
-              <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
-                {typeLabel}
-                <select
-                  ref={firstInputRef}
-                  value={resourceId}
-                  onChange={(e) => setResourceId(e.target.value)}
-                  disabled={saving}
-                  className={INPUT_CLASS}
-                >
-                  {resources.map((r) => (
-                    <option key={r.resourceId} value={r.resourceId}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <>
+                <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+                  {typeLabel}
+                  <select
+                    ref={firstInputRef}
+                    value={resourceId}
+                    onChange={(e) => setResourceId(e.target.value)}
+                    disabled={saving}
+                    className={INPUT_CLASS}
+                  >
+                    {resources.map((r) => (
+                      <option key={r.resourceId} value={r.resourceId}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {/* พรีวิวรูปของ{typeLabel}ที่เลือกอยู่ — ให้ผู้จองได้พิจารณา
+                    ภาพก่อนตัดสินใจจอง ตามที่ขอ */}
+                <div className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 dark:border-zinc-700 dark:bg-zinc-800/60">
+                  <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md bg-zinc-100 dark:bg-zinc-800">
+                    {selectedResource?.imageDataUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- data: URL from the sheet, not a static/remote asset next/image can optimize
+                      <img
+                        src={selectedResource.imageDataUrl}
+                        alt={selectedResource.name}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <ImageOff size={16} strokeWidth={1.5} className="text-zinc-300 dark:text-zinc-600" aria-hidden="true" />
+                    )}
+                  </div>
+                  <div className="min-w-0 text-xs text-zinc-500 dark:text-zinc-400">
+                    {selectedResource?.detail ? (
+                      <p className="leading-5">{selectedResource.detail}</p>
+                    ) : (
+                      <p className="italic">ไม่มีรายละเอียดเพิ่มเติม</p>
+                    )}
+                  </div>
+                </div>
+              </>
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">

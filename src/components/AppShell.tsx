@@ -4,8 +4,9 @@ import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Calendar,
+  Car,
   ClipboardList,
+  DoorOpen,
   Globe,
   Hospital,
   LayoutGrid,
@@ -20,7 +21,7 @@ import {
 /**
  * Persistent left-sidebar app shell for every authenticated screen (/menu,
  * /manage, /manage/it, /manage/it/tasks, /manage/it/report, /manage/users,
- * /booking). Introduced to replace the old pattern of each page repeating
+ * /booking/car, /booking/room). Introduced to replace the old pattern of each page repeating
  * its own row of "เมนูหลัก / จองรถ/ห้องประชุม / ระบบงาน IT / ออกจากระบบ"
  * links inside its own <header> — same destinations, same role gating,
  * just declared once here instead of copy-pasted seven times (see the
@@ -94,9 +95,13 @@ export default function AppShell({
     }
   }
 
+  // จองรถ / จองห้องประชุม are genuinely separate menu items and pages now
+  // (/booking/car, /booking/room), not one combined "ระบบจองรถ / ห้องประชุม"
+  // entry with an internal switcher — per the hospital's explicit request.
   const generalItems = [
     { href: "/menu", label: "เมนูหลัก", icon: LayoutGrid, active: pathname === "/menu" },
-    { href: "/booking", label: "ระบบจองรถ / ห้องประชุม", icon: Calendar, active: pathname.startsWith("/booking") },
+    { href: "/booking/car", label: "จองรถ", icon: Car, active: pathname.startsWith("/booking/car") },
+    { href: "/booking/room", label: "จองห้องประชุม", icon: DoorOpen, active: pathname.startsWith("/booking/room") },
   ];
 
   const registryItems = canAccessManage

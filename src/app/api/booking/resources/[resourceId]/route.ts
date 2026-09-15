@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, canManageBookingResources, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog, updateBookingResource } from "@/lib/sheets";
+import { isValidResourceImageDataUrl } from "@/lib/booking";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,7 @@ interface ResourceUpdatePayload {
   name?: string;
   detail?: string;
   active?: boolean;
+  imageDataUrl?: string;
 }
 
 function readUpdatePayload(body: unknown): ResourceUpdatePayload | null {
@@ -30,17 +32,28 @@ function readUpdatePayload(body: unknown): ResourceUpdatePayload | null {
   }
   if (typeof b.detail === "string") out.detail = b.detail.trim();
   if (typeof b.active === "boolean") out.active = b.active;
+  if (typeof b.imageDataUrl === "string") {
+    if (!isValidResourceImageDataUrl(b.imageDataUrl)) return null;
+    out.imageDataUrl = b.imageDataUrl;
+  }
   if (Object.keys(out).length === 0) return null;
   return out;
 }
 
-/** Edits a vehicle/meeting room's name/detail, or toggles it
+/** Edits a vehicle/meeting room's name/detail/photo, or toggles it
  * active/inactive (soft-deactivate — never hard-deleted, so past bookings
- * keep their meaning). Reachable by any logged-in account, per the
- * hospital's explicit request — no owner/creator restriction. */
+ * keep their meaning). Reachable only by the "it" role or the single
+ * env-configured bootstrap superadmin account, per the hospital's explicit
+ * request — see canManageBookingResources in lib/auth.ts. */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ resourceId: string }> }) {
   const { session, response } = requireSession(request);
   if (!session) return response;
+  if (!canManageBookingResources(session)) {
+    return NextResponse.json(
+      { error: "แก้ไขรถ/ห้องประชุมได้เฉพาะสิทธิ์ IT และ Superadmin ที่ระบบสร้างให้เท่านั้น" },
+      { status: 403 }
+    );
+  }
   const { resourceId } = await params;
 
   let body: unknown;
@@ -51,13 +64,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
   const updates = readUpdatePayload(body);
   if (!updates) {
-    return NextResponse.json({ error: "ข้อมูลที่ส่งมาไม่ถูกต้อง" }, { status: 400 });
+    return NextResponse.json(
+      { error: "ข้อมูลที่ส่งมาไม่ถูกต้อง (รูปภาพต้องมีขนาดไม่เกินที่กำหนด)" },
+      { status: 400 }
+    );
   }
 
   try {
     const resource = await updateBookingResource(resourceId, updates);
+    // imageDataUrl can be tens of thousands of characters — log that a
+    // photo changed, never the data itself, so the audit log stays legible
+    // and doesn't balloon in size.
     const changeSummary = Object.entries(updates)
-      .map(([k, v]) => `${k}=${v}`)
+      .map(([k, v]) => (k === "imageDataUrl" ? `imageDataUrl=${v ? "(updated)" : "(removed)"}` : `${k}=${v}`))
       .join(", ");
     await appendEditLog({
       timestamp: new Date().toISOString(),

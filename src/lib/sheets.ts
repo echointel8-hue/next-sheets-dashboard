@@ -1465,12 +1465,14 @@ function columnLetter(index: number): string {
 // other tab here: the sheet owner creates both by hand before anyone can
 // add a resource or make a booking. Reading tolerates either tab being
 // missing (just means "no resources/bookings yet"); writing requires the
-// relevant tab to exist. Any logged-in account, any role, can read/write
-// both — see lib/booking.ts's top comment for why there's no role gate.
+// relevant tab to exist. Any logged-in account, any role, can read both and
+// can make a booking — only *managing* BookingResources itself (add/edit/
+// toggle-active) is restricted, see lib/booking.ts's top comment and
+// canManageBookingResources in lib/auth.ts.
 // ---------------------------------------------------------------------------
 
 const BOOKING_RESOURCES_HEADER_ROW = [
-  "ResourceId", "Type", "Name", "Detail", "Active", "CreatedAt", "CreatedByUsername",
+  "ResourceId", "Type", "Name", "Detail", "Active", "CreatedAt", "CreatedByUsername", "ImageDataUrl",
 ];
 
 const BOOKINGS_HEADER_ROW = [
@@ -1501,11 +1503,15 @@ function rowToBookingResource(row: string[]): BookingResource {
     active: parseActive(col(4)),
     createdAt: col(5),
     createdByUsername: col(6),
+    imageDataUrl: col(7),
   };
 }
 
 function bookingResourceToRow(r: BookingResource): (string | number)[] {
-  return [r.resourceId, r.type, r.name, r.detail, r.active ? "Y" : "N", r.createdAt, r.createdByUsername];
+  return [
+    r.resourceId, r.type, r.name, r.detail, r.active ? "Y" : "N", r.createdAt, r.createdByUsername,
+    r.imageDataUrl,
+  ];
 }
 
 function rowToBooking(row: string[]): Booking {
@@ -1549,7 +1555,7 @@ export async function getBookingResources(): Promise<BookingResource[]> {
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:G100000`,
+      range: `${tab}!A2:H100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -1573,6 +1579,7 @@ export async function createBookingResource(input: {
   name: string;
   detail: string;
   createdByUsername: string;
+  imageDataUrl: string;
 }): Promise<BookingResource> {
   const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
   const tab = getBookingResourcesTab();
@@ -1586,6 +1593,7 @@ export async function createBookingResource(input: {
     active: true,
     createdAt: new Date().toISOString(),
     createdByUsername: input.createdByUsername,
+    imageDataUrl: input.imageDataUrl,
   };
 
   try {
@@ -1618,7 +1626,7 @@ export async function createBookingResource(input: {
  * getBookingResources callers in the API routes). */
 export async function updateBookingResource(
   resourceId: string,
-  updates: Partial<Pick<BookingResource, "name" | "detail" | "active">>
+  updates: Partial<Pick<BookingResource, "name" | "detail" | "active" | "imageDataUrl">>
 ): Promise<BookingResource> {
   const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
   const tab = getBookingResourcesTab();
@@ -1628,7 +1636,7 @@ export async function updateBookingResource(
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:G100000`,
+      range: `${tab}!A2:H100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -1647,7 +1655,7 @@ export async function updateBookingResource(
   try {
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${tab}!A${sheetRow}:G${sheetRow}`,
+      range: `${tab}!A${sheetRow}:H${sheetRow}`,
       valueInputOption: "USER_ENTERED",
       requestBody: { values: [bookingResourceToRow(merged)] },
     });

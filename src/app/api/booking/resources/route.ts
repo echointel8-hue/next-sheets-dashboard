@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, canManageBookingResources, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog, createBookingResource, getBookingResources } from "@/lib/sheets";
-import type { BookingResourceType } from "@/lib/booking";
+import { isValidResourceImageDataUrl, type BookingResourceType } from "@/lib/booking";
 
 // Always live — resources can be added by any logged-in account at any
 // time and the list is small, so caching isn't worth the staleness.
@@ -42,20 +42,39 @@ export async function GET(request: NextRequest) {
   }
 }
 
-function readResourcePayload(body: unknown): { type: BookingResourceType; name: string; detail: string } | null {
+function readResourcePayload(
+  body: unknown
+): { type: BookingResourceType; name: string; detail: string; imageDataUrl: string } | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
   if (b.type !== "car" && b.type !== "room") return null;
   if (typeof b.name !== "string" || !b.name.trim()) return null;
   if (typeof b.detail !== "string" && typeof b.detail !== "undefined") return null;
-  return { type: b.type, name: b.name.trim(), detail: typeof b.detail === "string" ? b.detail.trim() : "" };
+  if (typeof b.imageDataUrl !== "string" && typeof b.imageDataUrl !== "undefined") return null;
+  const imageDataUrl = typeof b.imageDataUrl === "string" ? b.imageDataUrl : "";
+  if (!isValidResourceImageDataUrl(imageDataUrl)) return null;
+  return {
+    type: b.type,
+    name: b.name.trim(),
+    detail: typeof b.detail === "string" ? b.detail.trim() : "",
+    imageDataUrl,
+  };
 }
 
-/** Adds one new vehicle or meeting room — reachable by any logged-in
- * account, per the hospital's explicit request. */
+/** Adds one new vehicle or meeting room — reachable only by the "it" role
+ * or the single env-configured bootstrap superadmin account, per the
+ * hospital's explicit request — see canManageBookingResources in
+ * lib/auth.ts. *Making a booking* (POST /api/booking/bookings) stays open
+ * to every logged-in account; only resource management is restricted. */
 export async function POST(request: NextRequest) {
   const { session, response } = requireSession(request);
   if (!session) return response;
+  if (!canManageBookingResources(session)) {
+    return NextResponse.json(
+      { error: "เพิ่มรถ/ห้องประชุมได้เฉพาะสิทธิ์ IT และ Superadmin ที่ระบบสร้างให้เท่านั้น" },
+      { status: 403 }
+    );
+  }
 
   let body: unknown;
   try {
@@ -65,7 +84,10 @@ export async function POST(request: NextRequest) {
   }
   const payload = readResourcePayload(body);
   if (!payload) {
-    return NextResponse.json({ error: "ข้อมูลที่ส่งมาไม่ถูกต้อง — กรุณาระบุประเภทและชื่อ" }, { status: 400 });
+    return NextResponse.json(
+      { error: "ข้อมูลที่ส่งมาไม่ถูกต้อง — กรุณาระบุประเภทและชื่อ (รูปภาพต้องมีขนาดไม่เกินที่กำหนด)" },
+      { status: 400 }
+    );
   }
 
   try {

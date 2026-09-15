@@ -29,3 +29,14 @@ export function roleLabelFor(role: Role, department: string, isBootstrap: boolea
 export function canAccessItDashboardClient(role: Role, isBootstrap: boolean): boolean {
   return role === "it" || (role === "superadmin" && isBootstrap);
 }
+
+/**
+ * Client-safe mirror of lib/auth.ts's canManageBookingResources() — same
+ * duplication reasoning as canAccessItDashboardClient above. Used only to
+ * decide whether BookingDashboard shows the "เพิ่ม/แก้ไข/เปิด-ปิดใช้งาน"
+ * controls for cars/meeting rooms — the real authorization decision always
+ * stays server-side in the booking resource API routes.
+ */
+export function canManageBookingResourcesClient(role: Role, isBootstrap: boolean): boolean {
+  return role === "it" || (role === "superadmin" && isBootstrap);
+}

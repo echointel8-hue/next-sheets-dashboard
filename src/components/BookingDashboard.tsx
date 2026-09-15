@@ -9,6 +9,7 @@ import {
   CalendarPlus,
   Car,
   DoorOpen,
+  ImageOff,
   List,
   Loader2,
   MapPin,
@@ -28,7 +29,7 @@ import {
   type BookingResource,
   type BookingResourceType,
 } from "@/lib/booking";
-import { canAccessItDashboardClient, roleLabelFor } from "@/lib/roleLabel";
+import { canAccessItDashboardClient, canManageBookingResourcesClient, roleLabelFor } from "@/lib/roleLabel";
 import AppShell from "@/components/AppShell";
 import BookingResourceFormModal from "@/components/BookingResourceFormModal";
 import BookingFormModal from "@/components/BookingFormModal";
@@ -50,27 +51,28 @@ const ACTION_BUTTON =
   "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60";
 
 /**
- * Top-level page for the vehicle / meeting-room booking feature. Every
- * logged-in account (any role) can reach this page, add/edit/deactivate
- * resources, and make bookings — see each API route's own comments. Car
- * and room bookings are kept as two clearly separate sections (a pill
- * switcher, not a merged generic-resource picker) per the hospital's
- * explicit request.
+ * Top-level page for one half of the vehicle / meeting-room booking
+ * feature — /booking/car and /booking/room are now genuinely separate
+ * pages/menu items (not a combined page with an internal car/room
+ * switcher), each rendering this same component pinned to its own `type`,
+ * per the hospital's explicit request. Every logged-in account (any role)
+ * can make a booking; only managing the resource list itself
+ * (add/edit/toggle-active — see canManageBookingResourcesClient) is
+ * restricted to the "it" role and the bootstrap superadmin account.
  */
 export default function BookingDashboard({
   session,
   initial,
-  initialType = "car",
+  type,
 }: {
   session: { username: string; displayName: string; role: Role; department: string; isBootstrap: boolean };
   initial: BookingLoadResult;
-  /** Which tab to open on — set from the page's own ?type= search param so
-   * /menu's "ระบบจองรถ" / "ระบบจองห้องประชุม" cards land directly on the
-   * matching section instead of always opening on "จองรถ". */
-  initialType?: BookingResourceType;
+  /** Fixed for the lifetime of this page — set by whichever route rendered
+   * it (/booking/car or /booking/room), never changed client-side. */
+  type: BookingResourceType;
 }) {
   const [data, setData] = useState<BookingLoadResult>(initial);
-  const [activeType, setActiveType] = useState<BookingResourceType>(initialType);
+  const canManageResources = canManageBookingResourcesClient(session.role, session.isBootstrap);
   const [resourceModal, setResourceModal] = useState<{ mode: "add" | "edit"; resource?: BookingResource } | null>(
     null
   );
@@ -89,17 +91,17 @@ export default function BookingDashboard({
   // dependency and avoids the "changes every render" lint warning without
   // introducing a redundant extra useMemo layer just to memoize them too.
   const typeResources = useMemo(
-    () => resources.filter((r) => r.type === activeType).slice().sort((a, b) => a.name.localeCompare(b.name, "th")),
-    [data, activeType] // eslint-disable-line react-hooks/exhaustive-deps
+    () => resources.filter((r) => r.type === type).slice().sort((a, b) => a.name.localeCompare(b.name, "th")),
+    [data, type] // eslint-disable-line react-hooks/exhaustive-deps
   );
   const activeTypeResources = useMemo(() => typeResources.filter((r) => r.active), [typeResources]);
   const typeBookings = useMemo(
     () =>
       bookings
-        .filter((b) => b.resourceType === activeType)
+        .filter((b) => b.resourceType === type)
         .slice()
         .sort((a, b) => (a.startTime < b.startTime ? 1 : -1)),
-    [data, activeType] // eslint-disable-line react-hooks/exhaustive-deps
+    [data, type] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   // Color each resource of the current type by when it was *created*
@@ -113,16 +115,16 @@ export default function BookingDashboard({
   // since-deactivated resource still shows a stable, decodable color.
   const resourceColorMap: Map<string, ActionColor> = useMemo(() => {
     const byCreatedAt = resources
-      .filter((r) => r.type === activeType)
+      .filter((r) => r.type === type)
       .slice()
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .map((r) => r.name);
     return buildActionColorMap(byCreatedAt);
     // `resources` is freshly re-derived from `data` every render (see the
-    // comment above typeResources); `data`/`activeType` are the real,
+    // comment above typeResources); `data`/`type` are the real,
     // stable dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, activeType]);
+  }, [data, type]);
 
   function handleResourceSaved(resource: BookingResource) {
     setData((prev) => {
@@ -191,7 +193,8 @@ export default function BookingDashboard({
     }
   }
 
-  const typeLabel = activeType === "car" ? "รถ" : "ห้องประชุม";
+  const typeLabel = type === "car" ? "รถ" : "ห้องประชุม";
+  const TypeIcon = type === "car" ? Car : DoorOpen;
 
   return (
     <AppShell
@@ -209,11 +212,11 @@ export default function BookingDashboard({
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
             aria-hidden="true"
           >
-            <Calendar size={20} strokeWidth={2} />
+            <TypeIcon size={20} strokeWidth={2} />
           </span>
           <div>
             <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">
-              ระบบจองรถ / ห้องประชุม
+              ระบบจอง{typeLabel}
             </h1>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
               {session.displayName || session.username} · {session.role}
@@ -251,55 +254,23 @@ export default function BookingDashboard({
 
         {!isError(data) && (
           <>
-            {/* แยกเมนูการใช้งานระหว่างการจองรถ และจองห้องประชุม — a pill
-                switcher, not a merged generic-resource picker, per the
-                hospital's explicit request. */}
-            <div className="inline-flex w-fit gap-1 rounded-full border border-zinc-200 bg-white p-1 dark:border-zinc-700 dark:bg-zinc-900">
-              <button
-                type="button"
-                onClick={() => setActiveType("car")}
-                className={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-                  activeType === "car"
-                    ? "bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
-                    : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                }`}
-              >
-                <Car size={16} strokeWidth={2} aria-hidden="true" />
-                จองรถ
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveType("room")}
-                className={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-                  activeType === "room"
-                    ? "bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
-                    : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                }`}
-              >
-                <DoorOpen size={16} strokeWidth={2} aria-hidden="true" />
-                จองห้องประชุม
-              </button>
-            </div>
-
             {/* รายการ{typeLabel} */}
             <div className={`${CARD} flex flex-col gap-3 p-4`}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-                  {activeType === "car" ? (
-                    <Car size={15} strokeWidth={2} aria-hidden="true" />
-                  ) : (
-                    <DoorOpen size={15} strokeWidth={2} aria-hidden="true" />
-                  )}
+                  <TypeIcon size={15} strokeWidth={2} aria-hidden="true" />
                   รายการ{typeLabel}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setResourceModal({ mode: "add" })}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] px-3 py-1.5 text-xs font-medium text-[var(--brand-contrast)] shadow-sm transition-opacity hover:opacity-90"
-                >
-                  <Plus size={14} strokeWidth={2} aria-hidden="true" />
-                  เพิ่ม{typeLabel}ใหม่
-                </button>
+                {canManageResources && (
+                  <button
+                    type="button"
+                    onClick={() => setResourceModal({ mode: "add" })}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] px-3 py-1.5 text-xs font-medium text-[var(--brand-contrast)] shadow-sm transition-opacity hover:opacity-90"
+                  >
+                    <Plus size={14} strokeWidth={2} aria-hidden="true" />
+                    เพิ่ม{typeLabel}ใหม่
+                  </button>
+                )}
               </div>
 
               {typeResources.length === 0 ? (
@@ -317,6 +288,20 @@ export default function BookingDashboard({
                           : "border-zinc-200 bg-zinc-50 opacity-70 dark:border-zinc-800 dark:bg-zinc-950/40"
                       }`}
                     >
+                      {/* รูปภาพ — ให้ผู้จองได้พิจารณาก่อนตัดสินใจจอง (ที่นี่
+                          และอีกครั้งในตัวเลือกตอนจอง — ดู BookingFormModal) */}
+                      <div className="flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
+                        {resource.imageDataUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- data: URL from the sheet, not a static/remote asset next/image can optimize
+                          <img
+                            src={resource.imageDataUrl}
+                            alt={resource.name}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <ImageOff size={22} strokeWidth={1.5} className="text-zinc-300 dark:text-zinc-600" aria-hidden="true" />
+                        )}
+                      </div>
                       <div className="flex items-start justify-between gap-2">
                         <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
                           {resource.name}
@@ -330,35 +315,37 @@ export default function BookingDashboard({
                       {resource.detail && (
                         <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">{resource.detail}</p>
                       )}
-                      <div className="mt-1 flex flex-wrap gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setResourceModal({ mode: "edit", resource })}
-                          className={`${ACTION_BUTTON} border-zinc-200 text-zinc-600 hover:bg-zinc-50 focus-visible:outline-zinc-500 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800`}
-                        >
-                          <Pencil size={12} strokeWidth={2} aria-hidden="true" />
-                          แก้ไข
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => toggleResourceActive(resource)}
-                          disabled={togglingResourceId === resource.resourceId}
-                          className={
-                            resource.active
-                              ? `${ACTION_BUTTON} border-amber-200 text-amber-700 hover:bg-amber-50 focus-visible:outline-amber-600 dark:border-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-950/30`
-                              : `${ACTION_BUTTON} border-emerald-200 text-emerald-700 hover:bg-emerald-50 focus-visible:outline-emerald-600 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`
-                          }
-                        >
-                          {togglingResourceId === resource.resourceId ? (
-                            <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-                          ) : resource.active ? (
-                            <Ban size={12} strokeWidth={2} aria-hidden="true" />
-                          ) : (
-                            <Power size={12} strokeWidth={2} aria-hidden="true" />
-                          )}
-                          {resource.active ? "ปิดใช้งาน" : "เปิดใช้งาน"}
-                        </button>
-                      </div>
+                      {canManageResources && (
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setResourceModal({ mode: "edit", resource })}
+                            className={`${ACTION_BUTTON} border-zinc-200 text-zinc-600 hover:bg-zinc-50 focus-visible:outline-zinc-500 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800`}
+                          >
+                            <Pencil size={12} strokeWidth={2} aria-hidden="true" />
+                            แก้ไข
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleResourceActive(resource)}
+                            disabled={togglingResourceId === resource.resourceId}
+                            className={
+                              resource.active
+                                ? `${ACTION_BUTTON} border-amber-200 text-amber-700 hover:bg-amber-50 focus-visible:outline-amber-600 dark:border-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-950/30`
+                                : `${ACTION_BUTTON} border-emerald-200 text-emerald-700 hover:bg-emerald-50 focus-visible:outline-emerald-600 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`
+                            }
+                          >
+                            {togglingResourceId === resource.resourceId ? (
+                              <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                            ) : resource.active ? (
+                              <Ban size={12} strokeWidth={2} aria-hidden="true" />
+                            ) : (
+                              <Power size={12} strokeWidth={2} aria-hidden="true" />
+                            )}
+                            {resource.active ? "ปิดใช้งาน" : "เปิดใช้งาน"}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -429,7 +416,7 @@ export default function BookingDashboard({
                   session={session}
                   onCancel={handleCancelBooking}
                   cancellingBookingId={cancellingBookingId}
-                  showDestination={activeType === "car"}
+                  showDestination={type === "car"}
                 />
               ) : (
                 <div className="overflow-x-auto">
@@ -439,7 +426,7 @@ export default function BookingDashboard({
                         <th className="px-2 py-2">{typeLabel}</th>
                         <th className="px-2 py-2">ช่วงเวลา</th>
                         <th className="px-2 py-2">วัตถุประสงค์</th>
-                        {activeType === "car" && <th className="px-2 py-2">ปลายทาง</th>}
+                        {type === "car" && <th className="px-2 py-2">ปลายทาง</th>}
                         <th className="px-2 py-2">ผู้เข้าร่วม</th>
                         <th className="px-2 py-2">ผู้จอง</th>
                         <th className="px-2 py-2">สถานะ</th>
@@ -472,7 +459,7 @@ export default function BookingDashboard({
                               <br />– {formatBookingDateTime(booking.endTime)}
                             </td>
                             <td className="px-2 py-2.5 text-zinc-600 dark:text-zinc-300">{booking.purpose}</td>
-                            {activeType === "car" && (
+                            {type === "car" && (
                               <td className="px-2 py-2.5 text-zinc-600 dark:text-zinc-300">
                                 {booking.destination && (
                                   <span className="inline-flex items-center gap-1">
@@ -538,7 +525,7 @@ export default function BookingDashboard({
       {resourceModal && (
         <BookingResourceFormModal
           mode={resourceModal.mode}
-          type={activeType}
+          type={type}
           resource={resourceModal.resource}
           onClose={() => setResourceModal(null)}
           onSaved={handleResourceSaved}
@@ -546,7 +533,7 @@ export default function BookingDashboard({
       )}
       {bookingModalOpen && (
         <BookingFormModal
-          resourceType={activeType}
+          resourceType={type}
           resources={activeTypeResources}
           onClose={() => setBookingModalOpen(false)}
           onSaved={handleBookingSaved}

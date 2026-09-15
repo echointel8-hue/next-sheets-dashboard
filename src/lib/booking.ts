@@ -7,12 +7,15 @@ import type { Role } from "@/lib/auth";
 // file follows). The actual Google Sheets read/write for both tabs lives in
 // lib/sheets.ts, which imports and re-exports these types.
 //
-// Per the hospital's explicit request: every logged-in account (any role —
-// superadmin, admin, it) has equal rights to add/edit resources and to
-// book them — there is no role restriction anywhere in this feature, only
-// "must be logged in." Bookings are confirmed immediately on creation; the
-// only gate is the time-conflict check below against the same resource —
-// there is no approval step.
+// Per the hospital's explicit request, *making a booking* stays open to
+// every logged-in account (any role) — there is no role restriction there,
+// only "must be logged in." Managing the resources themselves (adding a
+// car/room, editing one, toggling it active/inactive) is narrower: only the
+// "it" role or the single env-configured bootstrap superadmin account may
+// do that — see canManageBookingResources in lib/auth.ts — a superadmin
+// created later through /manage/users cannot. Bookings are confirmed
+// immediately on creation; the only gate is the time-conflict check below
+// against the same resource — there is no approval step.
 
 export type BookingResourceType = "car" | "room";
 
@@ -32,6 +35,27 @@ export interface BookingResource {
   active: boolean;
   createdAt: string;
   createdByUsername: string;
+  /** "" (no photo) or a full `data:image/...;base64,...` data URL, resized
+   * and compressed client-side (see BookingResourceFormModal) before it's
+   * ever sent to the server, so a booker can see what they're booking
+   * before confirming. Stored directly in the sheet cell — see
+   * MAX_RESOURCE_IMAGE_DATA_URL_LENGTH below for why it has to stay small. */
+  imageDataUrl: string;
+}
+
+/** Google Sheets caps a single cell at 50,000 characters — this keeps a
+ * healthy safety margin under that ceiling (the row's other columns, plus
+ * quoting/encoding overhead, all share the same request) while still
+ * allowing a small, recognizable photo. BookingResourceFormModal resizes
+ * and re-compresses every photo client-side to fit under this before it's
+ * ever submitted; isValidResourceImageDataUrl below is the one shared check
+ * both that upload UI and the API routes (defense in depth) run against it. */
+export const MAX_RESOURCE_IMAGE_DATA_URL_LENGTH = 42000;
+
+export function isValidResourceImageDataUrl(value: string): boolean {
+  if (value === "") return true;
+  if (value.length > MAX_RESOURCE_IMAGE_DATA_URL_LENGTH) return false;
+  return /^data:image\/(png|jpe?g|webp);base64,/.test(value);
 }
 
 /** One booking against one resource, for one time range. No status field —
