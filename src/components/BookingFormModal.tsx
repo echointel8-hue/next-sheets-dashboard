@@ -272,7 +272,7 @@ export default function BookingFormModal({
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
-                จำนวนผู้โดยสาร/ผู้เข้าร่วม
+                {resourceType === "car" ? "จำนวนผู้โดยสาร" : "จำนวนผู้เข้าร่วม"}
                 <input
                   type="number"
                   min={0}
