@@ -116,3 +116,25 @@ body {
     Arial,
     sans-serif;
 }
+
+/* AppShell (src/components/AppShell.tsx) print safety — belt-and-suspenders
+   alongside its own `print:hidden` Tailwind classes. The shell locks the
+   sidebar + main content to the viewport height (`h-screen overflow-hidden`
+   on the shell, `overflow-y-auto` on the scrolling main pane) so the app
+   reads like a normal dashboard shell on screen — but that same fixed
+   height silently truncates a multi-page print job (MaintenanceReportBuilder,
+   at /manage/it/report, is the one page in this app that prints) to
+   whatever fit in the on-screen scroll viewport. This rule unconditionally
+   restores normal, unclipped document flow for print regardless of which
+   page is mounted, so the shell can never reintroduce that clipping bug
+   even if a future page adds its own print view without knowing about it. */
+@media print {
+  .app-shell-sidebar,
+  .app-shell-topbar {
+    display: none !important;
+  }
+  .app-shell-scroll {
+    height: auto !important;
+    overflow: visible !important;
+  }
+}

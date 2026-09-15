@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -14,7 +12,6 @@ import {
   FileText,
   Loader2,
   Lock,
-  LogOut,
   MapPin,
   PenLine,
   Plus,
@@ -39,6 +36,7 @@ import {
   type ActionColor,
 } from "@/lib/actionColors";
 import MultiSelect from "@/components/MultiSelect";
+import AppShell from "@/components/AppShell";
 
 /** One selectable equipment item — already flattened/redaction-free by
  * manage/it/report/page.tsx from the raw sheet row, so this component never
@@ -426,15 +424,6 @@ export default function MaintenanceReportBuilder({
   reprintTasks?: ReprintTaskInfo[];
 }) {
   const router = useRouter();
-
-  async function logout() {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } finally {
-      router.push("/login");
-      router.refresh();
-    }
-  }
 
   const [items, setItems] = useState(initialItems);
   // Multi-select — an empty array means "no filter on that dimension", same
@@ -1248,9 +1237,17 @@ export default function MaintenanceReportBuilder({
     // Translate conflict, not specific to this page's own logic. Since this
     // dashboard is Thai-only by design anyway, there's no reason to ever
     // offer translation on it.
+    <AppShell
+      roleLabel={currentUser.isBootstrap ? "Superadmin (Bootstrap)" : "IT"}
+      username={currentUser.username}
+      displayName={currentUser.displayName}
+      canAccessManage={currentUser.isBootstrap}
+      canManageUsers={currentUser.isBootstrap}
+      canAccessIt
+    >
     <main
       translate="no"
-      className="notranslate flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 print:block print:bg-white print:px-0 print:py-0 sm:px-6 lg:px-10"
+      className="notranslate flex w-full flex-1 justify-center px-4 py-8 print:block print:bg-white print:px-0 print:py-0 sm:px-6 lg:px-10"
     >
       <div className="flex w-full max-w-[75rem] flex-col gap-6 print:max-w-none print:gap-0">
         {/* Selection controls — never printed (see the @media print rule
@@ -1269,33 +1266,14 @@ export default function MaintenanceReportBuilder({
                 ออกรายงาน: แบบฟอร์มบำรุงรักษาเชิงป้องกัน
               </h1>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Link
-                href="/manage/it/tasks"
-                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
-                กลับไปหน้างานบำรุงรักษา
-              </Link>
-              <button
-                type="button"
-                onClick={() => setShowSettings((v) => !v)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                <Settings size={16} strokeWidth={2} aria-hidden="true" />
-                ตั้งค่าแบบฟอร์มรายงาน
-              </button>
-              {/* Logout — always the last (rightmost) control in every
-                  authenticated page's header, per the hospital's request. */}
-              <button
-                type="button"
-                onClick={logout}
-                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-300"
-              >
-                <LogOut size={16} strokeWidth={2} aria-hidden="true" />
-                ออกจากระบบ
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowSettings((v) => !v)}
+              className="inline-flex items-center gap-1.5 self-start rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:self-auto"
+            >
+              <Settings size={16} strokeWidth={2} aria-hidden="true" />
+              ตั้งค่าแบบฟอร์มรายงาน
+            </button>
           </header>
 
           {isReprint && (
@@ -2554,5 +2532,6 @@ export default function MaintenanceReportBuilder({
         }
       `}</style>
     </main>
+    </AppShell>
   );
 }

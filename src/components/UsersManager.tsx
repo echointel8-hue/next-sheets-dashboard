@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { AlertTriangle, ArrowLeft, LogOut, Pencil, Plus, ShieldCheck, UserRound, Wrench } from "lucide-react";
+import { AlertTriangle, Pencil, Plus, ShieldCheck, UserRound, Wrench } from "lucide-react";
 import UserFormModal, { type ManagedUser } from "@/components/UserFormModal";
+import AppShell from "@/components/AppShell";
 
 const CARD =
   "rounded-2xl border border-emerald-900/10 bg-white shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
@@ -30,20 +29,10 @@ export default function UsersManager({
   username: string;
   initial: LoadResult;
 }) {
-  const router = useRouter();
   const [data, setData] = useState<LoadResult>(initial);
   const [modal, setModal] = useState<{ mode: "add" | "edit"; user?: ManagedUser } | null>(null);
 
   const users = !isError(data) ? data.users : [];
-
-  async function logout() {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } finally {
-      router.push("/login");
-      router.refresh();
-    }
-  }
 
   function handleSaved(user: ManagedUser) {
     setData((prev) => {
@@ -59,37 +48,25 @@ export default function UsersManager({
   }
 
   return (
-    <main className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 sm:px-8 lg:px-12">
+    <AppShell
+      roleLabel="Superadmin (Bootstrap)"
+      username={username}
+      canAccessManage
+      canManageUsers
+      canAccessIt
+    >
+    <main className="flex w-full flex-1 justify-center px-4 py-8 sm:px-8 lg:px-12">
       <div className="flex w-full max-w-4xl flex-col gap-6">
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <span
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
-              aria-hidden="true"
-            >
-              <UserRound size={20} strokeWidth={2} />
-            </span>
-            <div>
-              <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">จัดการผู้ใช้</h1>
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{username} · superadmin</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href="/manage"
-              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
-              จัดการข้อมูลครุภัณฑ์
-            </Link>
-            <button
-              type="button"
-              onClick={logout}
-              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-300"
-            >
-              <LogOut size={16} strokeWidth={2} aria-hidden="true" />
-              ออกจากระบบ
-            </button>
+        <header className="flex items-center gap-3">
+          <span
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
+            aria-hidden="true"
+          >
+            <UserRound size={20} strokeWidth={2} />
+          </span>
+          <div>
+            <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">จัดการผู้ใช้</h1>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{username} · superadmin</p>
           </div>
         </header>
 
@@ -204,5 +181,6 @@ export default function UsersManager({
         />
       )}
     </main>
+    </AppShell>
   );
 }

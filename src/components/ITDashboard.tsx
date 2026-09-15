@@ -2,20 +2,14 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
-  ArrowLeft,
   Building2,
-  Calendar,
   CheckCircle2,
-  ClipboardCheck,
   Cpu,
   FileSpreadsheet,
   Filter,
-  LayoutGrid,
   Loader2,
-  LogOut,
   Package,
   Pencil,
   Printer,
@@ -43,6 +37,7 @@ import { DEFAULT_SPEC_STANDARDS, evaluateRowSpec } from "@/lib/specEvaluation";
 import MultiSelect from "@/components/MultiSelect";
 import MaintenanceStatusStrip from "@/components/MaintenanceStatusStrip";
 import BulkEditSpecModal, { type BulkEditResult } from "@/components/BulkEditSpecModal";
+import AppShell from "@/components/AppShell";
 
 export interface ITRecord {
   rowNumber: number;
@@ -171,7 +166,6 @@ export default function ITDashboard({
   actionColorOrder: string[];
   initialSpecStandards: SpecStandards | null;
 }) {
-  const router = useRouter();
   // Not a plain const — a successful bulk edit (see applyBulkEditResult
   // below) patches the affected rows' values in place so the table reflects
   // the save immediately, without a full page reload.
@@ -549,15 +543,6 @@ export default function ITDashboard({
     }
   }
 
-  async function logout() {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } finally {
-      router.push("/login");
-      router.refresh();
-    }
-  }
-
   /** Exports exactly what's currently on screen in both spec tables —
    * pcRows/printerRows, i.e. after every active filter above (กลุ่มงาน,
    * ประเภทครุภัณฑ์, สถานะ, เดือน/ปีบำรุงรักษา, and the RAM/หน่วยจัดเก็บ
@@ -595,73 +580,27 @@ export default function ITDashboard({
   }
 
   return (
-    <main className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 sm:px-6 lg:px-10">
+    <AppShell
+      roleLabel={session.isBootstrap ? "Superadmin (Bootstrap)" : "IT"}
+      username={session.username}
+      canAccessManage={session.isBootstrap}
+      canManageUsers={session.isBootstrap}
+      canAccessIt
+    >
+    <main className="flex w-full flex-1 justify-center px-4 py-8 sm:px-6 lg:px-10">
       <div className="flex w-full max-w-[100rem] flex-col gap-6">
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <span
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
-              aria-hidden="true"
-            >
-              <Wrench size={20} strokeWidth={2} />
-            </span>
-            <div>
-              <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">
-                ระบบงาน IT
-              </h1>
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{session.username}</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href="/menu"
-              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              <LayoutGrid size={16} strokeWidth={2} aria-hidden="true" />
-              เมนูหลัก
-            </Link>
-            <Link
-              href="/"
-              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
-              แดชบอร์ดสาธารณะ
-            </Link>
-            {/* /booking (จองรถ/ห้องประชุม) is reachable by every logged-in
-                account, any role — not gated by isBootstrap like the link
-                below, per the hospital's explicit request that booking
-                rights are equal across every role. */}
-            <Link
-              href="/booking"
-              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              <Calendar size={16} strokeWidth={2} aria-hidden="true" />
-              จองรถ/ห้องประชุม
-            </Link>
-            {session.isBootstrap && (
-              <Link
-                href="/manage"
-                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                <Package size={16} strokeWidth={2} aria-hidden="true" />
-                จัดการครุภัณฑ์ทั่วไป
-              </Link>
-            )}
-            <Link
-              href="/manage/it/tasks"
-              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              <ClipboardCheck size={16} strokeWidth={2} aria-hidden="true" />
-              งานบำรุงรักษา
-            </Link>
-            <button
-              type="button"
-              onClick={logout}
-              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-300"
-            >
-              <LogOut size={16} strokeWidth={2} aria-hidden="true" />
-              ออกจากระบบ
-            </button>
+        <header className="flex items-center gap-3">
+          <span
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
+            aria-hidden="true"
+          >
+            <Wrench size={20} strokeWidth={2} />
+          </span>
+          <div>
+            <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">
+              ระบบงาน IT
+            </h1>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{session.username}</p>
           </div>
         </header>
 
@@ -1034,6 +973,7 @@ export default function ITDashboard({
         )}
       </div>
     </main>
+    </AppShell>
   );
 }
 

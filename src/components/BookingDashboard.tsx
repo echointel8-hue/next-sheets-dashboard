@@ -1,8 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   Ban,
@@ -11,18 +9,14 @@ import {
   CalendarPlus,
   Car,
   DoorOpen,
-  LayoutGrid,
   List,
   Loader2,
-  LogOut,
   MapPin,
-  Package,
   Pencil,
   Phone,
   Plus,
   Power,
   Users,
-  Wrench,
 } from "lucide-react";
 import type { Role } from "@/lib/auth";
 import { buildActionColorMap, actionColorVars, type ActionColor } from "@/lib/actionColors";
@@ -34,6 +28,8 @@ import {
   type BookingResource,
   type BookingResourceType,
 } from "@/lib/booking";
+import { canAccessItDashboardClient, roleLabelFor } from "@/lib/roleLabel";
+import AppShell from "@/components/AppShell";
 import BookingResourceFormModal from "@/components/BookingResourceFormModal";
 import BookingFormModal from "@/components/BookingFormModal";
 import BookingCalendar from "@/components/BookingCalendar";
@@ -73,7 +69,6 @@ export default function BookingDashboard({
    * matching section instead of always opening on "จองรถ". */
   initialType?: BookingResourceType;
 }) {
-  const router = useRouter();
   const [data, setData] = useState<BookingLoadResult>(initial);
   const [activeType, setActiveType] = useState<BookingResourceType>(initialType);
   const [resourceModal, setResourceModal] = useState<{ mode: "add" | "edit"; resource?: BookingResource } | null>(
@@ -84,15 +79,6 @@ export default function BookingDashboard({
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
-
-  async function logout() {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } finally {
-      router.push("/login");
-      router.refresh();
-    }
-  }
 
   const resources = isError(data) ? [] : data.resources;
   const bookings = isError(data) ? [] : data.bookings;
@@ -208,59 +194,30 @@ export default function BookingDashboard({
   const typeLabel = activeType === "car" ? "รถ" : "ห้องประชุม";
 
   return (
-    <main className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 sm:px-6 lg:px-10">
+    <AppShell
+      roleLabel={roleLabelFor(session.role, session.department, session.isBootstrap)}
+      username={session.username}
+      canAccessManage={session.role !== "it"}
+      canManageUsers={session.isBootstrap}
+      canAccessIt={canAccessItDashboardClient(session.role, session.isBootstrap)}
+    >
+    <main className="flex w-full flex-1 justify-center px-4 py-8 sm:px-6 lg:px-10">
       <div className="flex w-full max-w-6xl flex-col gap-6">
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <span
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
-              aria-hidden="true"
-            >
-              <Calendar size={20} strokeWidth={2} />
-            </span>
-            <div>
-              <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">
-                ระบบจองรถ / ห้องประชุม
-              </h1>
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                {session.username} · {session.role}
-                {session.department ? ` · ${session.department}` : ""}
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href="/menu"
-              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              <LayoutGrid size={16} strokeWidth={2} aria-hidden="true" />
-              เมนูหลัก
-            </Link>
-            {session.role === "it" ? (
-              <Link
-                href="/manage/it"
-                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                <Wrench size={16} strokeWidth={2} aria-hidden="true" />
-                ระบบงาน IT
-              </Link>
-            ) : (
-              <Link
-                href="/manage"
-                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                <Package size={16} strokeWidth={2} aria-hidden="true" />
-                จัดการครุภัณฑ์
-              </Link>
-            )}
-            <button
-              type="button"
-              onClick={logout}
-              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-300"
-            >
-              <LogOut size={16} strokeWidth={2} aria-hidden="true" />
-              ออกจากระบบ
-            </button>
+        <header className="flex items-center gap-3">
+          <span
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-[var(--brand-contrast)] shadow-sm"
+            aria-hidden="true"
+          >
+            <Calendar size={20} strokeWidth={2} />
+          </span>
+          <div>
+            <h1 className="text-xl font-bold text-zinc-950 dark:text-zinc-50 sm:text-2xl">
+              ระบบจองรถ / ห้องประชุม
+            </h1>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              {session.username} · {session.role}
+              {session.department ? ` · ${session.department}` : ""}
+            </p>
           </div>
         </header>
 
@@ -595,5 +552,6 @@ export default function BookingDashboard({
         />
       )}
     </main>
+    </AppShell>
   );
 }

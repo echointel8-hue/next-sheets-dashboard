@@ -4,13 +4,11 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft,
   Check,
   CheckCircle2,
   ClipboardList,
   FileText,
   Loader2,
-  LogOut,
   Printer,
   Save,
   Trash2,
@@ -22,6 +20,7 @@ import type { InspectionCheck, MaintenanceTask, MaintenanceTaskStatus } from "@/
 import { actionColorVars, buildActionColorMap, colorForAction, resolveColorOrder } from "@/lib/actionColors";
 import MultiSelect from "@/components/MultiSelect";
 import MaintenanceStatusStrip from "@/components/MaintenanceStatusStrip";
+import AppShell from "@/components/AppShell";
 
 const CARD =
   "rounded-2xl border border-emerald-900/10 bg-white shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
@@ -120,15 +119,6 @@ export default function MaintenanceTasksBoard({
   actionColorOrder: string[];
 }) {
   const router = useRouter();
-
-  async function logout() {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } finally {
-      router.push("/login");
-      router.refresh();
-    }
-  }
 
   const [tasks, setTasks] = useState(initialTasks);
   const [statusFilter, setStatusFilter] = useState<"all" | MaintenanceTaskStatus>("in_progress");
@@ -288,7 +278,15 @@ export default function MaintenanceTasksBoard({
   }
 
   return (
-    <main className="flex w-full flex-1 justify-center bg-[var(--page-bg)] px-4 py-8 sm:px-6 lg:px-10">
+    <AppShell
+      roleLabel={session.isBootstrap ? "Superadmin (Bootstrap)" : "IT"}
+      username={session.username}
+      displayName={session.displayName}
+      canAccessManage={session.isBootstrap}
+      canManageUsers={session.isBootstrap}
+      canAccessIt
+    >
+    <main className="flex w-full flex-1 justify-center px-4 py-8 sm:px-6 lg:px-10">
       <div className="flex w-full max-w-[75rem] flex-col gap-6">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
@@ -303,34 +301,13 @@ export default function MaintenanceTasksBoard({
               <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{session.displayName || session.username}</p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href="/manage/it"
-              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
-              กลับไประบบงาน IT
-            </Link>
-            <Link
-              href="/manage/it/report"
-              className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:from-[var(--brand-strong)]"
-            >
-              <FileText size={16} strokeWidth={2} aria-hidden="true" />
-              พิมพ์แบบฟอร์ม
-            </Link>
-            {/* Logout — always the last (rightmost) control in every
-                authenticated page's header, per the hospital's request, so
-                it's in a predictable place no matter which screen someone
-                is on. */}
-            <button
-              type="button"
-              onClick={logout}
-              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-300"
-            >
-              <LogOut size={16} strokeWidth={2} aria-hidden="true" />
-              ออกจากระบบ
-            </button>
-          </div>
+          <Link
+            href="/manage/it/report"
+            className="inline-flex items-center gap-1.5 self-start rounded-full bg-gradient-to-r from-[var(--brand)] to-[var(--brand-2)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] transition-colors hover:from-[var(--brand-strong)] sm:self-auto"
+          >
+            <FileText size={16} strokeWidth={2} aria-hidden="true" />
+            พิมพ์แบบฟอร์ม
+          </Link>
         </header>
 
         {fetchError && (
@@ -652,6 +629,7 @@ export default function MaintenanceTasksBoard({
         />
       )}
     </main>
+    </AppShell>
   );
 }
 
