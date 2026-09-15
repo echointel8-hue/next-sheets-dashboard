@@ -71,12 +71,15 @@ function readBookingPayload(body: unknown): BookingPayload | null {
   };
 }
 
-/** Creates a booking and confirms it immediately — no approval step, per
- * the hospital's explicit request. The only gate is the time-conflict
- * check inside createBooking(), re-checked server-side against the live
- * Bookings tab regardless of what the client believed was free.
- * bookedBy/department always come from the session, never the request
- * body — same rule as MaintenanceTask.assignedTo. */
+/** Creates a booking. A room booking confirms immediately, same as always;
+ * a car booking is created "pending" and needs a superadmin's approval
+ * (see canApproveCarBooking in lib/booking.ts and the bookingId PATCH
+ * route) before it counts as confirmed — per the hospital's explicit,
+ * later request. Either way the time-conflict check inside createBooking()
+ * is re-checked server-side against the live Bookings tab regardless of
+ * what the client believed was free. bookedBy/department always come from
+ * the session, never the request body — same rule as
+ * MaintenanceTask.assignedTo. */
 export async function POST(request: NextRequest) {
   const { session, response } = requireSession(request);
   if (!session) return response;
@@ -127,6 +130,9 @@ export async function POST(request: NextRequest) {
       bookedByUsername: session.username,
       bookedByDisplayName: displayName,
       department: session.department,
+      // A room booking confirms immediately; a car booking starts pending
+      // and needs a superadmin's approval — see the doc comment above.
+      approvalStatus: resource.type === "car" ? "pending" : "approved",
     });
 
     await appendEditLog({

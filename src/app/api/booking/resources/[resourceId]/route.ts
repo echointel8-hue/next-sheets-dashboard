@@ -20,6 +20,7 @@ interface ResourceUpdatePayload {
   detail?: string;
   active?: boolean;
   imageDataUrl?: string;
+  seatCount?: number;
 }
 
 function readUpdatePayload(body: unknown): ResourceUpdatePayload | null {
@@ -35,6 +36,10 @@ function readUpdatePayload(body: unknown): ResourceUpdatePayload | null {
   if (typeof b.imageDataUrl === "string") {
     if (!isValidResourceImageDataUrl(b.imageDataUrl)) return null;
     out.imageDataUrl = b.imageDataUrl;
+  }
+  if (typeof b.seatCount === "number") {
+    if (!Number.isFinite(b.seatCount) || b.seatCount < 0) return null;
+    out.seatCount = b.seatCount;
   }
   if (Object.keys(out).length === 0) return null;
   return out;

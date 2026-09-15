@@ -15,7 +15,12 @@ import type { Role } from "@/lib/auth";
 // do that — see canManageBookingResources in lib/auth.ts — a superadmin
 // created later through /manage/users cannot. Bookings are confirmed
 // immediately on creation; the only gate is the time-conflict check below
-// against the same resource — there is no approval step.
+// against the same resource.
+//
+// The one exception is car bookings: per a later explicit request, a car
+// booking additionally needs approval before it counts as confirmed — see
+// BookingApprovalStatus/canApproveCarBooking below. Room bookings never go
+// through this — they stay auto-confirmed exactly as before.
 
 export type BookingResourceType = "car" | "room";
 
@@ -41,6 +46,12 @@ export interface BookingResource {
    * before confirming. Stored directly in the sheet cell — see
    * MAX_RESOURCE_IMAGE_DATA_URL_LENGTH below for why it has to stay small. */
   imageDataUrl: string;
+  /** Number of seats — only meaningful (and only collected in the UI) for
+   * type "car"; always 0 for a room. 0 also means "not specified" for an
+   * older car resource added before this field existed, in which case
+   * isOverSeatCapacity below never flags it (there is nothing to compare
+   * against). */
+  seatCount: number;
 }
 
 /** Google Sheets caps a single cell at 50,000 characters — this keeps a
@@ -58,12 +69,38 @@ export function isValidResourceImageDataUrl(value: string): boolean {
   return /^data:image\/(png|jpe?g|webp);base64,/.test(value);
 }
 
-/** One booking against one resource, for one time range. No status field —
- * a booking is either live (cancelledAt is blank) or cancelled
- * (cancelledAt is set); there is no pending/approved state since bookings
- * confirm immediately. Cancelled bookings are kept (never deleted) as an
- * audit trail and so the same time slot's history is visible, but are
- * always excluded from the conflict check — see hasBookingConflict. */
+/** True only when this is a car resource with a known seat count and the
+ * requested traveler count exceeds it — used both by BookingFormModal
+ * (client-side, non-blocking warning) and could be reused server-side if
+ * this ever needs to be enforced. A room booking, or a car with seatCount
+ * still 0 ("not specified"), never triggers this. Per the hospital's
+ * explicit choice, exceeding this only warns — it never blocks the
+ * booking. */
+export function isOverSeatCapacity(
+  resource: Pick<BookingResource, "type" | "seatCount">,
+  participants: number
+): boolean {
+  return resource.type === "car" && resource.seatCount > 0 && participants > resource.seatCount;
+}
+
+/** Car bookings need a superadmin's approval before they count as
+ * confirmed — a later, narrower request than the original "every booking
+ * confirms immediately" rule. Room bookings never go through this: they're
+ * created already "approved" (see createBooking's approvalStatus
+ * derivation in lib/sheets.ts) and this field is otherwise ignored for
+ * them. A car booking made before this feature existed also reads back as
+ * "approved" (see parseApprovalStatus in lib/sheets.ts) rather than
+ * retroactively becoming "pending" — it was already confirmed under the
+ * rule in force when it was made. */
+export type BookingApprovalStatus = "pending" | "approved" | "rejected";
+
+/** One booking against one resource, for one time range. Live vs cancelled
+ * is tracked separately from approval (cancelledAt is blank while live, set
+ * once cancelled — see isBookingCancelled) — a booking can be cancelled
+ * regardless of its approvalStatus. Cancelled bookings are kept (never
+ * deleted) as an audit trail and so the same time slot's history is
+ * visible, but are always excluded from the conflict check along with
+ * rejected car bookings — see hasBookingConflict. */
 export interface Booking {
   bookingId: string;
   resourceId: string;
@@ -90,6 +127,14 @@ export interface Booking {
   bookedByDisplayName: string;
   department: string;
   createdAt: string;
+  /** "pending" only ever applies to a car booking awaiting a superadmin's
+   * review; room bookings and pre-existing car bookings are "approved".
+   * See BookingApprovalStatus above. */
+  approvalStatus: BookingApprovalStatus;
+  /** Blank until reviewed; set once a superadmin approves/rejects — see
+   * canApproveCarBooking below. */
+  approvedAt: string;
+  approvedByUsername: string;
   /** Blank while the booking is live; set to an ISO timestamp once
    * cancelled — see isBookingCancelled. */
   cancelledAt: string;
@@ -98,6 +143,22 @@ export interface Booking {
 
 export function isBookingCancelled(booking: Pick<Booking, "cancelledAt">): boolean {
   return booking.cancelledAt.trim() !== "";
+}
+
+/** Display label + tone for a booking's overall status, shared by every
+ * booking list/calendar view (BookingDashboard, BookingCalendar) so the
+ * wording and color never drift between them. Cancelled always wins — a
+ * cancelled booking is cancelled regardless of whether it was ever
+ * approved — otherwise this just mirrors approvalStatus, which is always
+ * "approved" for a room booking (see createBooking in lib/sheets.ts), so a
+ * room booking always reads exactly as it always has. */
+export function bookingStatusLabel(
+  booking: Pick<Booking, "cancelledAt" | "approvalStatus">
+): { text: string; tone: "cancelled" | "pending" | "approved" | "rejected" } {
+  if (isBookingCancelled(booking)) return { text: "ยกเลิกแล้ว", tone: "cancelled" };
+  if (booking.approvalStatus === "pending") return { text: "รออนุมัติ", tone: "pending" };
+  if (booking.approvalStatus === "rejected") return { text: "ไม่อนุมัติ", tone: "rejected" };
+  return { text: "ยืนยันแล้ว", tone: "approved" };
 }
 
 /** Splits a startTime/endTime string ("2026-08-25T14:30", the raw
@@ -125,10 +186,14 @@ export function formatBookingDateTime(raw: string): string {
   return `${d}/${mo}/${y} ${parts.time}`;
 }
 
-/** True if [startTime, endTime) would overlap any existing, non-cancelled
- * booking on the same resource — the only gate a new booking has to clear,
- * since there is no approval step. Half-open interval overlap test:
- * two ranges overlap iff existing.start < new.end && existing.end >
+/** True if [startTime, endTime) would overlap any existing, still-relevant
+ * booking on the same resource — the gate a new booking has to clear.
+ * Cancelled bookings never block (the slot was given back), and neither do
+ * rejected car bookings (the trip was turned down, so the slot is free
+ * again) — a *pending* car booking still blocks, though, so two accounts
+ * can't both have a request in flight for the same overlapping slot while
+ * a superadmin hasn't reviewed either yet. Half-open interval overlap
+ * test: two ranges overlap iff existing.start < new.end && existing.end >
  * new.start. `excludeBookingId` lets a future "edit booking time" feature
  * check a booking against every *other* booking without conflicting with
  * itself; unused by plain creation. */
@@ -147,6 +212,7 @@ export function hasBookingConflict(
     if (b.resourceId !== resourceId) return false;
     if (excludeBookingId && b.bookingId === excludeBookingId) return false;
     if (isBookingCancelled(b)) return false;
+    if (b.approvalStatus === "rejected") return false;
     const bStart = new Date(b.startTime).getTime();
     const bEnd = new Date(b.endTime).getTime();
     if (Number.isNaN(bStart) || Number.isNaN(bEnd)) return false;
@@ -166,4 +232,15 @@ export function canCancelBooking(
   session: { username: string; role: Role }
 ): boolean {
   return booking.bookedByUsername === session.username || session.role === "superadmin";
+}
+
+/** Who may approve/reject a pending car booking: any account with the
+ * superadmin role — per the hospital's explicit choice, this is *not*
+ * narrowed to the single bootstrap account the way
+ * canManageBookingResources is; every superadmin (bootstrap or one created
+ * later through /manage/users) can review car bookings, matching
+ * canCancelBooking's "any superadmin" reach above. Room bookings never
+ * reach this check — they have no pending state to review. */
+export function canApproveCarBooking(session: { role: Role }): boolean {
+  return session.role === "superadmin";
 }

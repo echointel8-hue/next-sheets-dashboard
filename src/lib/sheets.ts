@@ -9,6 +9,7 @@ import {
   hasBookingConflict,
   isBookingCancelled,
   type Booking,
+  type BookingApprovalStatus,
   type BookingResource,
   type BookingResourceType,
 } from "@/lib/booking";
@@ -22,7 +23,15 @@ export type { EquipmentRow, FieldMap };
 // comment). Server code should generally still prefer importing the
 // read/write functions (getSpecStandards, getMaintenanceLog, etc.) from here.
 export { DEFAULT_SPEC_STANDARDS, getLatestMaintenanceLogByAsset };
-export type { SpecStandards, SpecOptionLists, MaintenanceLogEntry, Booking, BookingResource, BookingResourceType };
+export type {
+  SpecStandards,
+  SpecOptionLists,
+  MaintenanceLogEntry,
+  Booking,
+  BookingApprovalStatus,
+  BookingResource,
+  BookingResourceType,
+};
 
 // Each record pairs a row's data with its 1-based row number in the sheet
 // (data row index + 2, accounting for the header row at row 1). This is the
@@ -274,7 +283,9 @@ export type EditLogAction =
   | "เพิ่มทรัพยากรจอง"
   | "แก้ไขทรัพยากรจอง"
   | "จองทรัพยากร"
-  | "ยกเลิกการจอง";
+  | "ยกเลิกการจอง"
+  | "อนุมัติการจองรถ"
+  | "ไม่อนุมัติการจองรถ";
 
 /** Appends one row to the EditLog tab — header row (created ahead of time
  * by the sheet owner, not by this app; see the project setup notes) must be:
@@ -1472,13 +1483,14 @@ function columnLetter(index: number): string {
 // ---------------------------------------------------------------------------
 
 const BOOKING_RESOURCES_HEADER_ROW = [
-  "ResourceId", "Type", "Name", "Detail", "Active", "CreatedAt", "CreatedByUsername", "ImageDataUrl",
+  "ResourceId", "Type", "Name", "Detail", "Active", "CreatedAt", "CreatedByUsername", "ImageDataUrl", "SeatCount",
 ];
 
 const BOOKINGS_HEADER_ROW = [
   "BookingId", "ResourceId", "ResourceType", "ResourceName", "StartTime", "EndTime",
   "Purpose", "Destination", "Participants", "ContactPhone", "BookedByUsername",
   "BookedByDisplayName", "Department", "CreatedAt", "CancelledAt", "CancelledByUsername",
+  "ApprovalStatus", "ApprovedAt", "ApprovedByUsername",
 ];
 
 function getBookingResourcesTab(): string {
@@ -1504,14 +1516,24 @@ function rowToBookingResource(row: string[]): BookingResource {
     createdAt: col(5),
     createdByUsername: col(6),
     imageDataUrl: col(7),
+    seatCount: Number(col(8)) || 0,
   };
 }
 
 function bookingResourceToRow(r: BookingResource): (string | number)[] {
   return [
     r.resourceId, r.type, r.name, r.detail, r.active ? "Y" : "N", r.createdAt, r.createdByUsername,
-    r.imageDataUrl,
+    r.imageDataUrl, r.seatCount,
   ];
+}
+
+/** Defaults anything not exactly "pending"/"rejected" to "approved" — this
+ * is what makes a blank ApprovalStatus cell (every room booking, and every
+ * car booking written before this column existed) read back as already
+ * confirmed instead of retroactively becoming "pending". */
+function parseApprovalStatus(raw: string): BookingApprovalStatus {
+  const v = raw.trim();
+  return v === "pending" || v === "rejected" ? v : "approved";
 }
 
 function rowToBooking(row: string[]): Booking {
@@ -1533,6 +1555,9 @@ function rowToBooking(row: string[]): Booking {
     createdAt: col(13),
     cancelledAt: col(14),
     cancelledByUsername: col(15),
+    approvalStatus: parseApprovalStatus(col(16)),
+    approvedAt: col(17),
+    approvedByUsername: col(18),
   };
 }
 
@@ -1541,6 +1566,7 @@ function bookingToRow(b: Booking): (string | number)[] {
     b.bookingId, b.resourceId, b.resourceType, b.resourceName, b.startTime, b.endTime,
     b.purpose, b.destination, b.participants, b.contactPhone, b.bookedByUsername,
     b.bookedByDisplayName, b.department, b.createdAt, b.cancelledAt, b.cancelledByUsername,
+    b.approvalStatus, b.approvedAt, b.approvedByUsername,
   ];
 }
 
@@ -1555,7 +1581,7 @@ export async function getBookingResources(): Promise<BookingResource[]> {
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:H100000`,
+      range: `${tab}!A2:I100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -1573,13 +1599,17 @@ export async function getBookingResources(): Promise<BookingResource[]> {
 }
 
 /** Adds one new vehicle or meeting room. Throws a clear "create the tab
- * first" Thai error if the BookingResources tab doesn't exist yet. */
+ * first" Thai error if the BookingResources tab doesn't exist yet.
+ * seatCount is only meaningful for type "car" — always stored as 0 for a
+ * room regardless of what's passed in, so a room resource never
+ * accidentally carries a stray seat count. */
 export async function createBookingResource(input: {
   type: BookingResourceType;
   name: string;
   detail: string;
   createdByUsername: string;
   imageDataUrl: string;
+  seatCount: number;
 }): Promise<BookingResource> {
   const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
   const tab = getBookingResourcesTab();
@@ -1594,6 +1624,7 @@ export async function createBookingResource(input: {
     createdAt: new Date().toISOString(),
     createdByUsername: input.createdByUsername,
     imageDataUrl: input.imageDataUrl,
+    seatCount: input.type === "car" ? input.seatCount : 0,
   };
 
   try {
@@ -1626,7 +1657,7 @@ export async function createBookingResource(input: {
  * getBookingResources callers in the API routes). */
 export async function updateBookingResource(
   resourceId: string,
-  updates: Partial<Pick<BookingResource, "name" | "detail" | "active" | "imageDataUrl">>
+  updates: Partial<Pick<BookingResource, "name" | "detail" | "active" | "imageDataUrl" | "seatCount">>
 ): Promise<BookingResource> {
   const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
   const tab = getBookingResourcesTab();
@@ -1636,7 +1667,7 @@ export async function updateBookingResource(
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:H100000`,
+      range: `${tab}!A2:I100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -1655,7 +1686,7 @@ export async function updateBookingResource(
   try {
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${tab}!A${sheetRow}:H${sheetRow}`,
+      range: `${tab}!A${sheetRow}:I${sheetRow}`,
       valueInputOption: "USER_ENTERED",
       requestBody: { values: [bookingResourceToRow(merged)] },
     });
@@ -1679,7 +1710,7 @@ export async function getBookings(): Promise<Booking[]> {
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:P100000`,
+      range: `${tab}!A2:S100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -1700,8 +1731,11 @@ export async function getBookings(): Promise<Booking[]> {
  * *current* Bookings tab (never trust a conflict check the caller may have
  * done earlier against a stale list — two accounts could race to book the
  * same slot). Throws a clear Thai error on conflict, or a "create the tab
- * first" error if the Bookings tab doesn't exist yet. Bookings confirm
- * immediately — there is no approval step. */
+ * first" error if the Bookings tab doesn't exist yet. Room bookings confirm
+ * immediately (approvalStatus "approved"); car bookings start "pending"
+ * and need a superadmin's review — see setBookingApprovalStatus below. The
+ * caller (POST /api/booking/bookings) derives approvalStatus from
+ * resourceType, same as it already derives destination. */
 export async function createBooking(input: {
   resourceId: string;
   resourceType: BookingResourceType;
@@ -1715,6 +1749,7 @@ export async function createBooking(input: {
   bookedByUsername: string;
   bookedByDisplayName: string;
   department: string;
+  approvalStatus: BookingApprovalStatus;
 }): Promise<Booking> {
   const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
   const tab = getBookingsTab();
@@ -1742,6 +1777,9 @@ export async function createBooking(input: {
     createdAt: new Date().toISOString(),
     cancelledAt: "",
     cancelledByUsername: "",
+    approvalStatus: input.approvalStatus,
+    approvedAt: "",
+    approvedByUsername: "",
   };
 
   try {
@@ -1781,7 +1819,7 @@ export async function cancelBooking(bookingId: string, cancelledByUsername: stri
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:P100000`,
+      range: `${tab}!A2:S100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -1804,13 +1842,77 @@ export async function cancelBooking(bookingId: string, cancelledByUsername: stri
   try {
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${tab}!A${sheetRow}:P${sheetRow}`,
+      range: `${tab}!A${sheetRow}:S${sheetRow}`,
       valueInputOption: "USER_ENTERED",
       requestBody: { values: [bookingToRow(merged)] },
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`ยกเลิกการจองไม่สำเร็จ: ${message}`);
+  }
+
+  return merged;
+}
+
+/** Approves or rejects a *pending* car booking — the superadmin review step
+ * a car booking needs before it counts as confirmed (see
+ * BookingApprovalStatus in lib/booking.ts). Find-by-id scan, same reasoning
+ * as cancelBooking. Only ever moves a booking out of "pending" — approving
+ * or rejecting one that's already been reviewed, or isn't a car booking,
+ * throws instead of silently overwriting a prior decision; the permission
+ * check itself (canApproveCarBooking) is the API route's job, not this
+ * function's, same split as cancelBooking/canCancelBooking. */
+export async function setBookingApprovalStatus(
+  bookingId: string,
+  approvalStatus: "approved" | "rejected",
+  approvedByUsername: string
+): Promise<Booking> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getBookingsTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:S100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`อ่านรายการจองไม่สำเร็จ: ${message}`);
+  }
+
+  const rows = values ?? [];
+  const idx = rows.findIndex((row) => (row[0] ?? "").toString().trim() === bookingId);
+  if (idx === -1) {
+    throw new Error("ไม่พบรายการจองนี้ — อาจถูกยกเลิกไปแล้ว");
+  }
+  const current = rowToBooking(rows[idx]);
+  if (current.resourceType !== "car") {
+    throw new Error("การจองนี้ไม่ต้องรออนุมัติ");
+  }
+  if (current.approvalStatus !== "pending") {
+    throw new Error("รายการจองนี้ถูกพิจารณาไปแล้ว");
+  }
+  const merged: Booking = {
+    ...current,
+    approvalStatus,
+    approvedAt: new Date().toISOString(),
+    approvedByUsername,
+  };
+  const sheetRow = idx + 2;
+
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${tab}!A${sheetRow}:S${sheetRow}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [bookingToRow(merged)] },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`บันทึกผลการอนุมัติไม่สำเร็จ: ${message}`);
   }
 
   return merged;

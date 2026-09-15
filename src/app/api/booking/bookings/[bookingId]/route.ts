@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
-import { canCancelBooking } from "@/lib/booking";
-import { appendEditLog, cancelBooking, getBookings } from "@/lib/sheets";
+import { canApproveCarBooking, canCancelBooking } from "@/lib/booking";
+import { appendEditLog, cancelBooking, getBookings, setBookingApprovalStatus } from "@/lib/sheets";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +47,57 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       newValue: `${cancelled.resourceName}: ${cancelled.startTime} - ${cancelled.endTime} ${requestAuditTag(request)}`,
     });
     return NextResponse.json({ booking: cancelled });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+function readApprovalPayload(body: unknown): "approved" | "rejected" | null {
+  if (!body || typeof body !== "object") return null;
+  const v = (body as Record<string, unknown>).approvalStatus;
+  return v === "approved" || v === "rejected" ? v : null;
+}
+
+/** Approves or rejects a pending car booking. Reachable only by an account
+ * with the superadmin role — see canApproveCarBooking in lib/booking.ts,
+ * which (unlike canManageBookingResources) is not narrowed to the
+ * bootstrap account only, per the hospital's explicit choice. Room
+ * bookings never have anything to approve — setBookingApprovalStatus
+ * itself rejects those, and any booking that's already been reviewed. */
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ bookingId: string }> }) {
+  const { session, response } = requireSession(request);
+  if (!session) return response;
+  if (!canApproveCarBooking(session)) {
+    return NextResponse.json(
+      { error: "อนุมัติ/ไม่อนุมัติการจองรถได้เฉพาะสิทธิ์ Superadmin เท่านั้น" },
+      { status: 403 }
+    );
+  }
+  const { bookingId } = await params;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "คำขอไม่ถูกต้อง" }, { status: 400 });
+  }
+  const approvalStatus = readApprovalPayload(body);
+  if (!approvalStatus) {
+    return NextResponse.json({ error: "ข้อมูลที่ส่งมาไม่ถูกต้อง" }, { status: 400 });
+  }
+
+  try {
+    const updated = await setBookingApprovalStatus(bookingId, approvalStatus, session.username);
+    await appendEditLog({
+      timestamp: new Date().toISOString(),
+      action: approvalStatus === "approved" ? "อนุมัติการจองรถ" : "ไม่อนุมัติการจองรถ",
+      actor: session.username,
+      department: session.department,
+      oldValue: "",
+      newValue: `${updated.resourceName}: ${updated.startTime} - ${updated.endTime} ${requestAuditTag(request)}`,
+    });
+    return NextResponse.json({ booking: updated });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });

@@ -2,16 +2,27 @@
 
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Ban, ChevronLeft, ChevronRight, Loader2, MapPin, Phone, Users, X } from "lucide-react";
+import { Ban, Check, ChevronLeft, ChevronRight, Loader2, MapPin, Phone, Users, X } from "lucide-react";
 import type { Role } from "@/lib/auth";
 import { actionColorVars, type ActionColor } from "@/lib/actionColors";
 import {
+  bookingStatusLabel,
   canCancelBooking,
   formatBookingDateTime,
   isBookingCancelled,
   splitBookingDateTime,
   type Booking,
 } from "@/lib/booking";
+
+// Tone -> badge classes for bookingStatusLabel's four tones — same mapping
+// as BookingDashboard's own copy (small enough to duplicate, matching this
+// codebase's existing per-file constant convention).
+const STATUS_BADGE_CLASSES: Record<ReturnType<typeof bookingStatusLabel>["tone"], string> = {
+  cancelled: "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
+  pending: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+  approved: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+  rejected: "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300",
+};
 
 const THAI_MONTHS = [
   "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
@@ -101,6 +112,9 @@ export default function BookingCalendar({
   onCancel,
   cancellingBookingId,
   showDestination,
+  canApprove,
+  onApprovalDecision,
+  approvingBookingId,
 }: {
   typeLabel: string;
   bookings: Booking[];
@@ -109,6 +123,12 @@ export default function BookingCalendar({
   onCancel: (booking: Booking) => void;
   cancellingBookingId: string | null;
   showDestination: boolean;
+  /** True only on the car calendar, for a superadmin — see canApproveCarBooking
+   * in lib/booking.ts. Room calendars never pass true, since room bookings
+   * have no pending state to review. */
+  canApprove: boolean;
+  onApprovalDecision: (booking: Booking, approvalStatus: "approved" | "rejected") => void;
+  approvingBookingId: string | null;
 }) {
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
@@ -228,16 +248,21 @@ export default function BookingCalendar({
               <div className="flex flex-col gap-0.5">
                 {visible.map((b) => {
                   const cancelled = isBookingCancelled(b);
+                  const pending = !cancelled && b.approvalStatus === "pending";
                   const color = resourceColorMap.get(b.resourceName);
                   const time = splitBookingDateTime(b.startTime)?.time ?? "";
                   return (
                     <span
                       key={b.bookingId}
                       style={!cancelled && color ? actionColorVars(color) : undefined}
+                      // จองรถที่ "รออนุมัติ" ใช้เส้นขอบประสีเหลือง แทนสีทรัพยากร
+                      // ปกติ — ให้ superadmin กวาดตาเห็นได้ทันทีว่ายังต้องรีวิว
                       className={`truncate rounded px-1 py-0.5 text-[10px] leading-tight ${
                         cancelled
                           ? "bg-zinc-200 text-zinc-500 line-through dark:bg-zinc-800 dark:text-zinc-500"
-                          : "bg-[var(--seg-c)] text-white dark:bg-[var(--seg-c-dark)]"
+                          : pending
+                            ? "border border-dashed border-amber-500 bg-amber-50 text-amber-800 dark:border-amber-400 dark:bg-amber-950/40 dark:text-amber-200"
+                            : "bg-[var(--seg-c)] text-white dark:bg-[var(--seg-c-dark)]"
                       }`}
                     >
                       {time} {b.resourceName}
@@ -265,6 +290,9 @@ export default function BookingCalendar({
           onCancel={onCancel}
           cancellingBookingId={cancellingBookingId}
           showDestination={showDestination}
+          canApprove={canApprove}
+          onApprovalDecision={onApprovalDecision}
+          approvingBookingId={approvingBookingId}
           onClose={() => setSelectedDateKey(null)}
         />
       )}
@@ -281,6 +309,9 @@ function DayDetailModal({
   onCancel,
   cancellingBookingId,
   showDestination,
+  canApprove,
+  onApprovalDecision,
+  approvingBookingId,
   onClose,
 }: {
   dateKey: string;
@@ -291,6 +322,9 @@ function DayDetailModal({
   onCancel: (booking: Booking) => void;
   cancellingBookingId: string | null;
   showDestination: boolean;
+  canApprove: boolean;
+  onApprovalDecision: (booking: Booking, approvalStatus: "approved" | "rejected") => void;
+  approvingBookingId: string | null;
   onClose: () => void;
 }) {
   const [y, mo, d] = dateKey.split("-");
@@ -329,6 +363,7 @@ function DayDetailModal({
             bookings.map((b) => {
               const cancelled = isBookingCancelled(b);
               const color = resourceColorMap.get(b.resourceName);
+              const status = bookingStatusLabel(b);
               return (
                 <div
                   key={b.bookingId}
@@ -351,15 +386,9 @@ function DayDetailModal({
                         {b.resourceName}
                       </span>
                     </div>
-                    {cancelled ? (
-                      <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-                        ยกเลิกแล้ว
-                      </span>
-                    ) : (
-                      <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-                        ยืนยันแล้ว
-                      </span>
-                    )}
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[status.tone]}`}>
+                      {status.text}
+                    </span>
                   </div>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400">
                     {formatBookingDateTime(b.startTime)} – {formatBookingDateTime(b.endTime)}
@@ -382,21 +411,49 @@ function DayDetailModal({
                     </span>
                     <span>{b.bookedByDisplayName || b.bookedByUsername}</span>
                   </div>
-                  {!cancelled && canCancelBooking(b, session) && (
-                    <button
-                      type="button"
-                      onClick={() => onCancel(b)}
-                      disabled={cancellingBookingId === b.bookingId}
-                      className="mt-1 inline-flex w-fit items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-60 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
-                    >
-                      {cancellingBookingId === b.bookingId ? (
-                        <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-                      ) : (
-                        <Ban size={12} strokeWidth={2} aria-hidden="true" />
-                      )}
-                      ยกเลิก
-                    </button>
-                  )}
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {!cancelled && canApprove && b.approvalStatus === "pending" && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => onApprovalDecision(b, "approved")}
+                          disabled={approvingBookingId === b.bookingId}
+                          className="inline-flex w-fit items-center gap-1 rounded-full border border-emerald-200 px-2 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 disabled:opacity-60 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+                        >
+                          {approvingBookingId === b.bookingId ? (
+                            <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                          ) : (
+                            <Check size={12} strokeWidth={2} aria-hidden="true" />
+                          )}
+                          อนุมัติ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onApprovalDecision(b, "rejected")}
+                          disabled={approvingBookingId === b.bookingId}
+                          className="inline-flex w-fit items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-60 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
+                        >
+                          <X size={12} strokeWidth={2} aria-hidden="true" />
+                          ไม่อนุมัติ
+                        </button>
+                      </>
+                    )}
+                    {!cancelled && canCancelBooking(b, session) && (
+                      <button
+                        type="button"
+                        onClick={() => onCancel(b)}
+                        disabled={cancellingBookingId === b.bookingId}
+                        className="inline-flex w-fit items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-60 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
+                      >
+                        {cancellingBookingId === b.bookingId ? (
+                          <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                        ) : (
+                          <Ban size={12} strokeWidth={2} aria-hidden="true" />
+                        )}
+                        ยกเลิก
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })

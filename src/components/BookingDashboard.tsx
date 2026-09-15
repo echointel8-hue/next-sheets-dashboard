@@ -8,6 +8,7 @@ import {
   CalendarDays,
   CalendarPlus,
   Car,
+  Check,
   DoorOpen,
   ImageOff,
   List,
@@ -18,10 +19,13 @@ import {
   Plus,
   Power,
   Users,
+  X as XIcon,
 } from "lucide-react";
 import type { Role } from "@/lib/auth";
 import { buildActionColorMap, actionColorVars, type ActionColor } from "@/lib/actionColors";
 import {
+  bookingStatusLabel,
+  canApproveCarBooking,
   canCancelBooking,
   formatBookingDateTime,
   isBookingCancelled,
@@ -46,9 +50,19 @@ function isError(data: BookingLoadResult): data is { error: string } {
 }
 
 const CARD =
-  "rounded-2xl border border-emerald-900/10 bg-gradient-to-b from-white to-emerald-50/60 shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:from-zinc-900 dark:to-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
+  "rounded-2xl border border-emerald-900/10 bg-gradient-to-b from-white to-emerald-50 shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:from-zinc-900 dark:to-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
 const ACTION_BUTTON =
   "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60";
+// Tone -> badge classes for bookingStatusLabel's four tones — shared shape
+// with BookingCalendar's own copy of this mapping (small enough, and this
+// codebase's existing convention, to duplicate rather than share a
+// constant across the two files).
+const STATUS_BADGE_CLASSES: Record<ReturnType<typeof bookingStatusLabel>["tone"], string> = {
+  cancelled: "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
+  pending: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+  approved: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+  rejected: "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300",
+};
 
 /**
  * Top-level page for one half of the vehicle / meeting-room booking
@@ -79,8 +93,11 @@ export default function BookingDashboard({
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [togglingResourceId, setTogglingResourceId] = useState<string | null>(null);
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
+  const [approvingBookingId, setApprovingBookingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
+  // เฉพาะการจองรถต้องมีขั้นตอนอนุมัติ — ห้องประชุมไม่มี (ยืนยันทันทีเหมือนเดิม)
+  const canApprove = type === "car" && canApproveCarBooking(session);
 
   const resources = isError(data) ? [] : data.resources;
   const bookings = isError(data) ? [] : data.bookings;
@@ -190,6 +207,33 @@ export default function BookingDashboard({
       setActionError("ยกเลิกไม่สำเร็จ กรุณาลองใหม่");
     } finally {
       setCancellingBookingId(null);
+    }
+  }
+
+  async function handleApprovalDecision(booking: Booking, approvalStatus: "approved" | "rejected") {
+    setApprovingBookingId(booking.bookingId);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/booking/bookings/${booking.bookingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approvalStatus }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(json.error || "บันทึกผลการอนุมัติไม่สำเร็จ");
+        return;
+      }
+      const updated = json.booking as Booking;
+      setData((prev) =>
+        isError(prev)
+          ? prev
+          : { ...prev, bookings: prev.bookings.map((b) => (b.bookingId === updated.bookingId ? updated : b)) }
+      );
+    } catch {
+      setActionError("บันทึกผลการอนุมัติไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setApprovingBookingId(null);
     }
   }
 
@@ -315,6 +359,12 @@ export default function BookingDashboard({
                       {resource.detail && (
                         <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">{resource.detail}</p>
                       )}
+                      {type === "car" && !!resource.seatCount && (
+                        <span className="inline-flex w-fit items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                          <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                          {resource.seatCount.toLocaleString("th-TH")} ที่นั่ง
+                        </span>
+                      )}
                       {canManageResources && (
                         <div className="mt-1 flex flex-wrap gap-1.5">
                           <button
@@ -417,6 +467,9 @@ export default function BookingDashboard({
                   onCancel={handleCancelBooking}
                   cancellingBookingId={cancellingBookingId}
                   showDestination={type === "car"}
+                  canApprove={canApprove}
+                  onApprovalDecision={handleApprovalDecision}
+                  approvingBookingId={approvingBookingId}
                 />
               ) : (
                 <div className="overflow-x-auto">
@@ -437,6 +490,7 @@ export default function BookingDashboard({
                       {typeBookings.map((booking) => {
                         const cancelled = isBookingCancelled(booking);
                         const color = resourceColorMap.get(booking.resourceName);
+                        const status = bookingStatusLabel(booking);
                         return (
                           <tr
                             key={booking.bookingId}
@@ -483,32 +537,54 @@ export default function BookingDashboard({
                               </div>
                             </td>
                             <td className="px-2 py-2.5">
-                              {cancelled ? (
-                                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-                                  ยกเลิกแล้ว
-                                </span>
-                              ) : (
-                                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-                                  ยืนยันแล้ว
-                                </span>
-                              )}
+                              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[status.tone]}`}>
+                                {status.text}
+                              </span>
                             </td>
                             <td className="px-2 py-2.5 text-right">
-                              {!cancelled && canCancelBooking(booking, session) && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleCancelBooking(booking)}
-                                  disabled={cancellingBookingId === booking.bookingId}
-                                  className={`${ACTION_BUTTON} border-red-200 text-red-700 hover:bg-red-50 focus-visible:outline-red-600 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30`}
-                                >
-                                  {cancellingBookingId === booking.bookingId ? (
-                                    <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-                                  ) : (
-                                    <Ban size={12} strokeWidth={2} aria-hidden="true" />
-                                  )}
-                                  ยกเลิก
-                                </button>
-                              )}
+                              <div className="flex flex-wrap justify-end gap-1.5">
+                                {!cancelled && canApprove && booking.approvalStatus === "pending" && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleApprovalDecision(booking, "approved")}
+                                      disabled={approvingBookingId === booking.bookingId}
+                                      className={`${ACTION_BUTTON} border-emerald-200 text-emerald-700 hover:bg-emerald-50 focus-visible:outline-emerald-600 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}
+                                    >
+                                      {approvingBookingId === booking.bookingId ? (
+                                        <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                                      ) : (
+                                        <Check size={12} strokeWidth={2} aria-hidden="true" />
+                                      )}
+                                      อนุมัติ
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleApprovalDecision(booking, "rejected")}
+                                      disabled={approvingBookingId === booking.bookingId}
+                                      className={`${ACTION_BUTTON} border-red-200 text-red-700 hover:bg-red-50 focus-visible:outline-red-600 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30`}
+                                    >
+                                      <XIcon size={12} strokeWidth={2} aria-hidden="true" />
+                                      ไม่อนุมัติ
+                                    </button>
+                                  </>
+                                )}
+                                {!cancelled && canCancelBooking(booking, session) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCancelBooking(booking)}
+                                    disabled={cancellingBookingId === booking.bookingId}
+                                    className={`${ACTION_BUTTON} border-red-200 text-red-700 hover:bg-red-50 focus-visible:outline-red-600 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30`}
+                                  >
+                                    {cancellingBookingId === booking.bookingId ? (
+                                      <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                                    ) : (
+                                      <Ban size={12} strokeWidth={2} aria-hidden="true" />
+                                    )}
+                                    ยกเลิก
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );

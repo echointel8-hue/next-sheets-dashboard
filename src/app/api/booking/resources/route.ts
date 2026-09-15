@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
 
 function readResourcePayload(
   body: unknown
-): { type: BookingResourceType; name: string; detail: string; imageDataUrl: string } | null {
+): { type: BookingResourceType; name: string; detail: string; imageDataUrl: string; seatCount: number } | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
   if (b.type !== "car" && b.type !== "room") return null;
@@ -53,11 +53,18 @@ function readResourcePayload(
   if (typeof b.imageDataUrl !== "string" && typeof b.imageDataUrl !== "undefined") return null;
   const imageDataUrl = typeof b.imageDataUrl === "string" ? b.imageDataUrl : "";
   if (!isValidResourceImageDataUrl(imageDataUrl)) return null;
+  // seatCount is only meaningful for a car — accepted here regardless (kept
+  // simple) but createBookingResource always stores 0 for a room, so a
+  // stray value sent for a room is silently dropped rather than rejected.
+  if (typeof b.seatCount !== "number" && typeof b.seatCount !== "undefined") return null;
+  const seatCount = typeof b.seatCount === "number" ? b.seatCount : 0;
+  if (!Number.isFinite(seatCount) || seatCount < 0) return null;
   return {
     type: b.type,
     name: b.name.trim(),
     detail: typeof b.detail === "string" ? b.detail.trim() : "",
     imageDataUrl,
+    seatCount,
   };
 }
 

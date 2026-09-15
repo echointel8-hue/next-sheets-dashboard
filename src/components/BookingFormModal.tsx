@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ImageOff, Loader2, Save, X } from "lucide-react";
-import type { Booking, BookingResource, BookingResourceType } from "@/lib/booking";
+import { AlertTriangle, ImageOff, Info, Loader2, Save, X } from "lucide-react";
+import { isOverSeatCapacity, type Booking, type BookingResource, type BookingResourceType } from "@/lib/booking";
 
 const INPUT_CLASS =
   "h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:disabled:bg-zinc-800/60 dark:disabled:text-zinc-500";
@@ -11,10 +11,15 @@ const INPUT_CLASS =
 /**
  * New-booking form, scoped to one resource type at a time (car or room —
  * kept as separate menus per the hospital's explicit request, see
- * BookingDashboard). Confirms immediately on save; the only reason a save
- * can fail is a time conflict re-checked server-side (POST
+ * BookingDashboard). A room booking confirms immediately on save; a car
+ * booking is accepted the same way but starts out "pending" a superadmin's
+ * approval (see the note shown below the resource picker when
+ * resourceType is "car") — the only reason a save itself can fail either
+ * way is a time conflict re-checked server-side (POST
  * /api/booking/bookings), surfaced here as a plain error message so the
- * person can pick another time/resource and try again.
+ * person can pick another time/resource and try again. Also warns (but
+ * doesn't block — per the hospital's explicit choice) when the entered
+ * participant count exceeds the selected car's seat count.
  */
 export default function BookingFormModal({
   resourceType,
@@ -54,6 +59,14 @@ export default function BookingFormModal({
     () => resources.find((r) => r.resourceId === resourceId),
     [resources, resourceId]
   );
+
+  // Non-blocking — per the hospital's explicit choice, exceeding the
+  // selected car's seat count only warns, it never stops the booking.
+  const participantsNum = Number(participants);
+  const overSeatCapacity =
+    !!selectedResource &&
+    Number.isFinite(participantsNum) &&
+    isOverSeatCapacity(selectedResource, participantsNum);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -200,8 +213,17 @@ export default function BookingFormModal({
                     ) : (
                       <p className="italic">ไม่มีรายละเอียดเพิ่มเติม</p>
                     )}
+                    {resourceType === "car" && !!selectedResource?.seatCount && (
+                      <p className="mt-0.5 leading-5">{selectedResource.seatCount.toLocaleString("th-TH")} ที่นั่ง</p>
+                    )}
                   </div>
                 </div>
+                {resourceType === "car" && (
+                  <p className="flex items-start gap-2 rounded-lg bg-sky-50 p-2.5 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
+                    <Info size={15} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+                    การจองรถต้องได้รับการอนุมัติจากผู้ดูแลระบบ (Superadmin) ก่อน จึงจะถือว่ายืนยันการจอง
+                  </p>
+                )}
               </>
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -270,6 +292,12 @@ export default function BookingFormModal({
                   className={INPUT_CLASS}
                 />
               </label>
+              {overSeatCapacity && (
+                <p className="flex items-start gap-2 text-xs leading-5 text-amber-700 dark:text-amber-400 sm:col-span-2">
+                  <AlertTriangle size={14} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  จำนวนผู้โดยสารมากกว่าจำนวนที่นั่งของ{selectedResource?.name} ({selectedResource?.seatCount.toLocaleString("th-TH")} ที่นั่ง) — ยังจองได้ แต่กรุณาตรวจสอบอีกครั้ง
+                </p>
+              )}
             </div>
             <div className="mt-1 flex justify-end gap-2">
               <button

@@ -95,6 +95,10 @@ export default function BookingResourceFormModal({
 }) {
   const [name, setName] = useState(resource?.name ?? "");
   const [detail, setDetail] = useState(resource?.detail ?? "");
+  // "" while empty (not "0") so the field doesn't default to a misleading
+  // 0-seat car before the user has typed anything — only meaningful for
+  // type "car", see lib/booking.ts's BookingResource.seatCount comment.
+  const [seatCount, setSeatCount] = useState(resource?.seatCount ? String(resource.seatCount) : "");
   const [imageDataUrl, setImageDataUrl] = useState(resource?.imageDataUrl ?? "");
   const [imageProcessing, setImageProcessing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -145,6 +149,11 @@ export default function BookingResourceFormModal({
       setError("รูปภาพมีขนาดใหญ่เกินไป กรุณาลองรูปอื่น");
       return;
     }
+    const seatCountNum = seatCount.trim() ? Number(seatCount) : 0;
+    if (type === "car" && (!Number.isFinite(seatCountNum) || seatCountNum < 0)) {
+      setError("กรุณาระบุจำนวนที่นั่งให้ถูกต้อง");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -152,8 +161,8 @@ export default function BookingResourceFormModal({
       const method = mode === "add" ? "POST" : "PATCH";
       const body =
         mode === "add"
-          ? { type, name: name.trim(), detail: detail.trim(), imageDataUrl }
-          : { name: name.trim(), detail: detail.trim(), imageDataUrl };
+          ? { type, name: name.trim(), detail: detail.trim(), imageDataUrl, seatCount: seatCountNum }
+          : { name: name.trim(), detail: detail.trim(), imageDataUrl, seatCount: seatCountNum };
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
@@ -228,10 +237,26 @@ export default function BookingResourceFormModal({
                 onChange={(e) => setDetail(e.target.value)}
                 disabled={saving}
                 rows={3}
-                placeholder={type === "car" ? "เช่น จำนวนที่นั่ง, หมายเหตุ" : "เช่น ความจุห้อง, อุปกรณ์ที่มี"}
+                placeholder={type === "car" ? "เช่น หมายเหตุอื่น ๆ" : "เช่น ความจุห้อง, อุปกรณ์ที่มี"}
                 className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-base text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
               />
             </label>
+            {/* จำนวนที่นั่ง — เฉพาะรถ ใช้เทียบกับจำนวนผู้โดยสารตอนจอง เพื่อ
+                แจ้งเตือนเมื่อจำนวนผู้เดินทางเกินที่นั่งที่มี (ดู BookingFormModal) */}
+            {type === "car" && (
+              <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+                จำนวนที่นั่ง
+                <input
+                  type="number"
+                  min={0}
+                  value={seatCount}
+                  onChange={(e) => setSeatCount(e.target.value)}
+                  disabled={saving}
+                  placeholder="เช่น 6"
+                  className={INPUT_CLASS}
+                />
+              </label>
+            )}
             <div className="flex flex-col gap-1.5 text-sm text-zinc-600 dark:text-zinc-300">
               รูปภาพ{typeLabel}
               <p className="text-xs font-normal text-zinc-400 dark:text-zinc-500">
