@@ -300,40 +300,32 @@ export default function UserFormModal({
               <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">สิทธิ์เฉพาะบัญชี</p>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
                 เริ่มต้นตามสิทธิ์ &quot;{role}&quot; ด้านบน — ติ๊กเพิ่มเพื่อให้สิทธิ์พิเศษ หรือปลดติ๊กเพื่อ
-                ตัดสิทธิ์ที่สิทธิ์นี้ปกติจะได้ (เปลี่ยนสิทธิ์หลักด้านบนจะรีเซ็ตรายการนี้กลับเป็นค่าเริ่มต้น) — บาง
-                รายการติ๊กเพิ่มไม่ได้ (จางไว้) เพราะสงวนไว้เฉพาะบัญชีผู้ดูแลระบบหลักเท่านั้น
+                ตัดสิทธิ์ที่สิทธิ์นี้ปกติจะได้ (เปลี่ยนสิทธิ์หลักด้านบนจะรีเซ็ตรายการนี้กลับเป็นค่าเริ่มต้น) —
+                รายการที่ให้เพิ่มไม่ได้ (สงวนไว้เฉพาะบัญชีผู้ดูแลระบบหลัก) จะไม่แสดงในนี้
               </p>
               <div className="flex flex-col gap-1.5">
-                {PERMISSION_KEYS.map((key) => {
-                  const checked = checkedPermissions.has(key);
-                  // Can always untick (revoke) — the cap only blocks
-                  // *granting* a bootstrap-reserved key to an account that
-                  // wouldn't otherwise have it (see isGrantablePermission /
-                  // NON_GRANTABLE_KEYS in lib/permissions.ts). The real
-                  // boundary is server-side in /api/manage/users; this just
-                  // keeps the UI from offering something that would bounce.
-                  const locked = !checked && !isGrantablePermission(key, role);
-                  return (
-                    <label
-                      key={key}
-                      className={`flex items-start gap-2 text-sm ${
-                        locked
-                          ? "text-zinc-400 dark:text-zinc-600"
-                          : "text-zinc-600 dark:text-zinc-300"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => togglePermission(key)}
-                        disabled={saving || locked}
-                        className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300 text-[var(--brand)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]"
-                      />
-                      {PERMISSION_LABELS[key]}
-                      {locked && <span className="text-xs">(เฉพาะผู้ดูแลระบบหลัก)</span>}
-                    </label>
-                  );
-                })}
+                {PERMISSION_KEYS.filter(
+                  // Hide a bootstrap-reserved key entirely unless this
+                  // account already has it ticked (so an existing account
+                  // with a leftover grant from before this cap existed can
+                  // still be seen and revoked here) — otherwise it's not
+                  // grantable for this role anyway (see isGrantablePermission
+                  // / NON_GRANTABLE_KEYS in lib/permissions.ts), so showing
+                  // it disabled would just be visual noise. The real
+                  // boundary stays server-side in /api/manage/users.
+                  (key) => checkedPermissions.has(key) || isGrantablePermission(key, role)
+                ).map((key) => (
+                  <label key={key} className="flex items-start gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+                    <input
+                      type="checkbox"
+                      checked={checkedPermissions.has(key)}
+                      onChange={() => togglePermission(key)}
+                      disabled={saving}
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300 text-[var(--brand)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]"
+                    />
+                    {PERMISSION_LABELS[key]}
+                  </label>
+                ))}
               </div>
             </div>
 
