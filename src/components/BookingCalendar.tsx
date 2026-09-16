@@ -250,7 +250,8 @@ export default function BookingCalendar({
                   const cancelled = isBookingCancelled(b);
                   const pending = !cancelled && b.approvalStatus === "pending";
                   const color = resourceColorMap.get(b.resourceName);
-                  const time = splitBookingDateTime(b.startTime)?.time ?? "";
+                  const startTimeOfDay = splitBookingDateTime(b.startTime)?.time ?? "";
+                  const endTimeOfDay = splitBookingDateTime(b.endTime)?.time ?? "";
                   return (
                     <span
                       key={b.bookingId}
@@ -265,7 +266,8 @@ export default function BookingCalendar({
                             : "bg-[var(--seg-c)] text-white dark:bg-[var(--seg-c-dark)]"
                       }`}
                     >
-                      {time} {b.resourceName}
+                      {startTimeOfDay}
+                      {endTimeOfDay ? `-${endTimeOfDay}` : ""} {b.department || b.resourceName}
                     </span>
                   );
                 })}
