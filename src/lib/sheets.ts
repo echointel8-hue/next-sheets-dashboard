@@ -74,6 +74,22 @@ function getEnv(name: string): string {
 // stays warm) — never per-request.
 let cachedAuth: ReturnType<typeof createSheetsAuth> | null = null;
 
+// The googleapis client library has NO request timeout by default (gaxios,
+// the HTTP layer underneath it, leaves `timeout` unset unless told
+// otherwise) — every google.sheets(...) call in this file could therefore
+// hang indefinitely if a request got stuck (a network hiccup, or Google
+// throttling the service account after a burst of reads/writes, e.g. from
+// manually editing the sheet a lot in a short span). That's exactly what
+// stalled login for a long time on 2026-09-16: the login route's own
+// unbounded `await appendEditLog(...)` before responding (see that route's
+// comment — now fixed by deferring it via after()) masked this as a
+// login-specific bug, but the same missing timeout affects every read/write
+// here, including the getUsers() read that a non-bootstrap login still has
+// to await before it can even check the password. Setting it once, globally,
+// covers every call site in this module: a stuck request now fails after 15s
+// with a clear, catchable error instead of hanging the caller forever.
+google.options({ timeout: 15_000 });
+
 function createSheetsAuth() {
   const clientEmail = getEnv("GOOGLE_SERVICE_ACCOUNT_EMAIL");
   const privateKey = getEnv("GOOGLE_PRIVATE_KEY").replace(/\\n/g, "\n");
