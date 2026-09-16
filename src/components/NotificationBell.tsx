@@ -5,10 +5,12 @@ import { Bell, Check, Loader2, X as XIcon } from "lucide-react";
 import { formatBookingDateTime, isBookingCancelled, type Booking } from "@/lib/booking";
 
 // No websocket/push available — the backend is Google Sheets, read on
-// every request — so "live" here means polling. Once a minute keeps the
-// badge/toast reasonably fresh without hammering the Sheets API on every
-// authenticated screen (this mounts once per session via AppShell).
-const POLL_INTERVAL_MS = 60_000;
+// every request — so "live" here means polling. True real-time would need
+// an external pub/sub service (Pusher/Ably/Supabase Realtime etc.), which
+// needs its own account + API keys; per explicit choice, faster polling is
+// the tradeoff instead — every 15 seconds, still per authenticated screen
+// (this mounts once per session via AppShell) rather than a true push.
+const POLL_INTERVAL_MS = 15_000;
 const TOAST_DURATION_MS = 6000;
 
 interface Toast {
