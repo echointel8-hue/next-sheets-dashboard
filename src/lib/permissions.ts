@@ -21,16 +21,25 @@ import type { Role } from "@/lib/auth";
 // HIERARCHY CAP (added right after this feature first shipped, in response
 // to the hospital noticing an admin account could otherwise be ticked all
 // the way up to look exactly like a superadmin, making the role dropdown
-// itself meaningless): a per-account override can only ever raise an
-// account up to what a plain, non-bootstrap superadmin already gets by
-// default. Six keys — manageBookingResources, deleteEquipment,
-// accessItDashboard, manageUsers, manageReportActionList,
-// viewAllMaintenanceTasks — stay reserved to the literal bootstrap account
-// and can never be granted to anyone else via extraPermissions, full stop,
-// even to a superadmin. See NON_GRANTABLE_KEYS/isGrantablePermission below —
-// that's now the real ceiling on how far an override can go, checked both
-// server-side (the actual boundary) and client-side (so the checkbox UI
-// never offers something the server would reject).
+// itself meaningless) — two layers, both enforced server-side (the real
+// boundary, in /api/manage/users) and client-side (so UserFormModal's
+// checkbox list never even offers something the server would reject):
+//   1. Six keys — manageBookingResources, deleteEquipment,
+//      accessItDashboard, manageUsers, manageReportActionList,
+//      viewAllMaintenanceTasks — stay reserved to the literal bootstrap
+//      account and can never be granted to anyone else via
+//      extraPermissions, full stop, even to a superadmin. See
+//      NON_GRANTABLE_KEYS below.
+//   2. On top of that, a role can have its own narrower allow-list for the
+//      remaining "superadmin ทั่วไป" tier keys (approveCarBooking,
+//      cancelAnyBooking, manageEquipmentAllDept, addEquipment,
+//      disposeRestoreEquipment) — currently just "admin", narrowed to
+//      addEquipment alone, since even that whole tier was still enough to
+//      make an admin account indistinguishable from a superadmin. See
+//      GRANTABLE_EXTRA_KEYS_BY_ROLE below.
+// isGrantablePermission(key, role) is the one function that combines both
+// layers — always use that, never NON_GRANTABLE_KEYS or
+// GRANTABLE_EXTRA_KEYS_BY_ROLE directly.
 //
 // NOT every existing role check in the app was migrated to read through
 // here — only the ones listed below, chosen because they're reasonable,
@@ -113,15 +122,39 @@ export const NON_GRANTABLE_KEYS: PermissionKey[] = [
   "viewAllMaintenanceTasks",
 ];
 
-/** True if `key` can be added to some account's extraPermissions — either
- * it isn't one of the bootstrap-reserved keys above, or the target role
- * already gets it by default anyway (so "granting" it is really just
- * re-enabling the role's own default, not an escalation). Use this — not
- * a bare NON_GRANTABLE_KEYS.includes check — everywhere a grant is being
- * validated, so a role's own defaults are never blocked from being kept. */
+/** A second, per-role ceiling on top of NON_GRANTABLE_KEYS — added when the
+ * hospital pointed out that even the "superadmin ทั่วไป" tier (the five
+ * keys NOT in NON_GRANTABLE_KEYS: approveCarBooking, cancelAnyBooking,
+ * manageEquipmentAllDept, addEquipment, disposeRestoreEquipment) was too
+ * much to let an "admin" account reach in full — ticking every one of those
+ * five still made an admin account functionally identical to a plain
+ * superadmin, the exact problem this whole cap exists to prevent, just one
+ * tier down. Only a role listed here has its grantable additions narrowed
+ * further; a role with no entry keeps the plain NON_GRANTABLE_KEYS ceiling
+ * (currently just "admin", narrowed to addEquipment alone, per the
+ * hospital's explicit choice — "admin ให้เพิ่มได้เฉพาะเพิ่มรายการครุภัณฑ์
+ * ใหม่เท่านั้น นอกนั้นซ่อนไป"). This never restricts a role's own defaults
+ * (see isGrantablePermission below) — only what can be added beyond them. */
+export const GRANTABLE_EXTRA_KEYS_BY_ROLE: Partial<Record<Role, PermissionKey[]>> = {
+  admin: ["addEquipment"],
+};
+
+/** True if `key` can be added to some account's extraPermissions for the
+ * given `role` — checked in this order: (1) the role already gets it by
+ * default anyway, so "granting" it is really just re-enabling the role's
+ * own default, never blocked; (2) it's one of the six bootstrap-reserved
+ * keys (NON_GRANTABLE_KEYS) — never grantable as an addition to anyone;
+ * (3) the role has its own narrower allow-list (GRANTABLE_EXTRA_KEYS_BY_ROLE)
+ * — only listed keys are grantable; (4) no allow-list for this role — every
+ * remaining (non-reserved) key is grantable. Use this — never a bare
+ * NON_GRANTABLE_KEYS/GRANTABLE_EXTRA_KEYS_BY_ROLE check — everywhere a grant
+ * is being validated. */
 export function isGrantablePermission(key: PermissionKey, role: Role): boolean {
-  if (!NON_GRANTABLE_KEYS.includes(key)) return true;
-  return defaultPermissionsForRole(role, false).has(key);
+  if (defaultPermissionsForRole(role, false).has(key)) return true;
+  if (NON_GRANTABLE_KEYS.includes(key)) return false;
+  const allowedExtras = GRANTABLE_EXTRA_KEYS_BY_ROLE[role];
+  if (allowedExtras) return allowedExtras.includes(key);
+  return true;
 }
 
 /** The minimal shape hasPermission()/defaultPermissionsForRole() need —
