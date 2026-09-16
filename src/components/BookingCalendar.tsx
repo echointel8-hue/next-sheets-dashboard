@@ -409,7 +409,10 @@ function DayDetailModal({
                       <Phone size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
                       {b.contactPhone}
                     </span>
-                    <span>{b.bookedByDisplayName || b.bookedByUsername}</span>
+                    <span>
+                      {b.bookedByDisplayName || b.bookedByUsername}
+                      {b.department ? ` · ${b.department}` : ""}
+                    </span>
                   </div>
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     {!cancelled && canApprove && b.approvalStatus === "pending" && (
