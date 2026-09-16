@@ -8,46 +8,59 @@ import { isOverSeatCapacity, type Booking, type BookingResource, type BookingRes
 const INPUT_CLASS =
   "h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:disabled:bg-zinc-800/60 dark:disabled:text-zinc-500";
 
-// วันเวลาเริ่มต้น/สิ้นสุด ใช้เวลาเป็นครึ่งชั่วโมงเท่านั้น (นาทีเลือกได้แค่ 00
-// หรือ 30) ตามที่ขอ — ชั่วโมงยังเลือกได้อิสระ. toLocalInputValue ประกอบค่า
-// จาก local time components เอง (ไม่ใช้ toISOString ซึ่งเป็น UTC) ให้ตรงกับ
-// รูปแบบที่ input type="datetime-local" ต้องการ.
-function toLocalInputValue(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+// วันเวลาเริ่มต้น/สิ้นสุด แยกเป็น 3 ช่องอิสระ (วันที่ + ชั่วโมง + นาที)
+// แทน input type="datetime-local" ตัวเดียว เพราะตัวเลือกนาทีของ picker
+// เนทีฟยังเลื่อนดูได้ทุกนาที (00-59) ต่อให้ตั้ง step ไว้แล้วก็ตาม — step
+// ควบคุมแค่ความถูกต้องตอน submit ไม่ได้จำกัดรายการที่แสดงใน picker เอง.
+// ช่องนาทีจึงต้องเป็น <select> ที่มีแค่ 2 ตัวเลือก (00/30) ตรงๆ ตามที่ขอ
+// ส่วนชั่วโมงยังเป็น <select> 24 ตัวเลือกให้เลือกได้อิสระเหมือนเดิม.
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
-function roundUpToHalfHour(date: Date): Date {
-  const d = new Date(date);
-  d.setSeconds(0, 0);
-  const minutes = d.getMinutes();
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => pad2(i));
+const MINUTE_OPTIONS = ["00", "30"] as const;
+type MinuteOption = (typeof MINUTE_OPTIONS)[number];
+
+function dateStr(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** ค่าเริ่มต้นของฟอร์มจองใหม่ — วันเวลาปัจจุบัน ปัดนาทีขึ้นเป็นครึ่งชั่วโมง
+ * ถัดไป (ไม่ปัดย้อนไปเป็นอดีต) และสิ้นสุดห่างจากเริ่มต้น 1 ชั่วโมง —
+ * ผู้จองยังปรับเปลี่ยนได้ตามต้องการทั้งหมด นี่แค่ลดการต้องเลือกวันที่/เวลา
+ * จากศูนย์ทุกครั้ง ตามที่ขอ. */
+function defaultBookingParts(): {
+  startDate: string;
+  startHour: string;
+  startMinute: MinuteOption;
+  endDate: string;
+  endHour: string;
+  endMinute: MinuteOption;
+} {
+  const start = new Date();
+  start.setSeconds(0, 0);
+  const minutes = start.getMinutes();
   if (minutes !== 0 && minutes !== 30) {
-    d.setMinutes(minutes + (minutes < 30 ? 30 - minutes : 60 - minutes));
+    start.setMinutes(minutes + (minutes < 30 ? 30 - minutes : 60 - minutes));
   }
-  return d;
-}
-
-/** Default วันเวลาเริ่มต้น/สิ้นสุด เมื่อเปิดฟอร์มจองใหม่ — วันเวลาปัจจุบัน
- * ปัดขึ้นเป็นครึ่งชั่วโมงถัดไป (ไม่ปัดย้อนไปเป็นอดีต) และสิ้นสุดห่างจาก
- * เริ่มต้น 1 ชั่วโมงเป็นค่าเริ่มต้น — ผู้จองยังปรับเปลี่ยนได้ตามต้องการ
- * ทั้งหมด นี่แค่ลดการต้องเลือกวันที่จากศูนย์ทุกครั้ง ตามที่ขอ. */
-function defaultBookingTimes(): { start: string; end: string } {
-  const start = roundUpToHalfHour(new Date());
   const end = new Date(start);
   end.setHours(end.getHours() + 1);
-  return { start: toLocalInputValue(start), end: toLocalInputValue(end) };
+
+  return {
+    startDate: dateStr(start),
+    startHour: pad2(start.getHours()),
+    startMinute: start.getMinutes() === 30 ? "30" : "00",
+    endDate: dateStr(end),
+    endHour: pad2(end.getHours()),
+    endMinute: end.getMinutes() === 30 ? "30" : "00",
+  };
 }
 
-/** ปัดค่าที่ผู้ใช้เลือก/พิมพ์เข้ามาให้นาทีเหลือแค่ 00 หรือ 30 เสมอ — ทำงาน
- * คู่กับ step={1800} บน input (ซึ่งจำกัดตัวเลือกในตัวเลือกเวลาแบบเนทีฟของ
- * เบราว์เซอร์อยู่แล้ว) เผื่อกรณีพิมพ์ค่าตรงๆ ที่ step เพียงอย่างเดียวอาจไม่
- * บล็อก. คืนค่าดิบกลับถ้ารูปแบบไม่ตรงตามที่คาด (เช่น ยังพิมพ์ไม่ครบ). */
-function snapToHalfHour(raw: string): string {
-  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
-  if (!m) return raw;
-  const [, y, mo, d, h, mi] = m;
-  const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
-  return toLocalInputValue(roundUpToHalfHour(date));
+/** ประกอบวันที่/ชั่วโมง/นาทีทั้ง 3 ช่องกลับเป็นสตริงเดียวรูปแบบเดียวกับที่
+ * ระบบใช้ทุกที่ ("YYYY-MM-DDTHH:MM") — ว่างถ้ายังเลือกวันที่ไม่ครบ. */
+function combineDateTime(date: string, hour: string, minute: string): string {
+  return date ? `${date}T${hour}:${minute}` : "";
 }
 
 /**
@@ -79,9 +92,17 @@ export default function BookingFormModal({
   onSaved: (booking: Booking) => void;
 }) {
   const [resourceId, setResourceId] = useState(preselectedResourceId ?? resources[0]?.resourceId ?? "");
-  const defaultTimes = defaultBookingTimes();
-  const [startTime, setStartTime] = useState(defaultTimes.start);
-  const [endTime, setEndTime] = useState(defaultTimes.end);
+  const defaultParts = defaultBookingParts();
+  const [startDate, setStartDate] = useState(defaultParts.startDate);
+  const [startHour, setStartHour] = useState(defaultParts.startHour);
+  const [startMinute, setStartMinute] = useState<MinuteOption>(defaultParts.startMinute);
+  const [endDate, setEndDate] = useState(defaultParts.endDate);
+  const [endHour, setEndHour] = useState(defaultParts.endHour);
+  const [endMinute, setEndMinute] = useState<MinuteOption>(defaultParts.endMinute);
+  // ค่ารวมรูปแบบ "YYYY-MM-DDTHH:MM" เดิม — ใช้กับ validation/ส่ง API ด้านล่าง
+  // เหมือนเดิมทุกจุด ไม่ต้องแตะโค้ดส่วนอื่นที่อ้างอิง startTime/endTime.
+  const startTime = combineDateTime(startDate, startHour, startMinute);
+  const endTime = combineDateTime(endDate, endHour, endMinute);
   const [purpose, setPurpose] = useState("");
   const [destination, setDestination] = useState("");
   const [participants, setParticipants] = useState("");
@@ -272,29 +293,93 @@ export default function BookingFormModal({
                 )}
               </>
             )}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+            {/* วันที่ + ชั่วโมง (อิสระ) + นาที (00/30 เท่านั้น) แยกเป็นคนละ
+                ช่อง — คนละแถวเสมอ (ไม่แบ่ง 2 คอลัมน์) เพราะแต่ละฝั่งมี 3
+                ช่องย่อยรวมกันแล้วค่อนข้างกว้าง ใส่ 2 ฝั่งเคียงกันในโมดัลนี้
+                จะแคบเกินไป */}
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
                 วันเวลาเริ่มต้น
-                <input
-                  type="datetime-local"
-                  step={1800}
-                  value={startTime}
-                  onChange={(e) => setStartTime(snapToHalfHour(e.target.value))}
-                  disabled={saving}
-                  className={INPUT_CLASS}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    disabled={saving}
+                    className={`${INPUT_CLASS} min-w-0 flex-1`}
+                  />
+                  <select
+                    value={startHour}
+                    onChange={(e) => setStartHour(e.target.value)}
+                    disabled={saving}
+                    aria-label="ชั่วโมงเริ่มต้น"
+                    className={`${INPUT_CLASS} w-[4.5rem] shrink-0`}
+                  >
+                    {HOUR_OPTIONS.map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="flex items-center text-zinc-400" aria-hidden="true">
+                    :
+                  </span>
+                  <select
+                    value={startMinute}
+                    onChange={(e) => setStartMinute(e.target.value as MinuteOption)}
+                    disabled={saving}
+                    aria-label="นาทีเริ่มต้น"
+                    className={`${INPUT_CLASS} w-[4.5rem] shrink-0`}
+                  >
+                    {MINUTE_OPTIONS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
                 วันเวลาสิ้นสุด
-                <input
-                  type="datetime-local"
-                  step={1800}
-                  value={endTime}
-                  onChange={(e) => setEndTime(snapToHalfHour(e.target.value))}
-                  disabled={saving}
-                  className={INPUT_CLASS}
-                />
-              </label>
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    disabled={saving}
+                    className={`${INPUT_CLASS} min-w-0 flex-1`}
+                  />
+                  <select
+                    value={endHour}
+                    onChange={(e) => setEndHour(e.target.value)}
+                    disabled={saving}
+                    aria-label="ชั่วโมงสิ้นสุด"
+                    className={`${INPUT_CLASS} w-[4.5rem] shrink-0`}
+                  >
+                    {HOUR_OPTIONS.map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="flex items-center text-zinc-400" aria-hidden="true">
+                    :
+                  </span>
+                  <select
+                    value={endMinute}
+                    onChange={(e) => setEndMinute(e.target.value as MinuteOption)}
+                    disabled={saving}
+                    aria-label="นาทีสิ้นสุด"
+                    className={`${INPUT_CLASS} w-[4.5rem] shrink-0`}
+                  >
+                    {MINUTE_OPTIONS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </div>
             <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
               วัตถุประสงค์ / เหตุผลการใช้งาน
