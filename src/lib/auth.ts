@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "crypto";
+import { createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "crypto";
 import type { NextRequest } from "next/server";
 import { hasPermission, type PermissionKey } from "@/lib/permissions";
 
@@ -73,6 +73,16 @@ export interface SessionPayload {
    * for any Users-tab account that has never had an override set. */
   extraPermissions?: PermissionKey[];
   revokedPermissions?: PermissionKey[];
+  /** Random ID minted once per successful login (registerNewSession below),
+   * carried unchanged through every sliding-refresh re-mint of this same
+   * session (see proxy.ts's refreshSessionCookie, which reuses it rather
+   * than generating a new one). Lets verifySessionToken tell "this same
+   * browser session, still going" apart from "a different login for this
+   * account happened somewhere else" — see the single-active-session
+   * section below for the full mechanism. Empty string for a cookie signed
+   * before this feature existed (tolerated, not enforced — see
+   * verifySessionToken). */
+  sessionId: string;
   exp: number; // epoch ms
 }
 
@@ -219,8 +229,68 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
   // cookie; a malformed value is dropped rather than rejecting the session).
   if (!Array.isArray(payload.extraPermissions)) delete payload.extraPermissions;
   if (!Array.isArray(payload.revokedPermissions)) delete payload.revokedPermissions;
+  // Same tolerance again, for sessionId — a cookie signed before the
+  // single-active-session feature existed just won't have one.
+  if (typeof payload.sessionId !== "string") payload.sessionId = "";
   if (Date.now() > payload.exp) return null;
+
+  // Single active session per account (see the section below this
+  // function): a non-empty sessionId participates in the check; an empty
+  // one (legacy cookie, or the rare case a login somehow didn't mint one)
+  // is waved through untracked, same "never worse than before this
+  // feature existed" reasoning as the displayName/extraPermissions
+  // fallbacks above.
+  if (payload.sessionId) {
+    const current = activeSessions.get(payload.username);
+    if (current === undefined) {
+      // Nothing recorded yet for this account — either the server just
+      // restarted (the in-memory map is cleared, see the comment below) or
+      // this is the very first request since a login minted this session.
+      // Adopt it as the active one rather than rejecting it outright: a
+      // mass logout on every deploy/restart would be worse than briefly
+      // not enforcing exclusivity until the next real login re-establishes
+      // it properly.
+      activeSessions.set(payload.username, payload.sessionId);
+    } else if (current !== payload.sessionId) {
+      // A different login for this account is now the active one —
+      // "logging in elsewhere kicks the old session out immediately," per
+      // the hospital's explicit choice.
+      return null;
+    }
+  }
   return payload;
+}
+
+// --- Single active session per account (in-memory, per Node process) ---
+// Same in-memory-map tradeoff as the login rate limiter below (see that
+// section's own comment) — resets on process restart, an accepted tradeoff
+// for this deployment shape. Maps username -> the sessionId of whichever
+// login is currently considered "the" active one for that account.
+// registerNewSession is called exactly once per successful login (see the
+// login route), overwriting whatever was there before — the previous
+// session's cookie still carries the old sessionId, so its next request
+// fails the check above and gets bounced to /login. A session just being
+// refreshed (proxy.ts's sliding-exp re-mint) reuses its own existing
+// sessionId rather than calling this again, so ordinary browsing never
+// touches this map — only an actual new login (or an explicit logout, via
+// clearActiveSession) does.
+const activeSessions = new Map<string, string>();
+
+/** Mints a new sessionId for `username` and registers it as the sole
+ * active session for that account, silently superseding whatever session
+ * (if any) was active before. Call once per successful login. */
+export function registerNewSession(username: string): string {
+  const sessionId = randomUUID();
+  activeSessions.set(username, sessionId);
+  return sessionId;
+}
+
+/** Releases `username`'s active-session slot — called on explicit logout
+ * so nothing stale lingers. Not required for the kick-out-on-login
+ * mechanism itself (a fresh login always overwrites regardless of what's
+ * here), just tidiness. */
+export function clearActiveSession(username: string): void {
+  activeSessions.delete(username);
 }
 
 // --- Login rate limiting (in-memory, per Node process) ---

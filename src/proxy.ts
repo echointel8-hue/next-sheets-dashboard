@@ -81,6 +81,22 @@ function refreshSessionCookie(response: NextResponse, session: SessionPayload) {
     department: session.department,
     isBootstrap: session.isBootstrap,
     displayName: session.displayName,
+    // Both fixed here at the same time:
+    // - extraPermissions/revokedPermissions were missing from this list
+    //   entirely, so a granted/revoked account silently lost its overrides
+    //   on this very first sliding-refresh after login (every request
+    //   refreshes — see the comment on the call site below) — a real bug,
+    //   not by design.
+    // - sessionId is reused as-is, never regenerated here — only a fresh
+    //   /api/auth/login call (registerNewSession) mints a new one. Ordinary
+    //   browsing must never touch the single-active-session map (lib/
+    //   auth.ts), or every refresh would spuriously re-claim "I'm the
+    //   active session," and two devices refreshing in quick succession
+    //   would end up fighting over which one counts as active instead of
+    //   only a genuine new login deciding that.
+    extraPermissions: session.extraPermissions,
+    revokedPermissions: session.revokedPermissions,
+    sessionId: session.sessionId,
   });
   response.cookies.set(SESSION_COOKIE, refreshed, {
     httpOnly: true,

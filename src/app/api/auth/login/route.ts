@@ -7,6 +7,7 @@ import {
   createSessionToken,
   isLockedOut,
   recordFailedAttempt,
+  registerNewSession,
   requestAuditTag,
   verifyPassword,
   type Role,
@@ -149,7 +150,14 @@ export async function POST(request: NextRequest) {
   }
 
   clearAttempts(rateLimitKey);
-  const token = createSessionToken(matched);
+  // One active session per account (lib/auth.ts's activeSessions map) — this
+  // mints a fresh sessionId and registers it as the sole active one for
+  // `matched.username`, silently superseding whatever session (on another
+  // device/browser) was active before it. Per the hospital's explicit
+  // choice: logging in elsewhere kicks the old session out immediately,
+  // rather than blocking this new login while an old one is still active.
+  const sessionId = registerNewSession(matched.username);
+  const token = createSessionToken({ ...matched, sessionId });
   await logLoginAttempt(request, "สำเร็จ", {
     username: matched.username,
     role: matched.role,
