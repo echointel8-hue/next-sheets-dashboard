@@ -7,7 +7,7 @@ import { canAccessItDashboardClient, roleLabelFor } from "@/lib/roleLabel";
 import AppShell from "@/components/AppShell";
 
 const CARD =
-  "rounded-2xl border border-emerald-900/10 bg-gradient-to-b from-white to-emerald-50/60 shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:from-zinc-900 dark:to-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
+  "rounded-2xl border border-emerald-900/10 bg-gradient-to-b from-white to-emerald-50 shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:from-zinc-900 dark:to-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
 
 interface MenuItem {
   href: string;
@@ -34,19 +34,19 @@ export default function MenuHub({
     {
       href: "/manage",
       title: "ระบบทะเบียนครุภัณฑ์คอมพิวเตอร์",
-      description: "เพิ่ม/แก้ไข/จำหน่ายครุภัณฑ์ ดูรายงานสเปกและงานบำรุงรักษา",
+      description: "บริหารจัดการทะเบียนครุภัณฑ์กลุ่มงาน",
       icon: <Package size={22} strokeWidth={2} aria-hidden="true" />,
     },
     {
       href: "/booking/car",
       title: "ระบบจองรถ",
-      description: "จองรถของโรงพยาบาล ดูช่วงเวลาที่ว่าง และรายการที่จองไว้",
+      description: "จองและใช้งานรถยนต์ราชการ",
       icon: <Car size={22} strokeWidth={2} aria-hidden="true" />,
     },
     {
       href: "/booking/room",
       title: "ระบบจองห้องประชุม",
-      description: "จองห้องประชุม ดูช่วงเวลาที่ว่าง และรายการที่จองไว้",
+      description: "จองและใช้งานห้องประชุม",
       icon: <DoorOpen size={22} strokeWidth={2} aria-hidden="true" />,
     },
   ];
