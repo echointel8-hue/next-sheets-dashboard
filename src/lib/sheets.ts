@@ -279,6 +279,11 @@ export type EditLogAction =
   | "เข้าสู่ระบบสำเร็จ"
   | "เข้าสู่ระบบล้มเหลว"
   | "ออกจากระบบ"
+  // Self-service password reset (POST /api/auth/reset-password) — a user
+  // proving a default password to set their own new one, distinct from
+  // "จัดการผู้ใช้" which covers a superadmin resetting it *for* them.
+  | "รีเซ็ตรหัสผ่านสำเร็จ"
+  | "รีเซ็ตรหัสผ่านล้มเหลว"
   // Vehicle/meeting-room booking feature — see the BookingResources/
   // Bookings tab section near the end of this file.
   | "เพิ่มทรัพยากรจอง"
