@@ -8,6 +8,48 @@ import { isOverSeatCapacity, type Booking, type BookingResource, type BookingRes
 const INPUT_CLASS =
   "h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:disabled:bg-zinc-800/60 dark:disabled:text-zinc-500";
 
+// วันเวลาเริ่มต้น/สิ้นสุด ใช้เวลาเป็นครึ่งชั่วโมงเท่านั้น (นาทีเลือกได้แค่ 00
+// หรือ 30) ตามที่ขอ — ชั่วโมงยังเลือกได้อิสระ. toLocalInputValue ประกอบค่า
+// จาก local time components เอง (ไม่ใช้ toISOString ซึ่งเป็น UTC) ให้ตรงกับ
+// รูปแบบที่ input type="datetime-local" ต้องการ.
+function toLocalInputValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function roundUpToHalfHour(date: Date): Date {
+  const d = new Date(date);
+  d.setSeconds(0, 0);
+  const minutes = d.getMinutes();
+  if (minutes !== 0 && minutes !== 30) {
+    d.setMinutes(minutes + (minutes < 30 ? 30 - minutes : 60 - minutes));
+  }
+  return d;
+}
+
+/** Default วันเวลาเริ่มต้น/สิ้นสุด เมื่อเปิดฟอร์มจองใหม่ — วันเวลาปัจจุบัน
+ * ปัดขึ้นเป็นครึ่งชั่วโมงถัดไป (ไม่ปัดย้อนไปเป็นอดีต) และสิ้นสุดห่างจาก
+ * เริ่มต้น 1 ชั่วโมงเป็นค่าเริ่มต้น — ผู้จองยังปรับเปลี่ยนได้ตามต้องการ
+ * ทั้งหมด นี่แค่ลดการต้องเลือกวันที่จากศูนย์ทุกครั้ง ตามที่ขอ. */
+function defaultBookingTimes(): { start: string; end: string } {
+  const start = roundUpToHalfHour(new Date());
+  const end = new Date(start);
+  end.setHours(end.getHours() + 1);
+  return { start: toLocalInputValue(start), end: toLocalInputValue(end) };
+}
+
+/** ปัดค่าที่ผู้ใช้เลือก/พิมพ์เข้ามาให้นาทีเหลือแค่ 00 หรือ 30 เสมอ — ทำงาน
+ * คู่กับ step={1800} บน input (ซึ่งจำกัดตัวเลือกในตัวเลือกเวลาแบบเนทีฟของ
+ * เบราว์เซอร์อยู่แล้ว) เผื่อกรณีพิมพ์ค่าตรงๆ ที่ step เพียงอย่างเดียวอาจไม่
+ * บล็อก. คืนค่าดิบกลับถ้ารูปแบบไม่ตรงตามที่คาด (เช่น ยังพิมพ์ไม่ครบ). */
+function snapToHalfHour(raw: string): string {
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if (!m) return raw;
+  const [, y, mo, d, h, mi] = m;
+  const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
+  return toLocalInputValue(roundUpToHalfHour(date));
+}
+
 /**
  * New-booking form, scoped to one resource type at a time (car or room —
  * kept as separate menus per the hospital's explicit request, see
@@ -37,8 +79,9 @@ export default function BookingFormModal({
   onSaved: (booking: Booking) => void;
 }) {
   const [resourceId, setResourceId] = useState(preselectedResourceId ?? resources[0]?.resourceId ?? "");
-  const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
+  const defaultTimes = defaultBookingTimes();
+  const [startTime, setStartTime] = useState(defaultTimes.start);
+  const [endTime, setEndTime] = useState(defaultTimes.end);
   const [purpose, setPurpose] = useState("");
   const [destination, setDestination] = useState("");
   const [participants, setParticipants] = useState("");
@@ -224,7 +267,7 @@ export default function BookingFormModal({
                 {resourceType === "car" && (
                   <p className="flex items-start gap-2 rounded-lg bg-sky-50 p-2.5 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
                     <Info size={15} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
-                    การจองรถต้องได้รับการอนุมัติจากผู้ดูแลระบบ (Superadmin) ก่อน จึงจะถือว่ายืนยันการจอง
+                    การจองรถต้องได้รับการอนุมัติจากบริหาร ก่อน จึงจะถือว่ายืนยันการจอง
                   </p>
                 )}
               </>
@@ -234,8 +277,9 @@ export default function BookingFormModal({
                 วันเวลาเริ่มต้น
                 <input
                   type="datetime-local"
+                  step={1800}
                   value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
+                  onChange={(e) => setStartTime(snapToHalfHour(e.target.value))}
                   disabled={saving}
                   className={INPUT_CLASS}
                 />
@@ -244,8 +288,9 @@ export default function BookingFormModal({
                 วันเวลาสิ้นสุด
                 <input
                   type="datetime-local"
+                  step={1800}
                   value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
+                  onChange={(e) => setEndTime(snapToHalfHour(e.target.value))}
                   disabled={saving}
                   className={INPUT_CLASS}
                 />
