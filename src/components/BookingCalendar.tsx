@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Ban, Check, ChevronLeft, ChevronRight, Loader2, MapPin, Phone, Users, X } from "lucide-react";
+import { Ban, Building2, Check, ChevronLeft, ChevronRight, Loader2, MapPin, Phone, Users, X } from "lucide-react";
 import type { Role } from "@/lib/auth";
 import { actionColorVars, type ActionColor } from "@/lib/actionColors";
 import type { PermissionKey } from "@/lib/permissions";
@@ -403,6 +403,12 @@ function DayDetailModal({
                       {b.destination}
                     </span>
                   )}
+                  {b.department && (
+                    <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--brand-strong)]">
+                      <Building2 size={14} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                      {b.department}
+                    </span>
+                  )}
                   <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
                     <span className="inline-flex items-center gap-1">
                       <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
@@ -412,10 +418,7 @@ function DayDetailModal({
                       <Phone size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
                       {b.contactPhone}
                     </span>
-                    <span>
-                      {b.bookedByDisplayName || b.bookedByUsername}
-                      {b.department ? ` · ${b.department}` : ""}
-                    </span>
+                    <span>{b.bookedByDisplayName || b.bookedByUsername}</span>
                   </div>
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     {!cancelled && canApprove && b.approvalStatus === "pending" && (
