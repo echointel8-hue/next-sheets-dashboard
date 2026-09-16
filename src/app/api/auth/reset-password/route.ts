@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import {
   clearActiveSession,
   clearAttempts,
@@ -30,15 +30,20 @@ function readResetPayload(body: unknown): ResetPayload | null {
 }
 
 /** Every attempt — success or failure — is logged to EditLog, same pattern
- * as the login route's logLoginAttempt (src/app/api/auth/login/route.ts). */
+ * as the login route's logLoginAttempt (src/app/api/auth/login/route.ts) —
+ * including taking a pre-computed `auditTag` rather than the NextRequest,
+ * since every call site below schedules this via after() instead of
+ * awaiting it before responding (see that route's comment for why: an
+ * unbounded await on this write used to be able to hang the whole request
+ * whenever Google Sheets was slow). */
 async function logResetAttempt(
-  request: NextRequest,
+  auditTag: string,
   outcome: "สำเร็จ" | "ล้มเหลว",
   username: string,
   reason?: string
 ): Promise<void> {
   try {
-    const parts = [outcome === "ล้มเหลว" ? `เหตุผล: ${reason ?? "ไม่ทราบ"}` : null, requestAuditTag(request)].filter(
+    const parts = [outcome === "ล้มเหลว" ? `เหตุผล: ${reason ?? "ไม่ทราบ"}` : null, auditTag].filter(
       (p): p is string => p !== null
     );
     await appendEditLog({
@@ -88,10 +93,13 @@ export async function POST(request: NextRequest) {
     );
   }
   const { username, currentPassword, newPassword } = submitted;
+  // Captured once up front — every EditLog write below is deferred via
+  // after(), so nothing downstream touches `request` directly anymore.
+  const auditTag = requestAuditTag(request);
 
   const rateLimitKey = `reset:${clientIp(request)}:${username}`;
   if (isLockedOut(rateLimitKey)) {
-    await logResetAttempt(request, "ล้มเหลว", username, "ถูกล็อกชั่วคราว (พยายามผิดหลายครั้ง)");
+    after(() => logResetAttempt(auditTag, "ล้มเหลว", username, "ถูกล็อกชั่วคราว (พยายามผิดหลายครั้ง)"));
     return NextResponse.json(
       { error: "ลองรหัสผ่านเริ่มต้นผิดหลายครั้งเกินไป กรุณารอ 5 นาทีแล้วลองใหม่" },
       { status: 429 }
@@ -103,7 +111,7 @@ export async function POST(request: NextRequest) {
     const user = users.find((u) => u.username === username && u.active);
     if (!user || !verifyPassword(currentPassword, user.passwordHash)) {
       recordFailedAttempt(rateLimitKey);
-      await logResetAttempt(request, "ล้มเหลว", username, "ชื่อผู้ใช้หรือรหัสผ่านเริ่มต้นไม่ถูกต้อง");
+      after(() => logResetAttempt(auditTag, "ล้มเหลว", username, "ชื่อผู้ใช้หรือรหัสผ่านเริ่มต้นไม่ถูกต้อง"));
       return NextResponse.json({ error: "ชื่อผู้ใช้หรือรหัสผ่านเริ่มต้นไม่ถูกต้อง" }, { status: 401 });
     }
     // Identity confirmed — clear the attempt counter the same way the login
@@ -123,7 +131,7 @@ export async function POST(request: NextRequest) {
     // one as normal, same as any other login.
     clearActiveSession(username);
 
-    await logResetAttempt(request, "สำเร็จ", username);
+    after(() => logResetAttempt(auditTag, "สำเร็จ", username));
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

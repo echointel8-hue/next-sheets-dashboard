@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
@@ -20,9 +20,19 @@ export const dynamic = "force-dynamic";
 
 /** Every login attempt — success or failure — is written to EditLog, per
  * the hospital's request to log everything from login onward. A logging
- * failure never blocks the actual login outcome. */
+ * failure never blocks the actual login outcome.
+ *
+ * Takes a pre-computed `auditTag` (see requestAuditTag) rather than the
+ * NextRequest itself — every call site now schedules this via `after()`
+ * (see the POST handler below) instead of awaiting it before responding, so
+ * the request object shouldn't be relied on inside this deferred callback;
+ * capturing the one string it actually needs out of it beforehand sidesteps
+ * that entirely. See the POST handler's comment for why this got deferred:
+ * a slow/stuck Google Sheets write here used to be able to hang the whole
+ * login response, even for the bootstrap account, which otherwise never
+ * touches Sheets at all to authenticate. */
 async function logLoginAttempt(
-  request: NextRequest,
+  auditTag: string,
   outcome: "สำเร็จ" | "ล้มเหลว",
   detail: { username: string; role?: Role; department?: string; isBootstrap?: boolean; reason?: string }
 ): Promise<void> {
@@ -31,7 +41,7 @@ async function logLoginAttempt(
       outcome === "สำเร็จ"
         ? `สิทธิ์: ${detail.role}${detail.isBootstrap ? " (bootstrap)" : ""}`
         : `เหตุผล: ${detail.reason ?? "ไม่ทราบ"}`,
-      requestAuditTag(request),
+      auditTag,
     ];
     await appendEditLog({
       timestamp: new Date().toISOString(),
@@ -98,13 +108,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "กรุณาระบุชื่อผู้ใช้และรหัสผ่าน" }, { status: 400 });
   }
   const { username, password } = credentials;
+  // Captured once up front — every EditLog write below is deferred via
+  // after() (see the comment on logLoginAttempt), so nothing downstream
+  // touches `request` directly anymore.
+  const auditTag = requestAuditTag(request);
 
   const rateLimitKey = `${clientIp(request)}:${username}`;
   if (isLockedOut(rateLimitKey)) {
-    await logLoginAttempt(request, "ล้มเหลว", {
-      username,
-      reason: "ถูกล็อกชั่วคราว (พยายามผิดหลายครั้ง)",
-    });
+    after(() =>
+      logLoginAttempt(auditTag, "ล้มเหลว", {
+        username,
+        reason: "ถูกล็อกชั่วคราว (พยายามผิดหลายครั้ง)",
+      })
+    );
     return NextResponse.json(
       { error: "ลองรหัสผ่านผิดหลายครั้งเกินไป กรุณารอ 5 นาทีแล้วลองใหม่" },
       { status: 429 }
@@ -142,10 +158,12 @@ export async function POST(request: NextRequest) {
 
   if (!matched) {
     recordFailedAttempt(rateLimitKey);
-    await logLoginAttempt(request, "ล้มเหลว", {
-      username,
-      reason: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง",
-    });
+    after(() =>
+      logLoginAttempt(auditTag, "ล้มเหลว", {
+        username,
+        reason: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง",
+      })
+    );
     return NextResponse.json({ error: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง" }, { status: 401 });
   }
 
@@ -158,12 +176,23 @@ export async function POST(request: NextRequest) {
   // rather than blocking this new login while an old one is still active.
   const sessionId = registerNewSession(matched.username);
   const token = createSessionToken({ ...matched, sessionId });
-  await logLoginAttempt(request, "สำเร็จ", {
-    username: matched.username,
-    role: matched.role,
-    department: matched.department,
-    isBootstrap: matched.isBootstrap,
-  });
+  // Deferred via after() — this is the fix for logins (bootstrap account
+  // especially) hanging for a long time when the Sheets API write is slow:
+  // this EditLog write used to be awaited *before* the response was built
+  // and sent, so any slowness or hiccup on Google's end stalled the entire
+  // login for however long that write took, with no timeout on it at all.
+  // after() runs it once the response has already gone out to the browser
+  // (and, on Vercel, keeps the function alive long enough for it to finish
+  // via waitUntil under the hood) — a slow write no longer blocks anyone
+  // from getting in.
+  after(() =>
+    logLoginAttempt(auditTag, "สำเร็จ", {
+      username: matched.username,
+      role: matched.role,
+      department: matched.department,
+      isBootstrap: matched.isBootstrap,
+    })
+  );
 
   const response = NextResponse.json({ ok: true, role: matched.role, department: matched.department });
   response.cookies.set(SESSION_COOKIE, token, {

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { SESSION_COOKIE, clearActiveSession, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog } from "@/lib/sheets";
 
@@ -17,18 +17,21 @@ export async function POST(request: NextRequest) {
     // tidiness so nothing stale lingers between this logout and whenever
     // the account next logs in.
     clearActiveSession(session.username);
-    try {
-      await appendEditLog({
+    // Deferred via after() (see login/route.ts's longer comment on the same
+    // pattern) — logging out should never sit around waiting on a Google
+    // Sheets write, so this now runs after the response has already gone
+    // out rather than blocking it.
+    const auditTag = requestAuditTag(request);
+    after(() =>
+      appendEditLog({
         timestamp: new Date().toISOString(),
         action: "ออกจากระบบ",
         actor: session.username,
         department: session.department,
         oldValue: "",
-        newValue: requestAuditTag(request),
-      });
-    } catch (err: unknown) {
-      console.error("appendEditLog failed (logout):", err);
-    }
+        newValue: auditTag,
+      }).catch((err: unknown) => console.error("appendEditLog failed (logout):", err))
+    );
   }
 
   const response = NextResponse.json({ ok: true });
