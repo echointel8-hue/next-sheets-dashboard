@@ -268,9 +268,9 @@ export default function UserFormModal({
                 disabled={saving}
                 className={INPUT_CLASS}
               >
-                <option value="admin">admin (กลุ่มงานตัวเอง)</option>
-                <option value="superadmin">superadmin (ทุกกลุ่มงาน)</option>
-                <option value="it">it (ดูข้อมูล + ออกรายงานทุกกลุ่มงาน)</option>
+                <option value="admin">admin</option>
+                <option value="superadmin">superadmin</option>
+                <option value="it">it</option>
               </select>
             </label>
 
