@@ -89,7 +89,14 @@ export default async function ManageItPage() {
 
   return (
     <ITDashboard
-      session={{ username: session.username, displayName: session.displayName, isBootstrap: session.isBootstrap }}
+      session={{
+        username: session.username,
+        displayName: session.displayName,
+        role: session.role,
+        isBootstrap: session.isBootstrap,
+        extraPermissions: session.extraPermissions,
+        revokedPermissions: session.revokedPermissions,
+      }}
       initial={initial}
       initialMaintenanceLog={maintenanceLog}
       initialMaintenanceTasks={maintenanceTasks}

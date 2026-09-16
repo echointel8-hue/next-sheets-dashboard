@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, hashPassword, requestAuditTag, verifySessionToken, type Role } from "@/lib/auth";
 import { addUser, appendEditLog, getUsers, updateUser, type UserRecord } from "@/lib/sheets";
+import { hasPermission, isPermissionKey, type PermissionKey } from "@/lib/permissions";
 
 // Always live — reveals account data behind an auth check and accepts
 // writes, never something to cache/prerender.
@@ -18,24 +19,33 @@ function toPublic(user: UserRecord): PublicUser {
     department: user.department,
     displayName: user.displayName,
     active: user.active,
+    extraPermissions: user.extraPermissions,
+    revokedPermissions: user.revokedPermissions,
   };
 }
 
-/** Managing users is restricted to the single env-configured bootstrap
- * account (SessionPayload.isBootstrap) — not just any superadmin. A
- * superadmin created through this same UI can add/edit/dispose equipment
- * across every department like any superadmin, but must not be able to
- * create or edit other accounts (including granting itself more access). */
-function requireBootstrapSuperadmin(request: NextRequest) {
+/** Managing users defaults to the single env-configured bootstrap account
+ * (SessionPayload.isBootstrap) — not just any superadmin — same as before
+ * this feature existed. Now backed by hasPermission()'s "manageUsers" key
+ * (see lib/permissions.ts) rather than a hardcoded isBootstrap check, so a
+ * specific non-bootstrap account can be granted this too through this same
+ * per-account override mechanism. That is a real delegation of power (see
+ * the security note at the top of lib/permissions.ts) — a superadmin
+ * created through this same UI can already add/edit/dispose equipment
+ * across every department like any superadmin; granting manageUsers on top
+ * of that additionally lets it create/edit other accounts (though it still
+ * cannot become the true bootstrap account, and cannot grant itself or
+ * anyone immunity to revocation). */
+function requireManageUsersPermission(request: NextRequest) {
   const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session) {
     return { session: null, response: NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 }) };
   }
-  if (!session.isBootstrap) {
+  if (!hasPermission(session, "manageUsers")) {
     return {
       session: null,
       response: NextResponse.json(
-        { error: "เฉพาะบัญชีผู้ดูแลระบบหลักเท่านั้นที่จัดการผู้ใช้ได้" },
+        { error: "เฉพาะบัญชีผู้ดูแลระบบหลัก (หรือบัญชีที่ได้รับสิทธิ์นี้เพิ่มเติม) เท่านั้นที่จัดการผู้ใช้ได้" },
         { status: 403 }
       ),
     };
@@ -45,7 +55,7 @@ function requireBootstrapSuperadmin(request: NextRequest) {
 
 /** Lists every account in the Users tab — bootstrap account only. */
 export async function GET(request: NextRequest) {
-  const { session, response } = requireBootstrapSuperadmin(request);
+  const { session, response } = requireManageUsersPermission(request);
   if (!session) return response;
 
   try {
@@ -63,6 +73,18 @@ interface NewUserPayload {
   role: Role;
   department: string;
   displayName: string;
+  extraPermissions: PermissionKey[];
+  revokedPermissions: PermissionKey[];
+}
+
+/** Reads a permission-key array from the request body, dropping any entry
+ * that isn't a real PermissionKey (see isPermissionKey) instead of
+ * rejecting the whole request over one bad value — same defensive posture
+ * as parsePermissionKeyList in lib/sheets.ts, just on the way in instead of
+ * the way back out of the sheet. Missing/wrong-type entirely -> []. */
+function readPermissionKeyArray(value: unknown): PermissionKey[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isPermissionKey);
 }
 
 function readNewUserPayload(body: unknown): NewUserPayload | null {
@@ -79,13 +101,15 @@ function readNewUserPayload(body: unknown): NewUserPayload | null {
     role: b.role,
     department: b.role === "admin" ? b.department.trim() : "",
     displayName: b.displayName.trim(),
+    extraPermissions: readPermissionKeyArray(b.extraPermissions),
+    revokedPermissions: readPermissionKeyArray(b.revokedPermissions),
   };
 }
 
 /** Creates a new account — bootstrap account only. The plaintext password is
  * hashed here and never written to the sheet or logged. */
 export async function POST(request: NextRequest) {
-  const { session, response } = requireBootstrapSuperadmin(request);
+  const { session, response } = requireManageUsersPermission(request);
   if (!session) return response;
 
   let body: unknown;
@@ -117,6 +141,8 @@ export async function POST(request: NextRequest) {
       role: submitted.role,
       department: submitted.department,
       displayName: submitted.displayName,
+      extraPermissions: submitted.extraPermissions,
+      revokedPermissions: submitted.revokedPermissions,
     });
 
     try {
@@ -148,6 +174,8 @@ interface UpdateUserPayload {
   department?: string;
   displayName?: string;
   active?: boolean;
+  extraPermissions?: PermissionKey[];
+  revokedPermissions?: PermissionKey[];
 }
 
 function readUpdateUserPayload(body: unknown): UpdateUserPayload | null {
@@ -175,13 +203,15 @@ function readUpdateUserPayload(body: unknown): UpdateUserPayload | null {
     if (typeof b.active !== "boolean") return null;
     out.active = b.active;
   }
+  if (b.extraPermissions !== undefined) out.extraPermissions = readPermissionKeyArray(b.extraPermissions);
+  if (b.revokedPermissions !== undefined) out.revokedPermissions = readPermissionKeyArray(b.revokedPermissions);
   return out;
 }
 
 /** Edits an existing account (reset password, change role/department,
  * rename, enable/disable) — bootstrap account only. */
 export async function PATCH(request: NextRequest) {
-  const { session, response } = requireBootstrapSuperadmin(request);
+  const { session, response } = requireManageUsersPermission(request);
   if (!session) return response;
 
   let body: unknown;
@@ -202,12 +232,19 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    const updates: Partial<Pick<UserRecord, "passwordHash" | "role" | "department" | "displayName" | "active">> = {};
+    const updates: Partial<
+      Pick<
+        UserRecord,
+        "passwordHash" | "role" | "department" | "displayName" | "active" | "extraPermissions" | "revokedPermissions"
+      >
+    > = {};
     if (submitted.password) updates.passwordHash = hashPassword(submitted.password);
     if (submitted.role) updates.role = submitted.role;
     if (submitted.department !== undefined) updates.department = submitted.department;
     if (submitted.displayName !== undefined) updates.displayName = submitted.displayName;
     if (submitted.active !== undefined) updates.active = submitted.active;
+    if (submitted.extraPermissions !== undefined) updates.extraPermissions = submitted.extraPermissions;
+    if (submitted.revokedPermissions !== undefined) updates.revokedPermissions = submitted.revokedPermissions;
 
     const updated = await updateUser(submitted.username, updates);
 
@@ -217,6 +254,8 @@ export async function PATCH(request: NextRequest) {
       submitted.department !== undefined && `กลุ่มงาน → ${submitted.department || "-"}`,
       submitted.displayName !== undefined && `ชื่อที่แสดง → ${submitted.displayName}`,
       submitted.active !== undefined && (submitted.active ? "เปิดใช้งาน" : "ปิดใช้งาน"),
+      (submitted.extraPermissions !== undefined || submitted.revokedPermissions !== undefined) &&
+        "ปรับสิทธิ์เฉพาะบัญชี",
     ].filter(Boolean);
     try {
       await appendEditLog({

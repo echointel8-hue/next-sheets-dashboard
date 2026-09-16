@@ -4,6 +4,7 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 import { getUsers } from "@/lib/sheets";
 import UsersManager from "@/components/UsersManager";
 import type { ManagedUser } from "@/components/UserFormModal";
+import { hasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +14,14 @@ export default async function ManageUsersPage() {
   if (!session) {
     redirect("/login?next=/manage/users");
   }
-  if (!session.isBootstrap) {
-    // Managing users is restricted to the bootstrap account only — even a
-    // superadmin created through this same UI can't get in here. Not an
-    // authorization bypass either way: /api/manage/users re-checks this
-    // itself regardless — this just avoids showing a page that can't do
-    // anything for anyone else.
+  if (!hasPermission(session, "manageUsers")) {
+    // Managing users defaults to the bootstrap account only — even a
+    // superadmin created through this same UI can't get in here by default.
+    // Now backed by hasPermission()'s "manageUsers" key (lib/permissions.ts)
+    // rather than a hardcoded isBootstrap check, so a specific account
+    // granted this permission through /manage/users can reach this page too
+    // — the same key /api/manage/users itself re-checks regardless, so this
+    // redirect is just UI convenience, not the real security boundary.
     redirect("/manage");
   }
 
@@ -33,6 +36,8 @@ export default async function ManageUsersPage() {
         department: u.department,
         displayName: u.displayName,
         active: u.active,
+        extraPermissions: u.extraPermissions,
+        revokedPermissions: u.revokedPermissions,
       })),
     };
   } catch (err) {

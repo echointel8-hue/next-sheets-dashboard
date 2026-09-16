@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog, getEquipmentDataUnredacted, updateEquipmentRow } from "@/lib/sheets";
-import { findDuplicateAssetNumberRow, isDeleted } from "@/lib/fields";
+import { findDuplicateAssetNumberRow, isDeleted, isDisposed } from "@/lib/fields";
+import { hasPermission } from "@/lib/permissions";
 import { rowSnapshotHash } from "@/lib/recordHash";
 
 export const dynamic = "force-dynamic";
@@ -74,7 +75,25 @@ export async function PATCH(
       );
     }
 
-    if (session.role === "admin") {
+    // Locked for everyone, admin and superadmin alike, once a row is
+    // จำหน่าย (disposed) — checked fresh against the live sheet, not just
+    // hidden in the UI, same rationale as the isDeleted check above. Must
+    // be restored (ยกเลิกจำหน่าย, superadmin-only) before it's editable
+    // again, so no one edits a retired asset's data by mistake.
+    if (isDisposed(record.data, snapshot.fields)) {
+      return NextResponse.json(
+        { error: "รายการนี้จำหน่ายแล้ว ไม่สามารถแก้ไขได้ — กรุณายกเลิกจำหน่ายก่อนจึงจะแก้ไขได้" },
+        { status: 403 }
+      );
+    }
+
+    // Department-scoped by default for admin — but see hasPermission's
+    // "manageEquipmentAllDept" key (lib/permissions.ts): an admin account
+    // can be granted this per-account to edit every department, the same
+    // reach a superadmin already has here unconditionally (superadmin's
+    // role isn't checked in this block at all, exactly as before this
+    // feature existed).
+    if (session.role === "admin" && !hasPermission(session, "manageEquipmentAllDept")) {
       const rowDepartment = fieldValue(record.data, snapshot.fields.department);
       if (!rowDepartment || rowDepartment !== session.department) {
         return NextResponse.json({ error: "ไม่มีสิทธิ์แก้ไขรายการนี้" }, { status: 403 });
@@ -96,8 +115,9 @@ export async function PATCH(
     }
 
     // admin can't smuggle a department change that would move a row out of
-    // (or into) their own scope via this endpoint.
-    if (session.role === "admin" && snapshot.fields.department) {
+    // (or into) their own scope via this endpoint — unless granted
+    // manageEquipmentAllDept, same carve-out as the scoping check above.
+    if (session.role === "admin" && !hasPermission(session, "manageEquipmentAllDept") && snapshot.fields.department) {
       nextValues[snapshot.fields.department] = session.department;
     }
 

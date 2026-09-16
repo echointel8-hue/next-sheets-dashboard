@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog, getEquipmentDataUnredacted, setEquipmentStatus } from "@/lib/sheets";
 import { STATUS_ACTIVE, STATUS_DISPOSED, isDeleted } from "@/lib/fields";
+import { hasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -10,10 +11,11 @@ function fieldValue(row: Record<string, string>, header: string | null): string 
   return (row[header] ?? "").trim();
 }
 
-/** Undoes a "จำหน่าย" (dispose) — superadmin only, same permission level as
- * dispose itself. Sets the status column back to STATUS_ACTIVE. A deleted
- * row (isDeleted) is treated as not found — restoring from a hard delete
- * isn't exposed through this endpoint. */
+/** Undoes a "จำหน่าย" (dispose) — same "disposeRestoreEquipment" permission
+ * level as dispose itself (see lib/permissions.ts), superadmin by default.
+ * Sets the status column back to STATUS_ACTIVE. A deleted row (isDeleted)
+ * is treated as not found — restoring from a hard delete isn't exposed
+ * through this endpoint. */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ rowNumber: string }> }
@@ -22,7 +24,7 @@ export async function POST(
   if (!session) {
     return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   }
-  if (session.role !== "superadmin") {
+  if (!hasPermission(session, "disposeRestoreEquipment")) {
     return NextResponse.json({ error: "เฉพาะ superadmin เท่านั้นที่ยกเลิกการจำหน่ายได้" }, { status: 403 });
   }
 

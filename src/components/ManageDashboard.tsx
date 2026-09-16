@@ -25,8 +25,9 @@ import {
   type FieldMap,
 } from "@/lib/fields";
 import type { Role } from "@/lib/auth";
-import { canAccessItDashboardClient, roleLabelFor } from "@/lib/roleLabel";
+import { canAccessItDashboardClient, canManageUsersClient, roleLabelFor } from "@/lib/roleLabel";
 import { canApproveCarBooking } from "@/lib/booking";
+import { hasPermission, type PermissionKey } from "@/lib/permissions";
 import AppShell from "@/components/AppShell";
 // DEFAULT_SPEC_STANDARDS/SpecOptionLists come from lib/specEvaluation, not
 // lib/sheets, here specifically because this is a Client Component: sheets.ts
@@ -119,7 +120,15 @@ export default function ManageDashboard({
   session,
   initial,
 }: {
-  session: { username: string; displayName: string; role: Role; department: string; isBootstrap: boolean };
+  session: {
+    username: string;
+    displayName: string;
+    role: Role;
+    department: string;
+    isBootstrap: boolean;
+    extraPermissions?: PermissionKey[];
+    revokedPermissions?: PermissionKey[];
+  };
   initial: ManageLoadResult;
 }) {
   const [data, setData] = useState<ManageLoadResult>(initial);
@@ -189,6 +198,18 @@ export default function ManageDashboard({
   }
 
   const isSuperadmin = session.role === "superadmin";
+  // These three mirror the actual server-side gates 1:1 (see hasPermission's
+  // "addEquipment"/"disposeRestoreEquipment"/"deleteEquipment" keys in
+  // lib/permissions.ts and the matching /api/manage/records* routes) —
+  // unlike isSuperadmin above, which now only drives the *view scope* UI
+  // (the "ทุกกลุ่มงาน" department filter), left role-based on purpose since
+  // the GET route's own department-visibility scoping wasn't migrated (see
+  // the comment atop lib/permissions.ts). A specific admin/it account
+  // granted one of these three keys now actually sees the matching button,
+  // not just have the API accept the request if they somehow triggered it.
+  const canAddEquipment = hasPermission(session, "addEquipment");
+  const canDisposeRestoreEquipment = hasPermission(session, "disposeRestoreEquipment");
+  const canDeleteEquipment = hasPermission(session, "deleteEquipment");
 
   const rows = useMemo(() => (!isError(data) ? data.rows : []), [data]);
   const headers = !isError(data) ? data.headers : [];
@@ -439,7 +460,7 @@ export default function ManageDashboard({
             แก้ไข
           </button>
         )}
-        {isSuperadmin && !disposed && (
+        {canDisposeRestoreEquipment && !disposed && (
           <button
             type="button"
             onClick={() => handleDispose(record)}
@@ -450,7 +471,7 @@ export default function ManageDashboard({
             จำหน่าย
           </button>
         )}
-        {isSuperadmin && disposed && (
+        {canDisposeRestoreEquipment && disposed && (
           <button
             type="button"
             onClick={() => handleRestore(record)}
@@ -461,7 +482,7 @@ export default function ManageDashboard({
             ยกเลิกจำหน่าย
           </button>
         )}
-        {session.isBootstrap && (
+        {canDeleteEquipment && (
           <button
             type="button"
             onClick={() => handleDelete(record)}
@@ -482,8 +503,18 @@ export default function ManageDashboard({
       username={session.username}
       displayName={session.displayName}
       canAccessManage={session.role !== "it"}
-      canManageUsers={session.isBootstrap}
-      canAccessIt={canAccessItDashboardClient(session.role, session.isBootstrap)}
+      canManageUsers={canManageUsersClient(
+        session.role,
+        session.isBootstrap,
+        session.extraPermissions,
+        session.revokedPermissions
+      )}
+      canAccessIt={canAccessItDashboardClient(
+        session.role,
+        session.isBootstrap,
+        session.extraPermissions,
+        session.revokedPermissions
+      )}
       canApproveBookings={canApproveCarBooking(session)}
     >
     <main className="flex w-full flex-1 justify-center px-4 py-8 sm:px-6 lg:px-10">
@@ -591,7 +622,7 @@ export default function ManageDashboard({
                     <FileSpreadsheet size={14} strokeWidth={2} aria-hidden="true" />
                     ส่งออก Excel
                   </button>
-                  {isSuperadmin && (
+                  {canAddEquipment && (
                     <button
                       type="button"
                       onClick={openAdd}

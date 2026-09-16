@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog, getEquipmentDataUnredacted, setEquipmentStatus } from "@/lib/sheets";
 import { STATUS_DISPOSED, isDeleted } from "@/lib/fields";
+import { hasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -10,9 +11,11 @@ function fieldValue(row: Record<string, string>, header: string | null): string 
   return (row[header] ?? "").trim();
 }
 
-/** Soft-deletes ("จำหน่าย") one equipment row — superadmin only. Sets the
- * status column rather than removing the row, so the sheet keeps a full
- * history (see fields.ts isDisposed / STATUS_DISPOSED). */
+/** Soft-deletes ("จำหน่าย") one equipment row — superadmin by default (see
+ * hasPermission's "disposeRestoreEquipment" key in lib/permissions.ts —
+ * same unchanged default, now also grantable per account). Sets the status
+ * column rather than removing the row, so the sheet keeps a full history
+ * (see fields.ts isDisposed / STATUS_DISPOSED). */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ rowNumber: string }> }
@@ -21,7 +24,7 @@ export async function POST(
   if (!session) {
     return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   }
-  if (session.role !== "superadmin") {
+  if (!hasPermission(session, "disposeRestoreEquipment")) {
     return NextResponse.json({ error: "เฉพาะ superadmin เท่านั้นที่จำหน่ายครุภัณฑ์ได้" }, { status: 403 });
   }
 

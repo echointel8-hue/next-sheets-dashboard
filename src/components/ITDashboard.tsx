@@ -38,6 +38,8 @@ import MultiSelect from "@/components/MultiSelect";
 import MaintenanceStatusStrip from "@/components/MaintenanceStatusStrip";
 import BulkEditSpecModal, { type BulkEditResult } from "@/components/BulkEditSpecModal";
 import AppShell from "@/components/AppShell";
+import { hasPermission, type PermissionKey } from "@/lib/permissions";
+import type { Role } from "@/lib/auth";
 
 export interface ITRecord {
   rowNumber: number;
@@ -146,7 +148,14 @@ export default function ITDashboard({
   actionColorOrder,
   initialSpecStandards,
 }: {
-  session: { username: string; displayName: string; isBootstrap: boolean };
+  session: {
+    username: string;
+    displayName: string;
+    role: Role;
+    isBootstrap: boolean;
+    extraPermissions?: PermissionKey[];
+    revokedPermissions?: PermissionKey[];
+  };
   initial: ITLoadResult;
   initialMaintenanceLog: MaintenanceLogEntry[];
   /** Every MaintenanceTask ever created (any equipment, any ปี) — feeds the
@@ -585,9 +594,9 @@ export default function ITDashboard({
       username={session.username}
       displayName={session.displayName}
       canAccessManage={session.isBootstrap}
-      canManageUsers={session.isBootstrap}
+      canManageUsers={hasPermission(session, "manageUsers")}
       canAccessIt
-      canApproveBookings={session.isBootstrap}
+      canApproveBookings={hasPermission(session, "approveCarBooking")}
     >
     <main className="flex w-full flex-1 justify-center px-4 py-8 sm:px-6 lg:px-10">
       <div className="flex w-full max-w-[100rem] flex-col gap-6">

@@ -39,6 +39,8 @@ import {
 } from "@/lib/actionColors";
 import MultiSelect from "@/components/MultiSelect";
 import AppShell from "@/components/AppShell";
+import { hasPermission, type PermissionKey } from "@/lib/permissions";
+import type { Role } from "@/lib/auth";
 
 /** One selectable equipment item — already flattened/redaction-free by
  * manage/it/report/page.tsx from the raw sheet row, so this component never
@@ -412,7 +414,14 @@ export default function MaintenanceReportBuilder({
    * bootstrap account may reorder/edit/delete an existing รายการ
    * "การดำเนินการ" entry; every other account (it, or a superadmin created
    * later through /manage/users) may only append new ones. */
-  currentUser: { username: string; displayName: string; isBootstrap: boolean };
+  currentUser: {
+    username: string;
+    displayName: string;
+    role: Role;
+    isBootstrap: boolean;
+    extraPermissions?: PermissionKey[];
+    revokedPermissions?: PermissionKey[];
+  };
   /** Every maintenance task ever created (any equipment, any year) — the
    * source for the "กำลังบำรุงรักษาโดย ..." / "เสร็จสิ้นล่าสุดโดย ..."
    * badges in the picker table below. Kept as the raw list (not
@@ -570,7 +579,7 @@ export default function MaintenanceReportBuilder({
   // bootstrap account's to manage. Enforced again server-side in
   // /api/manage/it/settings — this is a UI convenience, not the actual
   // security boundary.
-  const canManageActionOptions = currentUser.isBootstrap;
+  const canManageActionOptions = hasPermission(currentUser, "manageReportActionList");
   // How many รายการ "การดำเนินการ" entries are already saved (and therefore
   // locked for non-bootstrap accounts) — starts at however many the page
   // loaded with, and grows whenever a save succeeds (see
@@ -1244,9 +1253,9 @@ export default function MaintenanceReportBuilder({
       username={currentUser.username}
       displayName={currentUser.displayName}
       canAccessManage={currentUser.isBootstrap}
-      canManageUsers={currentUser.isBootstrap}
+      canManageUsers={hasPermission(currentUser, "manageUsers")}
       canAccessIt
-      canApproveBookings={currentUser.isBootstrap}
+      canApproveBookings={hasPermission(currentUser, "approveCarBooking")}
     >
     <main
       translate="no"

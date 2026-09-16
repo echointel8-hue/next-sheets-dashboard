@@ -33,7 +33,13 @@ import {
   type BookingResource,
   type BookingResourceType,
 } from "@/lib/booking";
-import { canAccessItDashboardClient, canManageBookingResourcesClient, roleLabelFor } from "@/lib/roleLabel";
+import {
+  canAccessItDashboardClient,
+  canManageBookingResourcesClient,
+  canManageUsersClient,
+  roleLabelFor,
+} from "@/lib/roleLabel";
+import type { PermissionKey } from "@/lib/permissions";
 import AppShell from "@/components/AppShell";
 import BookingResourceFormModal from "@/components/BookingResourceFormModal";
 import BookingFormModal from "@/components/BookingFormModal";
@@ -79,14 +85,27 @@ export default function BookingDashboard({
   initial,
   type,
 }: {
-  session: { username: string; displayName: string; role: Role; department: string; isBootstrap: boolean };
+  session: {
+    username: string;
+    displayName: string;
+    role: Role;
+    department: string;
+    isBootstrap: boolean;
+    extraPermissions?: PermissionKey[];
+    revokedPermissions?: PermissionKey[];
+  };
   initial: BookingLoadResult;
   /** Fixed for the lifetime of this page — set by whichever route rendered
    * it (/booking/car or /booking/room), never changed client-side. */
   type: BookingResourceType;
 }) {
   const [data, setData] = useState<BookingLoadResult>(initial);
-  const canManageResources = canManageBookingResourcesClient(session.role, session.isBootstrap);
+  const canManageResources = canManageBookingResourcesClient(
+    session.role,
+    session.isBootstrap,
+    session.extraPermissions,
+    session.revokedPermissions
+  );
   const [resourceModal, setResourceModal] = useState<{ mode: "add" | "edit"; resource?: BookingResource } | null>(
     null
   );
@@ -246,8 +265,18 @@ export default function BookingDashboard({
       username={session.username}
       displayName={session.displayName}
       canAccessManage={session.role !== "it"}
-      canManageUsers={session.isBootstrap}
-      canAccessIt={canAccessItDashboardClient(session.role, session.isBootstrap)}
+      canManageUsers={canManageUsersClient(
+        session.role,
+        session.isBootstrap,
+        session.extraPermissions,
+        session.revokedPermissions
+      )}
+      canAccessIt={canAccessItDashboardClient(
+        session.role,
+        session.isBootstrap,
+        session.extraPermissions,
+        session.revokedPermissions
+      )}
       canApproveBookings={canApproveCarBooking(session)}
     >
     <main className="flex w-full flex-1 justify-center px-4 py-8 sm:px-6 lg:px-10">

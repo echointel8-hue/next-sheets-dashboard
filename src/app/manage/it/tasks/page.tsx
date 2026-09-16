@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { SESSION_COOKIE, canAccessItDashboard, verifySessionToken } from "@/lib/auth";
 import { getMaintenanceTasks, getReportSettings, DEFAULT_REPORT_SETTINGS, type MaintenanceTask } from "@/lib/sheets";
 import MaintenanceTasksBoard from "@/components/MaintenanceTasksBoard";
+import { hasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -40,8 +41,14 @@ export default async function ManageItTasksPage() {
     // The bootstrap superadmin account is the one exception, keeping the
     // team-wide "หัวหน้าติดตามงาน" view (see MaintenanceTasksBoard's own
     // stats/byAssignee comment) since that's still the only way anyone
-    // leads/oversees the team here — there's no separate "หัวหน้า" role.
-    tasks = session.isBootstrap ? allTasks : allTasks.filter((t) => t.assignedToUsername === session.username);
+    // leads/oversees the team here — there's no separate "หัวหน้า" role. Now
+    // backed by hasPermission()'s "viewAllMaintenanceTasks" key (see
+    // lib/permissions.ts) rather than a hardcoded isBootstrap check — same
+    // unchanged default, now also grantable to a specific it account (e.g.
+    // a team lead who isn't the bootstrap account).
+    tasks = hasPermission(session, "viewAllMaintenanceTasks")
+      ? allTasks
+      : allTasks.filter((t) => t.assignedToUsername === session.username);
   } else {
     loadError = tasksResult.reason instanceof Error ? tasksResult.reason.message : String(tasksResult.reason);
   }
@@ -55,7 +62,14 @@ export default async function ManageItTasksPage() {
       // displayName comes straight off the session cookie now (looked up
       // once at login — see the SessionPayload comment in lib/auth.ts)
       // instead of a separate getUsers() call on every visit to this page.
-      session={{ username: session.username, displayName: session.displayName, isBootstrap: session.isBootstrap }}
+      session={{
+        username: session.username,
+        displayName: session.displayName,
+        role: session.role,
+        isBootstrap: session.isBootstrap,
+        extraPermissions: session.extraPermissions,
+        revokedPermissions: session.revokedPermissions,
+      }}
       initialTasks={tasks}
       loadError={loadError}
       actionOptions={settings.actionOptions}

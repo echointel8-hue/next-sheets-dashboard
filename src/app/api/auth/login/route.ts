@@ -11,6 +11,7 @@ import {
   verifyPassword,
   type Role,
 } from "@/lib/auth";
+import type { PermissionKey } from "@/lib/permissions";
 import { appendEditLog, getUsers } from "@/lib/sheets";
 
 // Never cache/prerender — checks live rate-limit + credential state.
@@ -61,6 +62,12 @@ interface Matched {
    * up once, right here, from the very same Users-tab row this function
    * already fetched to check the password, so it costs nothing extra. */
   displayName: string;
+  /** Per-account permission overrides (see lib/permissions.ts), carried
+   * into the session the same way displayName is — omitted (not just
+   * empty-array) for the bootstrap account, which has no Users-tab row and
+   * is immune to revocation/needs no grants anyway. */
+  extraPermissions?: PermissionKey[];
+  revokedPermissions?: PermissionKey[];
 }
 
 /** The bootstrap account (env-configured) always works, independent of the
@@ -119,6 +126,8 @@ export async function POST(request: NextRequest) {
           department: user.department,
           isBootstrap: false,
           displayName: user.displayName || user.username,
+          extraPermissions: user.extraPermissions,
+          revokedPermissions: user.revokedPermissions,
         };
       }
     } catch (err: unknown) {

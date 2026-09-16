@@ -216,7 +216,14 @@ export default async function ManageItReportPage({
       // displayName comes straight off the session cookie now (looked up
       // once at login — see the SessionPayload comment in lib/auth.ts)
       // instead of a separate getUsers() call on every visit to this page.
-      currentUser={{ username: session.username, displayName: session.displayName, isBootstrap: session.isBootstrap }}
+      currentUser={{
+        username: session.username,
+        displayName: session.displayName,
+        role: session.role,
+        isBootstrap: session.isBootstrap,
+        extraPermissions: session.extraPermissions,
+        revokedPermissions: session.revokedPermissions,
+      }}
       taskHistory={taskHistory}
       reprintTasks={reprintTasks}
     />

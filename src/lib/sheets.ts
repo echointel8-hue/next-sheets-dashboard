@@ -5,6 +5,7 @@ import type { Role } from "@/lib/auth";
 import { DEFAULT_SPEC_STANDARDS, type SpecOptionLists, type SpecStandards } from "@/lib/specEvaluation";
 import { getLatestMaintenanceLogByAsset, type MaintenanceLogEntry } from "@/lib/maintenanceLog";
 import { resolveColorOrder } from "@/lib/actionColors";
+import { isPermissionKey, type PermissionKey } from "@/lib/permissions";
 import {
   hasBookingConflict,
   isBookingCancelled,
@@ -331,7 +332,17 @@ export async function appendEditLog(entry: {
 // stored here (see src/lib/auth.ts hashPassword/verifyPassword); superadmins
 // manage rows through the /manage/users UI, not by hand-editing the sheet.
 // Header row (created ahead of time by the sheet owner): Username |
-// PasswordHash | Role | Department | DisplayName | Active
+// PasswordHash | Role | Department | DisplayName | Active | ExtraPermissions
+// | RevokedPermissions
+//
+// The last two columns back the per-account permission-override feature
+// (see src/lib/permissions.ts) — added after the original six; a sheet that
+// predates this feature simply has blank/missing G and H cells, which reads
+// back as "no overrides" (parsePermissionKeyList("") below), so nothing
+// existing breaks until the sheet owner adds the two columns by hand (same
+// one-time manual-column-add pattern as SeatCount/ApprovalStatus earlier).
+// Each cell holds a comma-separated list of PermissionKey strings, e.g.
+// "accessItDashboard,manageUsers".
 // ---------------------------------------------------------------------------
 
 export interface UserRecord {
@@ -342,6 +353,19 @@ export interface UserRecord {
   department: string;
   displayName: string;
   active: boolean;
+  extraPermissions: PermissionKey[];
+  revokedPermissions: PermissionKey[];
+}
+
+/** "a,b,c" -> ["a","b"] — silently drops any entry that isn't a real
+ * PermissionKey (a stray typo hand-edited into the sheet, or a key retired
+ * in a later version of this app) rather than letting it through as an
+ * opaque string nothing downstream understands. */
+function parsePermissionKeyList(raw: string): PermissionKey[] {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(isPermissionKey);
 }
 
 /** Parses the Role column's raw text, defaulting to the most restrictive
@@ -375,7 +399,7 @@ export async function getUsers(): Promise<UserRecord[]> {
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${usersTab}!A2:F1000`, // skip header row (row 1)
+      range: `${usersTab}!A2:H1000`, // skip header row (row 1)
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -399,6 +423,8 @@ export async function getUsers(): Promise<UserRecord[]> {
       department: (r[3] ?? "").toString().trim(),
       displayName: (r[4] ?? "").toString().trim(),
       active: parseActive((r[5] ?? "").toString()),
+      extraPermissions: parsePermissionKeyList((r[6] ?? "").toString()),
+      revokedPermissions: parsePermissionKeyList((r[7] ?? "").toString()),
     }));
 }
 
@@ -408,6 +434,8 @@ export async function addUser(user: {
   role: Role;
   department: string;
   displayName: string;
+  extraPermissions?: PermissionKey[];
+  revokedPermissions?: PermissionKey[];
 }): Promise<void> {
   const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
   const usersTab = getUsersTab();
@@ -426,6 +454,8 @@ export async function addUser(user: {
         user.department,
         user.displayName,
         "Y",
+        (user.extraPermissions ?? []).join(","),
+        (user.revokedPermissions ?? []).join(","),
       ]],
     },
   });
@@ -437,7 +467,12 @@ export async function addUser(user: {
  * emergency Active=N) between calls. */
 export async function updateUser(
   username: string,
-  updates: Partial<Pick<UserRecord, "passwordHash" | "role" | "department" | "displayName" | "active">>
+  updates: Partial<
+    Pick<
+      UserRecord,
+      "passwordHash" | "role" | "department" | "displayName" | "active" | "extraPermissions" | "revokedPermissions"
+    >
+  >
 ): Promise<UserRecord> {
   const users = await getUsers();
   const existing = users.find((u) => u.username === username);
@@ -452,7 +487,7 @@ export async function updateUser(
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `${usersTab}!A${merged.rowNumber}:F${merged.rowNumber}`,
+    range: `${usersTab}!A${merged.rowNumber}:H${merged.rowNumber}`,
     valueInputOption: "USER_ENTERED",
     requestBody: {
       values: [[
@@ -462,6 +497,8 @@ export async function updateUser(
         merged.department,
         merged.displayName,
         merged.active ? "Y" : "N",
+        merged.extraPermissions.join(","),
+        merged.revokedPermissions.join(","),
       ]],
     },
   });

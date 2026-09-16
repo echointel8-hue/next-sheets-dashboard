@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog, getEquipmentDataUnredacted, setEquipmentStatus } from "@/lib/sheets";
 import { STATUS_DELETED, isDeleted } from "@/lib/fields";
+import { hasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -11,14 +12,18 @@ function fieldValue(row: Record<string, string>, header: string | null): string 
 }
 
 /** Hides ("ลบ") one equipment row — restricted to the single env-configured
- * bootstrap account (session.isBootstrap), not merely any superadmin, per
- * the hospital's request. This is still a soft delete: only the status
- * column changes (setEquipmentStatus never removes a row), so the row is
- * never physically destroyed and stays recoverable by editing the sheet
- * directly — but the app hides it from every table (public dashboard and
- * /manage) and excludes it from every report from this point on. Can be
- * applied to an active or already-disposed row; a row already deleted is
- * treated as not found (it's already hidden). */
+ * bootstrap account by default, not merely any superadmin, per the
+ * hospital's request. Now backed by hasPermission()'s "deleteEquipment" key
+ * (see lib/permissions.ts) rather than a hardcoded isBootstrap check — same
+ * unchanged default, now also grantable to a specific account (a real
+ * delegation of power — see the security note atop lib/permissions.ts).
+ * This is still a soft delete: only the status column changes
+ * (setEquipmentStatus never removes a row), so the row is never physically
+ * destroyed and stays recoverable by editing the sheet directly — but the
+ * app hides it from every table (public dashboard and /manage) and excludes
+ * it from every report from this point on. Can be applied to an active or
+ * already-disposed row; a row already deleted is treated as not found (it's
+ * already hidden). */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ rowNumber: string }> }
@@ -27,7 +32,7 @@ export async function POST(
   if (!session) {
     return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   }
-  if (!session.isBootstrap) {
+  if (!hasPermission(session, "deleteEquipment")) {
     return NextResponse.json(
       { error: "เฉพาะบัญชีผู้ดูแลระบบหลักเท่านั้นที่ลบรายการครุภัณฑ์ได้" },
       { status: 403 }

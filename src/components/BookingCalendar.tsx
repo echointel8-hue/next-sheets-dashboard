@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Ban, Check, ChevronLeft, ChevronRight, Loader2, MapPin, Phone, Users, X } from "lucide-react";
 import type { Role } from "@/lib/auth";
 import { actionColorVars, type ActionColor } from "@/lib/actionColors";
+import type { PermissionKey } from "@/lib/permissions";
 import {
   bookingStatusLabel,
   canCancelBooking,
@@ -119,7 +120,7 @@ export default function BookingCalendar({
   typeLabel: string;
   bookings: Booking[];
   resourceColorMap: Map<string, ActionColor>;
-  session: { username: string; role: Role };
+  session: { username: string; role: Role; isBootstrap: boolean; extraPermissions?: PermissionKey[]; revokedPermissions?: PermissionKey[] };
   onCancel: (booking: Booking) => void;
   cancellingBookingId: string | null;
   showDestination: boolean;
@@ -320,7 +321,7 @@ function DayDetailModal({
   typeLabel: string;
   bookings: Booking[];
   resourceColorMap: Map<string, ActionColor>;
-  session: { username: string; role: Role };
+  session: { username: string; role: Role; isBootstrap: boolean; extraPermissions?: PermissionKey[]; revokedPermissions?: PermissionKey[] };
   onCancel: (booking: Booking) => void;
   cancellingBookingId: string | null;
   showDestination: boolean;

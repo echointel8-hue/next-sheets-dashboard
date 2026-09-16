@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, canAccessItDashboard, verifySessionToken } from "@/lib/auth";
 import { getReportSettings, updateReportSettings, type ReportSettings } from "@/lib/sheets";
+import { hasPermission } from "@/lib/permissions";
 
 /** True iff the two lists are identical, entry for entry. The client
  * (MaintenanceReportBuilder's saveSettingsAsDefault) always sends the full
@@ -160,7 +161,7 @@ export async function PATCH(request: NextRequest) {
     // account (see MaintenanceReportBuilder's canManageActionOptions) —
     // this is the actual boundary in case that UI is ever bypassed.
     if (
-      !session.isBootstrap &&
+      !hasPermission(session, "manageReportActionList") &&
       (updates.actionOptions !== undefined ||
         updates.hiddenActionOptions !== undefined ||
         updates.detailRequiredActionOptions !== undefined)

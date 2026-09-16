@@ -1,4 +1,4 @@
-import type { Role } from "@/lib/auth";
+import { hasPermission, type PermissionSession } from "@/lib/permissions";
 
 // Pure type definitions + derivation logic for the vehicle / meeting-room
 // booking feature ("ระบบจองรถ จองห้องประชุม") — dependency-free so client
@@ -253,12 +253,15 @@ export function hasBookingConflict(
  * resource/booking management itself was explicitly opened up to every
  * role equally. Not exposed as a setting the user was asked about; this is
  * a reasonable default to stop one account from cancelling another
- * department's booking outright. */
+ * department's booking outright. Backed by hasPermission()'s
+ * "cancelAnyBooking" key for the "someone else's booking" half — same
+ * unchanged default (any superadmin), now also grantable per account; a
+ * booking's own owner can always cancel it regardless, exactly as before. */
 export function canCancelBooking(
   booking: Pick<Booking, "bookedByUsername">,
-  session: { username: string; role: Role }
+  session: { username: string } & PermissionSession
 ): boolean {
-  return booking.bookedByUsername === session.username || session.role === "superadmin";
+  return booking.bookedByUsername === session.username || hasPermission(session, "cancelAnyBooking");
 }
 
 /** Who may approve/reject a pending car booking: any account with the
@@ -267,7 +270,9 @@ export function canCancelBooking(
  * canManageBookingResources is; every superadmin (bootstrap or one created
  * later through /manage/users) can review car bookings, matching
  * canCancelBooking's "any superadmin" reach above. Room bookings never
- * reach this check — they have no pending state to review. */
-export function canApproveCarBooking(session: { role: Role }): boolean {
-  return session.role === "superadmin";
+ * reach this check — they have no pending state to review. Backed by
+ * hasPermission()'s "approveCarBooking" key — same unchanged default (any
+ * superadmin), now also grantable per account. */
+export function canApproveCarBooking(session: PermissionSession): boolean {
+  return hasPermission(session, "approveCarBooking");
 }

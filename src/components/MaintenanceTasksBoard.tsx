@@ -22,6 +22,8 @@ import { actionColorVars, buildActionColorMap, colorForAction, resolveColorOrder
 import MultiSelect from "@/components/MultiSelect";
 import MaintenanceStatusStrip from "@/components/MaintenanceStatusStrip";
 import AppShell from "@/components/AppShell";
+import { hasPermission, type PermissionKey } from "@/lib/permissions";
+import type { Role } from "@/lib/auth";
 
 const CARD =
   "rounded-2xl border border-emerald-900/10 bg-gradient-to-b from-white to-emerald-50 shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:from-zinc-900 dark:to-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
@@ -98,7 +100,14 @@ export default function MaintenanceTasksBoard({
   detailRequiredActionOptions,
   actionColorOrder,
 }: {
-  session: { username: string; displayName: string; isBootstrap: boolean };
+  session: {
+    username: string;
+    displayName: string;
+    role: Role;
+    isBootstrap: boolean;
+    extraPermissions?: PermissionKey[];
+    revokedPermissions?: PermissionKey[];
+  };
   initialTasks: MaintenanceTask[];
   loadError: string | null;
   actionOptions: string[];
@@ -284,9 +293,9 @@ export default function MaintenanceTasksBoard({
       username={session.username}
       displayName={session.displayName}
       canAccessManage={session.isBootstrap}
-      canManageUsers={session.isBootstrap}
+      canManageUsers={hasPermission(session, "manageUsers")}
       canAccessIt
-      canApproveBookings={session.isBootstrap}
+      canApproveBookings={hasPermission(session, "approveCarBooking")}
     >
     <main className="flex w-full flex-1 justify-center px-4 py-8 sm:px-6 lg:px-10">
       <div className="flex w-full max-w-[75rem] flex-col gap-6">
@@ -365,7 +374,7 @@ export default function MaintenanceTasksBoard({
             already only ever returns that one account's own tasks (see
             that page's own comment), so for anyone else this would just
             repeat the stat tiles above under their own name. */}
-        {session.isBootstrap && stats.byAssignee.length > 0 && (
+        {hasPermission(session, "viewAllMaintenanceTasks") && stats.byAssignee.length > 0 && (
           <div className={`${CARD} flex flex-col gap-3 p-4`}>
             <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
               <Users size={15} strokeWidth={2} aria-hidden="true" />

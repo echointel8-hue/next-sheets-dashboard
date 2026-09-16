@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog, appendEquipmentRow, getEquipmentDataUnredacted } from "@/lib/sheets";
 import { STATUS_ACTIVE, findDuplicateAssetNumberRow, isDeleted } from "@/lib/fields";
+import { hasPermission } from "@/lib/permissions";
 import { rowSnapshotHash } from "@/lib/recordHash";
 
 // Always live — reveals unredacted data behind an auth check and accepts
@@ -97,13 +98,15 @@ function readNewRecordPayload(body: unknown): Record<string, string> | null {
   return values;
 }
 
-/** Adds a new equipment row — superadmin only. */
+/** Adds a new equipment row — superadmin by default (see hasPermission's
+ * "addEquipment" key in lib/permissions.ts — same unchanged default, now
+ * also grantable per account through /manage/users). */
 export async function POST(request: NextRequest) {
   const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session) {
     return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   }
-  if (session.role !== "superadmin") {
+  if (!hasPermission(session, "addEquipment")) {
     return NextResponse.json({ error: "เฉพาะ superadmin เท่านั้นที่เพิ่มรายการใหม่ได้" }, { status: 403 });
   }
 

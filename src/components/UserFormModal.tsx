@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, Loader2, Save, X } from "lucide-react";
 import type { Role } from "@/lib/auth";
 import { DEPARTMENT_OPTIONS } from "@/lib/fields";
+import { PERMISSION_KEYS, PERMISSION_LABELS, defaultPermissionsForRole, type PermissionKey } from "@/lib/permissions";
 
 const INPUT_CLASS =
   "h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:disabled:bg-zinc-800/60 dark:disabled:text-zinc-500";
@@ -16,6 +17,8 @@ export interface ManagedUser {
   department: string;
   displayName: string;
   active: boolean;
+  extraPermissions?: PermissionKey[];
+  revokedPermissions?: PermissionKey[];
 }
 
 /**
@@ -44,6 +47,40 @@ export default function UserFormModal({
   const [active, setActive] = useState(user?.active ?? true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Per-account permission overrides (see lib/permissions.ts) — what this
+  // account can do beyond/instead of its role's own defaults. Starts at the
+  // role's defaults, with the account's own saved extraPermissions layered
+  // on top (added) and revokedPermissions layered on top (removed) — so
+  // editing an existing account shows exactly what it can do right now, not
+  // just the raw override lists. Never bootstrap (env-configured, not
+  // editable through this UI, and immune to revocation anyway).
+  const [checkedPermissions, setCheckedPermissions] = useState<Set<PermissionKey>>(() => {
+    const base = defaultPermissionsForRole(user?.role ?? "admin", false);
+    const next = new Set(base);
+    for (const k of user?.extraPermissions ?? []) next.add(k);
+    for (const k of user?.revokedPermissions ?? []) next.delete(k);
+    return next;
+  });
+
+  /** Changing the role resets the checkbox list back to that role's plain
+   * defaults, discarding any manual ticks made under the previous role —
+   * simplest predictable behavior (no hidden "leftover override from a role
+   * you're no longer on"), and matches how rarely an account's role
+   * actually changes after creation. */
+  function handleRoleChange(nextRole: Role) {
+    setRole(nextRole);
+    setCheckedPermissions(defaultPermissionsForRole(nextRole, false));
+  }
+
+  function togglePermission(key: PermissionKey) {
+    setCheckedPermissions((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
@@ -106,6 +143,13 @@ export default function UserFormModal({
       return;
     }
 
+    // Diff the ticked checkboxes against the role's plain defaults — only
+    // the deviations get sent/stored, exactly what hasPermission()
+    // (lib/permissions.ts) expects in extraPermissions/revokedPermissions.
+    const roleDefaults = defaultPermissionsForRole(role, false);
+    const extraPermissions = PERMISSION_KEYS.filter((k) => checkedPermissions.has(k) && !roleDefaults.has(k));
+    const revokedPermissions = PERMISSION_KEYS.filter((k) => !checkedPermissions.has(k) && roleDefaults.has(k));
+
     setSaving(true);
     try {
       const res = await fetch("/api/manage/users", {
@@ -113,7 +157,7 @@ export default function UserFormModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           mode === "add"
-            ? { username: username.trim(), password, role, department, displayName }
+            ? { username: username.trim(), password, role, department, displayName, extraPermissions, revokedPermissions }
             : {
                 username,
                 ...(password ? { password } : {}),
@@ -121,6 +165,8 @@ export default function UserFormModal({
                 department,
                 displayName,
                 active,
+                extraPermissions,
+                revokedPermissions,
               }
         ),
       });
@@ -212,7 +258,7 @@ export default function UserFormModal({
               สิทธิ์
               <select
                 value={role}
-                onChange={(e) => setRole(e.target.value as Role)}
+                onChange={(e) => handleRoleChange(e.target.value as Role)}
                 disabled={saving}
                 className={INPUT_CLASS}
               >
@@ -243,6 +289,28 @@ export default function UserFormModal({
                 </select>
               </label>
             )}
+
+            <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
+              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">สิทธิ์เฉพาะบัญชี</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                เริ่มต้นตามสิทธิ์ &quot;{role}&quot; ด้านบน — ติ๊กเพิ่มเพื่อให้สิทธิ์พิเศษ หรือปลดติ๊กเพื่อ
+                ตัดสิทธิ์ที่สิทธิ์นี้ปกติจะได้ (เปลี่ยนสิทธิ์หลักด้านบนจะรีเซ็ตรายการนี้กลับเป็นค่าเริ่มต้น)
+              </p>
+              <div className="flex flex-col gap-1.5">
+                {PERMISSION_KEYS.map((key) => (
+                  <label key={key} className="flex items-start gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+                    <input
+                      type="checkbox"
+                      checked={checkedPermissions.has(key)}
+                      onChange={() => togglePermission(key)}
+                      disabled={saving}
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300 text-[var(--brand)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]"
+                    />
+                    {PERMISSION_LABELS[key]}
+                  </label>
+                ))}
+              </div>
+            </div>
 
             {mode === "edit" && (
               <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">

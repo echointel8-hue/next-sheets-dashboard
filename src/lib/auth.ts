@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import type { NextRequest } from "next/server";
+import { hasPermission, type PermissionKey } from "@/lib/permissions";
 
 // Login/session auth for the /manage area. Three roles:
 // - superadmin: every department, can add/edit/dispose equipment
@@ -65,6 +66,13 @@ export interface SessionPayload {
    * through /manage/users won't be reflected until that account's next
    * login, an accepted tradeoff given the 5-minute idle session timeout. */
   displayName: string;
+  /** Per-account permission overrides layered on top of the role above —
+   * see lib/permissions.ts for the full model. Both are omitted entirely for
+   * the bootstrap account (immune to revocation and already granted every
+   * key by role, so there's nothing an override could add or take away) and
+   * for any Users-tab account that has never had an override set. */
+  extraPermissions?: PermissionKey[];
+  revokedPermissions?: PermissionKey[];
   exp: number; // epoch ms
 }
 
@@ -76,9 +84,17 @@ export interface SessionPayload {
  * add/edit/dispose rights everywhere else, but does not get this page.
  * Centralized here since the page itself, its settings API route, and any
  * future IT-only route all need the exact same check.
+ *
+ * Now backed by hasPermission()'s "accessItDashboard" key (see
+ * lib/permissions.ts) rather than a hardcoded role/isBootstrap comparison —
+ * the default outcome for every existing account is unchanged (it role, or
+ * the bootstrap superadmin), but a specific account can now additionally be
+ * granted this through /manage/users' per-account permission overrides.
  */
-export function canAccessItDashboard(session: Pick<SessionPayload, "role" | "isBootstrap">): boolean {
-  return session.role === "it" || (session.role === "superadmin" && session.isBootstrap);
+export function canAccessItDashboard(
+  session: Pick<SessionPayload, "role" | "isBootstrap" | "extraPermissions" | "revokedPermissions">
+): boolean {
+  return hasPermission(session, "accessItDashboard");
 }
 
 /**
@@ -93,9 +109,14 @@ export function canAccessItDashboard(session: Pick<SessionPayload, "role" | "isB
  * named function (rather than reusing canAccessItDashboard directly) so
  * the two rules can diverge later without one silently changing the other,
  * even though they start out identical.
+ *
+ * Now backed by hasPermission()'s "manageBookingResources" key — same
+ * unchanged default outcome, now also grantable per account.
  */
-export function canManageBookingResources(session: Pick<SessionPayload, "role" | "isBootstrap">): boolean {
-  return session.role === "it" || (session.role === "superadmin" && session.isBootstrap);
+export function canManageBookingResources(
+  session: Pick<SessionPayload, "role" | "isBootstrap" | "extraPermissions" | "revokedPermissions">
+): boolean {
+  return hasPermission(session, "manageBookingResources");
 }
 
 /** Hashes a plaintext password for storage (in the Users sheet tab or the
@@ -191,6 +212,13 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
   // this feature existed — never worse, and self-limiting given the
   // 5-minute idle session timeout.
   if (typeof payload.displayName !== "string") payload.displayName = payload.username;
+  // Same tolerance as displayName above, for the two permission-override
+  // arrays added later — a cookie signed before this feature existed just
+  // won't have them, which hasPermission() already treats as "no overrides"
+  // (Array.isArray check rather than assuming shape from a hand-tampered
+  // cookie; a malformed value is dropped rather than rejecting the session).
+  if (!Array.isArray(payload.extraPermissions)) delete payload.extraPermissions;
+  if (!Array.isArray(payload.revokedPermissions)) delete payload.revokedPermissions;
   if (Date.now() > payload.exp) return null;
   return payload;
 }
