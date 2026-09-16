@@ -248,6 +248,7 @@ export default function BookingDashboard({
       canAccessManage={session.role !== "it"}
       canManageUsers={session.isBootstrap}
       canAccessIt={canAccessItDashboardClient(session.role, session.isBootstrap)}
+      canApproveBookings={canApproveCarBooking(session)}
     >
     <main className="flex w-full flex-1 justify-center px-4 py-8 sm:px-6 lg:px-10">
       <div className="flex w-full max-w-6xl flex-col gap-6">

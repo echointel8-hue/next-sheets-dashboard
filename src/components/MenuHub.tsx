@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Car, DoorOpen, Package } from "lucide-react";
 import type { Role } from "@/lib/auth";
 import { canAccessItDashboardClient, roleLabelFor } from "@/lib/roleLabel";
+import { canApproveCarBooking } from "@/lib/booking";
 import AppShell from "@/components/AppShell";
 
 const CARD =
@@ -59,6 +60,7 @@ export default function MenuHub({
       canAccessManage={session.role !== "it"}
       canManageUsers={session.isBootstrap}
       canAccessIt={canAccessItDashboardClient(session.role, session.isBootstrap)}
+      canApproveBookings={canApproveCarBooking(session)}
     >
       <main className="flex w-full flex-1 justify-center px-4 py-10 sm:px-6 lg:px-10">
         <div className="flex w-full max-w-4xl flex-col gap-6">

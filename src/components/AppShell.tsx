@@ -17,6 +17,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import NotificationBell from "@/components/NotificationBell";
 
 /**
  * Persistent left-sidebar app shell for every authenticated screen (/menu,
@@ -67,6 +68,11 @@ export interface AppShellProps {
    * own sidebar entry) is part of the IT system, not a separate one, so the
    * nav shows that hierarchy instead of listing them as equal siblings. */
   canAccessIt: boolean;
+  /** Show the pending-car-booking-approval bell — only superadmin accounts
+   * (see canApproveCarBooking in lib/booking.ts). Each caller computes this
+   * from its own session/currentUser rather than AppShell re-deriving it,
+   * same pattern as the other can* flags above. */
+  canApproveBookings: boolean;
   children: ReactNode;
 }
 
@@ -82,6 +88,7 @@ export default function AppShell({
   canAccessManage,
   canManageUsers,
   canAccessIt,
+  canApproveBookings,
   children,
 }: AppShellProps) {
   const pathname = usePathname();
@@ -203,6 +210,11 @@ export default function AppShell({
 
   return (
     <div className="app-shell-page-bg flex h-screen overflow-hidden">
+      {/* Fixed-position, so it renders once here rather than being
+          duplicated inside both the desktop sidebar and the mobile topbar
+          markup below — see NotificationBell's own doc comment. */}
+      <NotificationBell enabled={canApproveBookings} />
+
       {/* Desktop sidebar — persistent, always visible at lg+. A light
           surface with a soft top-to-bottom white→emerald-50 wash rather
           than a flat fill, so it reads as bright and airy but still has a

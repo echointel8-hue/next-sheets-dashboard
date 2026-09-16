@@ -26,6 +26,7 @@ import {
 } from "@/lib/fields";
 import type { Role } from "@/lib/auth";
 import { canAccessItDashboardClient, roleLabelFor } from "@/lib/roleLabel";
+import { canApproveCarBooking } from "@/lib/booking";
 import AppShell from "@/components/AppShell";
 // DEFAULT_SPEC_STANDARDS/SpecOptionLists come from lib/specEvaluation, not
 // lib/sheets, here specifically because this is a Client Component: sheets.ts
@@ -76,7 +77,7 @@ function dateOnly(raw: string): string {
 }
 
 const CARD =
-  "rounded-2xl border border-emerald-900/10 bg-gradient-to-b from-white to-emerald-50/60 shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:from-zinc-900 dark:to-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
+  "rounded-2xl border border-emerald-900/10 bg-gradient-to-b from-white to-emerald-50 shadow-[0_1px_2px_rgba(4,120,87,0.04),0_4px_16px_-4px_rgba(4,120,87,0.14)] dark:border-emerald-400/10 dark:from-zinc-900 dark:to-zinc-900 dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_4px_16px_-4px_rgba(0,0,0,0.45)]";
 const ACTION_BUTTON =
   "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2";
 
@@ -483,6 +484,7 @@ export default function ManageDashboard({
       canAccessManage={session.role !== "it"}
       canManageUsers={session.isBootstrap}
       canAccessIt={canAccessItDashboardClient(session.role, session.isBootstrap)}
+      canApproveBookings={canApproveCarBooking(session)}
     >
     <main className="flex w-full flex-1 justify-center px-4 py-8 sm:px-6 lg:px-10">
       <div className="flex w-full max-w-[100rem] flex-col gap-6">
