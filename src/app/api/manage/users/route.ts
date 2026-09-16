@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, hashPassword, requestAuditTag, verifySessionToken, type Role } from "@/lib/auth";
 import { addUser, appendEditLog, getUsers, updateUser, type UserRecord } from "@/lib/sheets";
-import { hasPermission, isPermissionKey, type PermissionKey } from "@/lib/permissions";
+import {
+  PERMISSION_LABELS,
+  hasPermission,
+  isGrantablePermission,
+  isPermissionKey,
+  type PermissionKey,
+} from "@/lib/permissions";
 
 // Always live — reveals account data behind an auth check and accepts
 // writes, never something to cache/prerender.
@@ -24,18 +30,14 @@ function toPublic(user: UserRecord): PublicUser {
   };
 }
 
-/** Managing users defaults to the single env-configured bootstrap account
- * (SessionPayload.isBootstrap) — not just any superadmin — same as before
- * this feature existed. Now backed by hasPermission()'s "manageUsers" key
- * (see lib/permissions.ts) rather than a hardcoded isBootstrap check, so a
- * specific non-bootstrap account can be granted this too through this same
- * per-account override mechanism. That is a real delegation of power (see
- * the security note at the top of lib/permissions.ts) — a superadmin
- * created through this same UI can already add/edit/dispose equipment
- * across every department like any superadmin; granting manageUsers on top
- * of that additionally lets it create/edit other accounts (though it still
- * cannot become the true bootstrap account, and cannot grant itself or
- * anyone immunity to revocation). */
+/** Managing users is restricted to the single env-configured bootstrap
+ * account (SessionPayload.isBootstrap) — not just any superadmin. Backed by
+ * hasPermission()'s "manageUsers" key (see lib/permissions.ts) rather than a
+ * hardcoded isBootstrap check for consistency with every other migrated
+ * check, but in practice this stays bootstrap-only: manageUsers is one of
+ * the six keys in NON_GRANTABLE_KEYS (lib/permissions.ts) that a per-account
+ * override can never grant to anyone else, precisely so that reaching this
+ * route always means being the literal bootstrap account. */
 function requireManageUsersPermission(request: NextRequest) {
   const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session) {
@@ -87,6 +89,22 @@ function readPermissionKeyArray(value: unknown): PermissionKey[] {
   return value.filter(isPermissionKey);
 }
 
+/** The real enforcement of the hierarchy cap (see NON_GRANTABLE_KEYS in
+ * lib/permissions.ts): rejects the request outright if any submitted
+ * extraPermissions entry would grant a bootstrap-reserved key to an account
+ * that doesn't already get it by role default. UserFormModal disables those
+ * checkboxes so this should rarely trigger from the real UI — this is the
+ * actual security boundary, not just a UI nicety, since a request can always
+ * be hand-crafted. Returns null (no error) when everything's within the
+ * cap. */
+function validatePermissionCap(extraPermissions: PermissionKey[], role: Role): string | null {
+  const notGrantable = extraPermissions.filter((k) => !isGrantablePermission(k, role));
+  if (notGrantable.length === 0) return null;
+  return `สิทธิ์ต่อไปนี้ให้เพิ่มเติมผ่านการติ๊กไม่ได้ (สงวนไว้เฉพาะบัญชีผู้ดูแลระบบหลัก): ${notGrantable
+    .map((k) => PERMISSION_LABELS[k])
+    .join(", ")}`;
+}
+
 function readNewUserPayload(body: unknown): NewUserPayload | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
@@ -127,6 +145,10 @@ export async function POST(request: NextRequest) {
   }
   if (submitted.role === "admin" && submitted.department === "") {
     return NextResponse.json({ error: "admin ต้องระบุกลุ่มงานที่รับผิดชอบ" }, { status: 400 });
+  }
+  const capError = validatePermissionCap(submitted.extraPermissions, submitted.role);
+  if (capError) {
+    return NextResponse.json({ error: capError }, { status: 400 });
   }
 
   try {
@@ -232,6 +254,19 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
+    // The cap (see validatePermissionCap above) is checked against whatever
+    // role the account will actually have after this save — the submitted
+    // role if this request is changing it, otherwise its current one (a
+    // request that only touches extraPermissions, leaving role untouched,
+    // still needs the right role to validate against).
+    if (submitted.extraPermissions !== undefined && submitted.extraPermissions.length > 0) {
+      const effectiveRole = nextRole ?? (await getUsers()).find((u) => u.username === submitted.username)?.role;
+      const capError = effectiveRole ? validatePermissionCap(submitted.extraPermissions, effectiveRole) : null;
+      if (capError) {
+        return NextResponse.json({ error: capError }, { status: 400 });
+      }
+    }
+
     const updates: Partial<
       Pick<
         UserRecord,

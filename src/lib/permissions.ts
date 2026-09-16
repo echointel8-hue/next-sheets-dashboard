@@ -18,14 +18,19 @@ import type { Role } from "@/lib/auth";
 // route and lib/auth.ts/lib/booking.ts, without pulling `crypto`/
 // `googleapis` into client bundles.
 //
-// IMPORTANT SECURITY NOTE (surfaced to the hospital when this shipped):
-// granting a sensitive key — manageUsers, deleteEquipment,
-// manageReportActionList, accessItDashboard — to a non-bootstrap account via
-// extraPermissions is a real delegation of power. A regular superadmin
-// granted manageUsers, for example, could create/edit other accounts
-// (though still not become the true bootstrap account, and still can't grant
-// itself or anyone else immunity to revocation — see the isBootstrap
-// short-circuit in hasPermission below). Grant these sparingly.
+// HIERARCHY CAP (added right after this feature first shipped, in response
+// to the hospital noticing an admin account could otherwise be ticked all
+// the way up to look exactly like a superadmin, making the role dropdown
+// itself meaningless): a per-account override can only ever raise an
+// account up to what a plain, non-bootstrap superadmin already gets by
+// default. Six keys — manageBookingResources, deleteEquipment,
+// accessItDashboard, manageUsers, manageReportActionList,
+// viewAllMaintenanceTasks — stay reserved to the literal bootstrap account
+// and can never be granted to anyone else via extraPermissions, full stop,
+// even to a superadmin. See NON_GRANTABLE_KEYS/isGrantablePermission below —
+// that's now the real ceiling on how far an override can go, checked both
+// server-side (the actual boundary) and client-side (so the checkbox UI
+// never offers something the server would reject).
 //
 // NOT every existing role check in the app was migrated to read through
 // here — only the ones listed below, chosen because they're reasonable,
@@ -81,6 +86,43 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   manageReportActionList: 'จัดการรายการ "การดำเนินการ" มาตรฐานในรายงาน',
   viewAllMaintenanceTasks: "ดูงานบำรุงรักษาของทุกคนในทีม (ไม่ใช่แค่ของตัวเอง)",
 };
+
+/** Keys reserved to the bootstrap account by default — never grantable to
+ * any other account through extraPermissions, no matter its role. Without
+ * this cap, an admin account could be ticked up through every checkbox and
+ * end up functionally indistinguishable from a superadmin (or even from
+ * bootstrap itself), which would make the role dropdown meaningless — a
+ * concern the hospital raised directly after this feature first shipped.
+ * The chosen fix: a per-account override can raise an account's ceiling up
+ * to (but never past) what a plain, non-bootstrap superadmin already gets
+ * by default — the five keys below stay behind the literal bootstrap
+ * account, full stop. Revoking one of these from an account that already
+ * has it by role default (i.e. "it" and manageBookingResources/
+ * accessItDashboard/viewAllMaintenanceTasks) is still always allowed —
+ * this only blocks *granting* one of these keys to an account that
+ * wouldn't otherwise have it. Enforced both server-side (readNewUserPayload/
+ * readUpdateUserPayload in /api/manage/users, the real boundary) and
+ * client-side (UserFormModal disables the checkbox), so this list is the
+ * single source of truth for both. */
+export const NON_GRANTABLE_KEYS: PermissionKey[] = [
+  "manageBookingResources",
+  "deleteEquipment",
+  "accessItDashboard",
+  "manageUsers",
+  "manageReportActionList",
+  "viewAllMaintenanceTasks",
+];
+
+/** True if `key` can be added to some account's extraPermissions — either
+ * it isn't one of the bootstrap-reserved keys above, or the target role
+ * already gets it by default anyway (so "granting" it is really just
+ * re-enabling the role's own default, not an escalation). Use this — not
+ * a bare NON_GRANTABLE_KEYS.includes check — everywhere a grant is being
+ * validated, so a role's own defaults are never blocked from being kept. */
+export function isGrantablePermission(key: PermissionKey, role: Role): boolean {
+  if (!NON_GRANTABLE_KEYS.includes(key)) return true;
+  return defaultPermissionsForRole(role, false).has(key);
+}
 
 /** The minimal shape hasPermission()/defaultPermissionsForRole() need —
  * matches (a subset of) SessionPayload without importing it as a value. */

@@ -12,12 +12,13 @@ function fieldValue(row: Record<string, string>, header: string | null): string 
 }
 
 /** Hides ("ลบ") one equipment row — restricted to the single env-configured
- * bootstrap account by default, not merely any superadmin, per the
- * hospital's request. Now backed by hasPermission()'s "deleteEquipment" key
- * (see lib/permissions.ts) rather than a hardcoded isBootstrap check — same
- * unchanged default, now also grantable to a specific account (a real
- * delegation of power — see the security note atop lib/permissions.ts).
- * This is still a soft delete: only the status column changes
+ * bootstrap account, not merely any superadmin, per the hospital's request.
+ * Backed by hasPermission()'s "deleteEquipment" key (see lib/permissions.ts)
+ * rather than a hardcoded isBootstrap check for consistency with every other
+ * migrated check, but this stays bootstrap-only in practice: deleteEquipment
+ * is one of the six keys in NON_GRANTABLE_KEYS that a per-account override
+ * can never grant to anyone else. This is still a soft delete: only the
+ * status column changes
  * (setEquipmentStatus never removes a row), so the row is never physically
  * destroyed and stays recoverable by editing the sheet directly — but the
  * app hides it from every table (public dashboard and /manage) and excludes
