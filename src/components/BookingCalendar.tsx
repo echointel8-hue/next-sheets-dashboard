@@ -249,7 +249,7 @@ export default function BookingCalendar({
             <ChevronLeft size={18} strokeWidth={2} aria-hidden="true" />
           </button>
           <span className="min-w-[9rem] text-center text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-            {THAI_MONTHS[monthCursor.getMonth()]} {monthCursor.getFullYear()}
+            {THAI_MONTHS[monthCursor.getMonth()]} {monthCursor.getFullYear() + 543}
           </span>
           <button
             type="button"
@@ -455,7 +455,7 @@ function DayDetailModal({
   onClose: () => void;
 }) {
   const [y, mo, d] = dateKey.split("-");
-  const dateLabel = `${d}/${mo}/${y}`;
+  const dateLabel = `${d}/${mo}/${Number(y) + 543}`;
 
   return createPortal(
     <div

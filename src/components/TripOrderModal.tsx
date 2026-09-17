@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, ImageOff, Loader2, Save, Truck, Users, X } from "lucide-react";
 import {
+  formatBookingDateRange,
   formatBookingDateTime,
   splitBookingDateTime,
   type Booking,
@@ -417,7 +418,7 @@ export default function TripOrderModal({
             className="flex items-center gap-2 text-base font-semibold text-zinc-800 dark:text-zinc-100"
           >
             <Truck size={18} strokeWidth={2} className="shrink-0 text-[var(--brand-strong)]" aria-hidden="true" />
-            {editing ? "แก้ไขใบสั่งงานเดินทาง" : "สั่งงานเดินทาง"}
+            {editing ? "แก้ไขใบสั่งงานเดินทาง" : "คำขอการเดินทาง"}
           </h2>
           <button
             type="button"
@@ -438,19 +439,25 @@ export default function TripOrderModal({
               <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
                 {editing
                   ? `คำขอจองที่ใบสั่งงานนี้ครอบคลุม (${includedBookings.length.toLocaleString("th-TH")} รายการ) — แก้ไขตรงนี้ไม่ได้`
-                  : `คำขอจองที่จะรวมในใบสั่งงานนี้ (${includedBookings.length.toLocaleString("th-TH")} รายการ)`}
+                  : `คำขอการเดินทาง (${includedBookings.length.toLocaleString("th-TH")} รายการ)`}
               </p>
-              <ul className="flex flex-col gap-1.5">
+              <ul className="flex flex-col gap-2">
                 {includedBookings.map((b) => (
-                  <li key={b.bookingId} className="text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                  // ลำดับใหม่ตามที่ขอ ("จัดลำดับเพื่อความสวยงาม") — วันที่+
+                  // ช่วงเวลาขึ้นก่อนบรรทัดเดียว (ไม่เขียนวันที่ซ้ำสองรอบเมื่อ
+                  // เป็นวันเดียวกัน ดู formatBookingDateRange) ตามด้วยกลุ่มงาน/
+                  // วัตถุประสงค์ แล้วค่อยปลายทางท้ายสุด
+                  <li key={b.bookingId} className="flex flex-col gap-0.5 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
                     <span className="font-medium text-zinc-800 dark:text-zinc-100">
-                      {formatBookingDateTime(b.startTime)} – {formatBookingDateTime(b.endTime)}
-                    </span>{" "}
-                    {b.department || b.bookedByDisplayName || b.bookedByUsername} — {b.purpose}
-                    {b.destination && <> (ปลายทาง: {b.destination})</>}
-                    {extraBookingIds.has(b.bookingId) && (
-                      <span className="ml-1 text-emerald-700 dark:text-emerald-400">(เพิ่มเข้ามา)</span>
-                    )}
+                      {formatBookingDateRange(b.startTime, b.endTime)}
+                    </span>
+                    <span>
+                      {b.department || b.bookedByDisplayName || b.bookedByUsername} — {b.purpose}
+                      {extraBookingIds.has(b.bookingId) && (
+                        <span className="ml-1 text-emerald-700 dark:text-emerald-400">(เพิ่มเข้ามา)</span>
+                      )}
+                    </span>
+                    {b.destination && <span>(ปลายทาง: {b.destination})</span>}
                   </li>
                 ))}
               </ul>

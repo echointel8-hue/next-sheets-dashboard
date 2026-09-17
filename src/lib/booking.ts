@@ -369,7 +369,24 @@ export function formatBookingDateTime(raw: string): string {
   const parts = splitBookingDateTime(raw);
   if (!parts) return raw;
   const [y, mo, d] = parts.dateKey.split("-");
-  return `${d}/${mo}/${y} ${parts.time}`;
+  return `${d}/${mo}/${Number(y) + 543} ${parts.time}`;
+}
+
+/** ช่วงเวลาแบบกระชับสำหรับคำขอเดียวที่วันเริ่ม/สิ้นสุดเป็นวันเดียวกัน (กรณี
+ * ทั่วไปของการจองรถ/ห้อง) — "DD/MM/YYYY HH:MM-HH:MM" แทนที่จะเขียนวันที่ซ้ำ
+ * สองรอบแบบ formatBookingDateTime คู่กัน (เช่น
+ * "24/09/2569 09:00 – 24/09/2569 12:00" ซึ่งอ่านซ้ำซ้อนเกินจำเป็นเมื่อเป็น
+ * วันเดียวกัน) — ตามที่ขอปรับ popup สั่งงานเดินทางให้ "จัดลำดับเพื่อความ
+ * สวยงาม" ถ้าเริ่ม/สิ้นสุดคนละวัน (เช่น เดินทางข้ามคืน) จะ fallback ไปแสดง
+ * แบบเต็มทั้งสองฝั่งเหมือนเดิม (คั่นด้วย " – ") กันไม่ให้ข้อมูลวันที่หาย. */
+export function formatBookingDateRange(startRaw: string, endRaw: string): string {
+  const start = splitBookingDateTime(startRaw);
+  const end = splitBookingDateTime(endRaw);
+  if (!start || !end || start.dateKey !== end.dateKey) {
+    return `${formatBookingDateTime(startRaw)} – ${formatBookingDateTime(endRaw)}`;
+  }
+  const [y, mo, d] = start.dateKey.split("-");
+  return `${d}/${mo}/${Number(y) + 543} ${start.time}-${end.time}`;
 }
 
 /** True if [startTime, endTime) would overlap any existing, still-relevant
