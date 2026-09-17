@@ -796,6 +796,12 @@ export default function BookingDashboard({
       {tripOrderModalOpen && (
         <TripOrderModal
           bookings={selectedBookings}
+          // คำขอจองรถรออนุมัติอื่นๆ ที่ยังไม่ถูกเลือกไว้แต่แรก — ส่งทั้งหมด
+          // ไปให้ TripOrderModal เอง กรองเหลือเฉพาะวันเดียวกัน (ดูคอมเมนต์ที่
+          // prop นั้น) ไม่ต้องกรองซ้ำที่นี่
+          candidateBookings={typeBookings.filter(
+            (b) => b.approvalStatus === "pending" && !isBookingCancelled(b) && !selectedBookingIds.has(b.bookingId)
+          )}
           resources={activeTypeResources}
           onClose={() => setTripOrderModalOpen(false)}
           onCreated={handleTripOrderCreated}

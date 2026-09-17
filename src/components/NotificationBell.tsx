@@ -274,6 +274,10 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
       {dispatchBooking && (
         <TripOrderModal
           bookings={[dispatchBooking]}
+          // รายการรออนุมัติอื่นในป็อปอัปนี้เอง (รออยู่แล้ว) ส่งต่อให้
+          // TripOrderModal กรองเหลือเฉพาะวันเดียวกันเอง — ตัดรายการที่กำลัง
+          // จัดรถอยู่ตอนนี้ออกก่อน
+          candidateBookings={pending.filter((b) => b.bookingId !== dispatchBooking.bookingId)}
           resources={carResources}
           onClose={() => setDispatchBooking(null)}
           onCreated={handleTripOrderCreated}

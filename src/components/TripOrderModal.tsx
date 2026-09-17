@@ -82,9 +82,16 @@ function defaultTripOrderParts(bookings: { startTime: string; endTime: string }[
  * /api/booking/trip-orders/[tripOrderId]) — แก้ได้เฉพาะรถ/คนขับ/เวลา/
  * หมายเหตุ ("เท่าที่จำเป็น" ตามที่โรงพยาบาลขอ) รายการคำขอจองที่ครอบคลุมจะ
  * ไม่เปลี่ยนแปลงในโหมดแก้ไข (แสดงไว้ให้ดูอย่างเดียว เหมือนโหมดสร้างใหม่).
+ *
+ * โหมดสร้างใหม่เท่านั้น: ถ้าผู้เรียกส่ง `candidateBookings` มาด้วย (คำขอ
+ * จองรถ "รออนุมัติ" อื่นๆ ที่ยังไม่ถูกเลือกไว้แต่แรก) คอมโพเนนต์นี้จะกรองให้
+ * เหลือเฉพาะวันเดียวกับคำขอที่เลือกไว้แล้ว แล้วแสดงเป็นรายการให้ติ๊กเพิ่มเข้า
+ * ใบสั่งงานเดียวกันได้เอง — สำหรับกรณีเดินทางไปทางเดียวกัน/วันเดียวกัน ตามที่
+ * โรงพยาบาลขอเพิ่มภายหลัง ยังคงเป็นแค่ "เลือกได้เอง" ไม่มีการจัดกลุ่มอัตโนมัติ.
  */
 export default function TripOrderModal({
   bookings,
+  candidateBookings,
   resources,
   editing,
   onClose,
@@ -96,6 +103,12 @@ export default function TripOrderModal({
    * รายการคำขอที่ใบสั่งงานนี้ครอบคลุมอยู่แล้ว (แสดงผลอย่างเดียว ไม่เปลี่ยน
    * ได้ตรงนี้) — คัดกรองมาจากผู้เรียกใช้ทั้งสองกรณี. */
   bookings: Booking[];
+  /** โหมดสร้างใหม่เท่านั้น (ไม่มีผลในโหมดแก้ไข) — คำขอจองรถ "รออนุมัติ" อื่นๆ
+   * ที่ยังไม่ได้เลือกไว้ ให้ผู้ใช้เลือกเพิ่มเข้าใบสั่งงานเดียวกันได้เอง ถ้าจะ
+   * เดินทางไปด้วยกัน คอมโพเนนต์นี้กรองเหลือเฉพาะวันเดียวกับ `bookings` ที่
+   * เลือกไว้แล้วให้เอง (ไม่ต้องกรองมาก่อน) และตัด bookingId ที่ซ้ำกับ
+   * `bookings` ออกให้เองด้วย. */
+  candidateBookings?: Booking[];
   /** รถที่เปิดใช้งานอยู่ (ประเภท car) — ในโหมดแก้ไข ถ้ารถที่ถูกมอบหมายไว้เดิม
    * ไม่อยู่ในรายการนี้แล้ว (เช่น ถูกปิดใช้งานไปหลังออกใบสั่งงาน) คอมโพเนนต์นี้
    * จะเติมให้เองเพื่อให้ตัวเลือกเดิมยังแสดงถูกต้อง. */
@@ -108,6 +121,39 @@ export default function TripOrderModal({
   /** โหมดแก้ไขเท่านั้น */
   onUpdated?: (tripOrder: TripOrder) => void;
 }) {
+  // วันที่ (YYYY-MM-DD) ของคำขอที่เลือกไว้แต่แรกทั้งหมด — ใช้กรอง
+  // candidateBookings ให้เหลือเฉพาะวันเดียวกัน (ดูคอมเมนต์ที่ prop ด้านบน)
+  const initialDates = useMemo(() => new Set(bookings.map((b) => b.startTime.slice(0, 10))), [bookings]);
+  // ตัวเลือก "เพิ่มคำขออื่น" ที่แสดงจริง — เฉพาะโหมดสร้างใหม่ (editing ไม่ส่ง
+  // candidateBookings มาอยู่แล้ว แต่กันไว้อีกชั้นด้วย !editing), วันเดียวกับ
+  // ที่เลือกไว้แล้ว, และไม่ซ้ำกับที่เลือกไว้แล้ว
+  const eligibleCandidates = useMemo(
+    () =>
+      editing
+        ? []
+        : (candidateBookings ?? []).filter(
+            (b) => initialDates.has(b.startTime.slice(0, 10)) && !bookings.some((ib) => ib.bookingId === b.bookingId)
+          ),
+    [editing, candidateBookings, initialDates, bookings]
+  );
+  // คำขอที่ผู้ใช้ติ๊กเพิ่มจาก eligibleCandidates (bookingId) — เริ่มว่างเสมอ
+  // ผู้ใช้ต้องเลือกเองทีละรายการ ไม่มีการเลือกอัตโนมัติ
+  const [extraBookingIds, setExtraBookingIds] = useState<Set<string>>(new Set());
+  function toggleExtra(bookingId: string) {
+    setExtraBookingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(bookingId)) next.delete(bookingId);
+      else next.add(bookingId);
+      return next;
+    });
+  }
+  // รายการที่จะรวมในใบสั่งงานจริง (ที่เลือกไว้แต่แรก + ที่เพิ่งติ๊กเพิ่ม) —
+  // ใช้แทน `bookings` เดิมทุกจุดที่ต้องนับ/แสดง/ส่งไป API ยกเว้นกล่องแสดงผล
+  // อย่างเดียวของโหมดแก้ไขซึ่งไม่มี extraBookingIds ให้เพิ่มอยู่แล้ว
+  const includedBookings = useMemo(
+    () => [...bookings, ...eligibleCandidates.filter((b) => extraBookingIds.has(b.bookingId))],
+    [bookings, eligibleCandidates, extraBookingIds]
+  );
   const effectiveResources = useMemo(() => {
     if (editing && !resources.some((r) => r.resourceId === editing.resourceId)) {
       const placeholder: BookingResource = {
@@ -163,7 +209,7 @@ export default function TripOrderModal({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  const totalParticipants = bookings.reduce((sum, b) => sum + b.participants, 0);
+  const totalParticipants = includedBookings.reduce((sum, b) => sum + b.participants, 0);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -223,7 +269,7 @@ export default function TripOrderModal({
           startTime,
           endTime,
           notes: notes.trim(),
-          bookingIds: bookings.map((b) => b.bookingId),
+          bookingIds: includedBookings.map((b) => b.bookingId),
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -303,17 +349,20 @@ export default function TripOrderModal({
             <div className="flex flex-col gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
               <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
                 {editing
-                  ? `คำขอจองที่ใบสั่งงานนี้ครอบคลุม (${bookings.length.toLocaleString("th-TH")} รายการ) — แก้ไขตรงนี้ไม่ได้`
-                  : `คำขอจองที่จะรวมในใบสั่งงานนี้ (${bookings.length.toLocaleString("th-TH")} รายการ)`}
+                  ? `คำขอจองที่ใบสั่งงานนี้ครอบคลุม (${includedBookings.length.toLocaleString("th-TH")} รายการ) — แก้ไขตรงนี้ไม่ได้`
+                  : `คำขอจองที่จะรวมในใบสั่งงานนี้ (${includedBookings.length.toLocaleString("th-TH")} รายการ)`}
               </p>
               <ul className="flex flex-col gap-1.5">
-                {bookings.map((b) => (
+                {includedBookings.map((b) => (
                   <li key={b.bookingId} className="text-xs leading-5 text-zinc-600 dark:text-zinc-300">
                     <span className="font-medium text-zinc-800 dark:text-zinc-100">
                       {formatBookingDateTime(b.startTime)} – {formatBookingDateTime(b.endTime)}
                     </span>{" "}
                     {b.department || b.bookedByDisplayName || b.bookedByUsername} — {b.purpose}
                     {b.destination && <> (ปลายทาง: {b.destination})</>}
+                    {extraBookingIds.has(b.bookingId) && (
+                      <span className="ml-1 text-emerald-700 dark:text-emerald-400">(เพิ่มเข้ามา)</span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -322,6 +371,39 @@ export default function TripOrderModal({
                 รวมผู้โดยสารตามคำขอ {totalParticipants.toLocaleString("th-TH")} คน
               </p>
             </div>
+
+            {/* เฉพาะโหมดสร้างใหม่: คำขอจองรถ "รออนุมัติ" อื่นในวันเดียวกันที่
+                ยังไม่ถูกเลือกไว้แต่แรก — ให้ติ๊กเพิ่มเข้าใบสั่งงานเดียวกันได้
+                เองถ้าจะเดินทางไปทางเดียวกัน ตามที่โรงพยาบาลขอเพิ่มภายหลัง */}
+            {eligibleCandidates.length > 0 && (
+              <div className="flex flex-col gap-1.5 rounded-xl border border-dashed border-sky-200 bg-sky-50/60 p-3 dark:border-sky-900/50 dark:bg-sky-950/20">
+                <p className="text-xs font-medium text-sky-800 dark:text-sky-200">
+                  คำขอจองรถอื่นในวันเดียวกัน — เลือกเพิ่มได้ถ้าจะเดินทางไปด้วยกัน
+                </p>
+                <ul className="flex flex-col gap-1.5">
+                  {eligibleCandidates.map((b) => (
+                    <li key={b.bookingId}>
+                      <label className="flex cursor-pointer items-start gap-2 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                        <input
+                          type="checkbox"
+                          checked={extraBookingIds.has(b.bookingId)}
+                          onChange={() => toggleExtra(b.bookingId)}
+                          disabled={saving}
+                          className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--brand)]"
+                        />
+                        <span>
+                          <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                            {formatBookingDateTime(b.startTime)} – {formatBookingDateTime(b.endTime)}
+                          </span>{" "}
+                          {b.department || b.bookedByDisplayName || b.bookedByUsername} — {b.purpose}
+                          {b.destination && <> (ปลายทาง: {b.destination})</>}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
               รถที่ใช้
