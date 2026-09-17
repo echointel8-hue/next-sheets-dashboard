@@ -25,6 +25,16 @@ const STATUS_BADGE_CLASSES: Record<ReturnType<typeof bookingStatusLabel>["tone"]
   approved: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
   rejected: "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300",
 };
+// ลำดับการแสดงผลตามสถานะ — "รออนุมัติ" ต้องเห็นก่อนเสมอ (ยังต้องตัดสินใจ)
+// ตามด้วย "ยืนยันแล้ว" (เสร็จแล้ว ไม่ต้องทำอะไรต่อ) ส่วนไม่อนุมัติ/ยกเลิกแล้ว
+// ไม่ใช่รายการที่ต้องรีบดู เลยไว้ท้ายสุด — ใช้กับทั้งช่องวันในปฏิทิน (3
+// รายการแรกที่โชว์) และรายการในหน้าต่างรายละเอียดวัน (DayDetailModal) ตามที่ขอ
+const STATUS_SORT_PRIORITY: Record<ReturnType<typeof bookingStatusLabel>["tone"], number> = {
+  pending: 0,
+  approved: 1,
+  rejected: 2,
+  cancelled: 3,
+};
 
 const THAI_MONTHS = [
   "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
@@ -187,7 +197,14 @@ export default function BookingCalendar({
         map.set(key, list);
       }
     }
-    for (const list of map.values()) list.sort((a, b) => (a.startTime < b.startTime ? -1 : 1));
+    for (const list of map.values()) {
+      list.sort((a, b) => {
+        const priorityDiff =
+          STATUS_SORT_PRIORITY[bookingStatusLabel(a).tone] - STATUS_SORT_PRIORITY[bookingStatusLabel(b).tone];
+        if (priorityDiff !== 0) return priorityDiff;
+        return a.startTime < b.startTime ? -1 : 1;
+      });
+    }
     return map;
   }, [bookings]);
 
