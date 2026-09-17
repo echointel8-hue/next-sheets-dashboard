@@ -466,30 +466,46 @@ function DayDetailModal({
           </button>
         </div>
         <div className="flex flex-col gap-3 overflow-y-auto px-5 py-4">
-          {bookings.length === 0 ? (
-            <p className="py-4 text-center text-sm text-zinc-500 dark:text-zinc-400">ไม่มีการจองในวันนี้</p>
-          ) : (
-            bookings.map((b) => {
-              const cancelled = isBookingCancelled(b);
-              const color = resourceColorMap.get(bookingColorMapKey(b));
-              const status = bookingStatusLabel(b);
+          {(() => {
+            // จัดกลุ่มคำขอที่เดินทางร่วมกัน (TripOrder เดียวกันครอบคลุม >1
+            // คำขอ) ให้อยู่ใน "การ์ดเดียวกัน" แทนที่จะแยกเป็นหลายกล่องซ้อนกัน
+            // — ตามที่ขอ ("เชื่อมกรอบสองวงเป็นกรอบเดียว") ข้อมูลที่เป็นของ
+            // เที่ยวรถโดยรวม (ชื่อรถ/คนขับ) แสดงครั้งเดียวต่อกลุ่ม ส่วนข้อมูล
+            // เฉพาะคำขอ (วัตถุประสงค์/ผู้ติดต่อ/สถานะ/ปุ่มจัดการ) ยังคงแยกราย
+            // คำขอเหมือนเดิม รายการที่ไม่ได้เดินทางร่วมกับใครยังคงเป็นกลุ่มละ
+            // 1 คำขอเหมือนเดิมทุกประการ
+            const seen = new Set<string>();
+            const groups: { key: string; trip?: TripOrder; items: Booking[] }[] = [];
+            for (const b of bookings) {
+              if (seen.has(b.bookingId)) continue;
               const trip = tripOrderByBookingId.get(b.bookingId);
-              // เดินทางร่วมกับรายการอื่น (TripOrder เดียวกันครอบคลุม >1 คำขอ)
-              // — ใช้กรอบสีเดียวกับจุด/ชิพสีของรายการนั้น (ชุดสีเดียวกับ
-              // ทั่วทั้งแอป ผ่านการตรวจสอบ colorblind-safe แล้ว) แทนกรอบเทา
-              // ปกติ ให้เห็นชัดเจนว่ารายการไหนไปด้วยกันบ้าง ตามที่ขอ
-              // ("ใช้กรอบสีของกล่องแจ้งสถานะเป็นสีเดียวกันหากเป็นรายการที่
-              // เดินทางร่วมกัน") — เฉพาะเที่ยวที่รวมมากกว่า 1 คำขอเท่านั้น
-              // เที่ยวเดี่ยวไม่มีอะไรให้เทียบเลยไม่ต้องเน้น
-              const travelingTogether = !!trip && trip.bookingIds.length > 1;
+              if (trip && trip.bookingIds.length > 1) {
+                const items = bookings.filter((x) => trip.bookingIds.includes(x.bookingId));
+                items.forEach((it) => seen.add(it.bookingId));
+                groups.push({ key: trip.tripOrderId, trip, items });
+              } else {
+                seen.add(b.bookingId);
+                groups.push({ key: b.bookingId, trip, items: [b] });
+              }
+            }
+
+            if (groups.length === 0) {
+              return <p className="py-4 text-center text-sm text-zinc-500 dark:text-zinc-400">ไม่มีการจองในวันนี้</p>;
+            }
+
+            return groups.map(({ key, trip, items }) => {
+              const first = items[0];
+              const travelingTogether = items.length > 1;
+              const allCancelled = items.every(isBookingCancelled);
+              const color = resourceColorMap.get(bookingColorMapKey(first));
               const displayResourceName =
-                b.resourceType === "car" ? carBookingDisplayName(b, trip) : b.resourceName;
+                first.resourceType === "car" ? carBookingDisplayName(first, trip) : first.resourceName;
               return (
                 <div
-                  key={b.bookingId}
-                  style={!cancelled && travelingTogether && color ? actionColorVars(color) : undefined}
+                  key={key}
+                  style={!allCancelled && travelingTogether && color ? actionColorVars(color) : undefined}
                   className={`flex flex-col gap-1.5 rounded-xl border p-3 ${
-                    cancelled
+                    allCancelled
                       ? "border-zinc-200 opacity-70 dark:border-zinc-800"
                       : travelingTogether && color
                         ? "border-2 border-[var(--seg-c)] dark:border-[var(--seg-c-dark)]"
@@ -509,42 +525,29 @@ function DayDetailModal({
                         {displayResourceName}
                       </span>
                     </div>
-                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[status.tone]}`}>
-                      {status.text}
-                    </span>
+                    {/* แบดจ์สถานะรวมไว้ตรงหัวการ์ดเฉพาะกลุ่มที่มีคำขอเดียว —
+                        กลุ่มที่เดินทางร่วมกันแต่ละคำขออาจมีสถานะต่างกันได้
+                        (เช่น อนุมัติแล้ว 1 / ยกเลิกไป 1) จึงย้ายไปแสดงแยกราย
+                        คำขอด้านล่างแทน กันข้อความ "สถานะ" ที่ไม่ตรงความจริง
+                        ของบางคำขอในกลุ่ม */}
+                    {!travelingTogether && (
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[bookingStatusLabel(first).tone]}`}
+                      >
+                        {bookingStatusLabel(first).text}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    {formatBookingDateTime(b.startTime)} – {formatBookingDateTime(b.endTime)}
-                  </p>
-                  <p className="text-sm text-zinc-700 dark:text-zinc-200">{b.purpose}</p>
-                  {showDestination && b.destination && (
-                    <span className="inline-flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      <MapPin size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
-                      {b.destination}
-                    </span>
-                  )}
-                  {showDestination && b.companions && (
-                    <span className="inline-flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
-                      ผู้เดินทาง: {b.companions}
-                    </span>
-                  )}
-                  {showDestination && b.editedByUsername && (
-                    <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-                      <Pencil size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
-                      แก้ไขโดยฝ่ายบริหาร ({b.editedByUsername})
-                    </span>
-                  )}
+                  {/* กล่องคนขับ/รถ — ข้อมูลของ "เที่ยวรถ" โดยรวม แสดงครั้งเดียว
+                      ต่อกลุ่ม (ไม่ว่าจะมี 1 หรือหลายคำขอ) ไม่ซ้ำต่อคำขอ ตามที่
+                      ขอ ("อยู่ข้างกับรถ หรืออยู่ใต้ก็ได้") — วางไว้ใต้ชื่อรถ */}
                   {showDestination && trip && (
                     <span className="flex items-start justify-between gap-1.5 rounded-lg bg-sky-50 p-2 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
                       <span className="flex items-start gap-1.5">
                         <Truck size={13} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
                         <span>
-                          {/* ตัดชื่อรถออก — แสดงอยู่แล้วที่หัวการ์ดด้านบน
-                              (displayResourceName) เหลือแค่คนขับ/จำนวนที่ร่วม
-                              เที่ยวตรงนี้ กันข้อมูลซ้ำซ้อน ตามที่ขอ */}
                           คนขับ: {trip.driverName || "—"}
-                          {travelingTogether && <> (ร่วมเที่ยวกับอีก {trip.bookingIds.length - 1} คำขอ)</>}
+                          {travelingTogether && <> · รวม {items.length.toLocaleString("th-TH")} คำขอเดินทางร่วมกัน</>}
                         </span>
                       </span>
                       {canApprove && (
@@ -559,80 +562,127 @@ function DayDetailModal({
                       )}
                     </span>
                   )}
-                  {b.department && (
-                    <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--brand-strong)]">
-                      <Building2 size={14} strokeWidth={2} aria-hidden="true" className="shrink-0" />
-                      {b.department}
-                    </span>
-                  )}
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
-                    <span className="inline-flex items-center gap-1">
-                      <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
-                      {b.participants.toLocaleString("th-TH")}
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <Phone size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
-                      {b.contactPhone}
-                    </span>
-                    <span>{b.bookedByDisplayName || b.bookedByUsername}</span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    {!cancelled && canApprove && b.approvalStatus === "pending" && (
-                      <>
-                        <label className="inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-full border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
-                          <input
-                            type="checkbox"
-                            checked={selectedBookingIds.has(b.bookingId)}
-                            onChange={() => onToggleSelect(b)}
-                            className="h-3.5 w-3.5 accent-[var(--brand)]"
-                          />
-                          เลือกจัดรถ
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => onReject(b)}
-                          disabled={rejectingBookingId === b.bookingId}
-                          className="inline-flex w-fit items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-60 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
-                        >
-                          {rejectingBookingId === b.bookingId ? (
-                            <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-                          ) : (
-                            <X size={12} strokeWidth={2} aria-hidden="true" />
+                  {items.map((b, index) => {
+                    const cancelled = isBookingCancelled(b);
+                    const status = bookingStatusLabel(b);
+                    return (
+                      <div
+                        key={b.bookingId}
+                        className={`flex flex-col gap-1.5 ${
+                          index > 0 ? "border-t border-dashed border-zinc-200 pt-2 dark:border-zinc-700" : ""
+                        } ${cancelled ? "opacity-70" : ""}`}
+                      >
+                        {/* เวลา + สถานะรายคำขอ (สำหรับกลุ่มที่เดินทางร่วมกัน
+                            หลายคำขอเท่านั้น — คำขอเดียวสถานะอยู่ที่หัวการ์ด
+                            ด้านบนแล้ว) */}
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                            {formatBookingDateTime(b.startTime)} – {formatBookingDateTime(b.endTime)}
+                          </span>
+                          {travelingTogether && (
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[status.tone]}`}>
+                              {status.text}
+                            </span>
                           )}
-                          ไม่อนุมัติ
-                        </button>
-                      </>
-                    )}
-                    {!cancelled && canEditBooking && showDestination && (
-                      <button
-                        type="button"
-                        onClick={() => onEditBooking(b)}
-                        className="inline-flex w-fit items-center gap-1 rounded-full border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                      >
-                        <Pencil size={12} strokeWidth={2} aria-hidden="true" />
-                        แก้ไขข้อมูล
-                      </button>
-                    )}
-                    {!cancelled && canCancelBooking(b, session) && (
-                      <button
-                        type="button"
-                        onClick={() => onCancel(b)}
-                        disabled={cancellingBookingId === b.bookingId}
-                        className="inline-flex w-fit items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-60 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
-                      >
-                        {cancellingBookingId === b.bookingId ? (
-                          <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-                        ) : (
-                          <Ban size={12} strokeWidth={2} aria-hidden="true" />
+                        </div>
+                        {/* ลำดับใหม่ตามที่ขอ — กลุ่มงาน, จำนวนผู้เดินทาง และ
+                            เบอร์ติดต่อ ขึ้นก่อนวัตถุประสงค์เดินทาง */}
+                        {b.department && (
+                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--brand-strong)]">
+                            <Building2 size={14} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                            {b.department}
+                          </span>
                         )}
-                        ยกเลิก
-                      </button>
-                    )}
-                  </div>
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+                          <span className="inline-flex items-center gap-1">
+                            <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                            {b.participants.toLocaleString("th-TH")}
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <Phone size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                            {b.contactPhone}
+                          </span>
+                          <span>{b.bookedByDisplayName || b.bookedByUsername}</span>
+                        </div>
+                        <p className="text-sm text-zinc-700 dark:text-zinc-200">{b.purpose}</p>
+                        {showDestination && b.destination && (
+                          <span className="inline-flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                            <MapPin size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                            {b.destination}
+                          </span>
+                        )}
+                        {showDestination && b.companions && (
+                          <span className="inline-flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                            <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                            ผู้ร่วมเดินทาง: {b.companions}
+                          </span>
+                        )}
+                        {showDestination && b.editedByUsername && (
+                          <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                            <Pencil size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                            แก้ไขโดยฝ่ายบริหาร ({b.editedByUsername})
+                          </span>
+                        )}
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          {!cancelled && canApprove && b.approvalStatus === "pending" && (
+                            <>
+                              <label className="inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-full border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedBookingIds.has(b.bookingId)}
+                                  onChange={() => onToggleSelect(b)}
+                                  className="h-3.5 w-3.5 accent-[var(--brand)]"
+                                />
+                                เลือกจัดรถ
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => onReject(b)}
+                                disabled={rejectingBookingId === b.bookingId}
+                                className="inline-flex w-fit items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-60 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
+                              >
+                                {rejectingBookingId === b.bookingId ? (
+                                  <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                                ) : (
+                                  <X size={12} strokeWidth={2} aria-hidden="true" />
+                                )}
+                                ไม่อนุมัติ
+                              </button>
+                            </>
+                          )}
+                          {!cancelled && canEditBooking && showDestination && (
+                            <button
+                              type="button"
+                              onClick={() => onEditBooking(b)}
+                              className="inline-flex w-fit items-center gap-1 rounded-full border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                            >
+                              <Pencil size={12} strokeWidth={2} aria-hidden="true" />
+                              แก้ไขข้อมูล
+                            </button>
+                          )}
+                          {!cancelled && canCancelBooking(b, session) && (
+                            <button
+                              type="button"
+                              onClick={() => onCancel(b)}
+                              disabled={cancellingBookingId === b.bookingId}
+                              className="inline-flex w-fit items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-60 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
+                            >
+                              {cancellingBookingId === b.bookingId ? (
+                                <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                              ) : (
+                                <Ban size={12} strokeWidth={2} aria-hidden="true" />
+                              )}
+                              ยกเลิก
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               );
-            })
-          )}
+            });
+          })()}
         </div>
         {/* ปุ่ม "ออกใบสั่งงานเดินทาง" ย้ายมาไว้ตรงนี้ (แถบท้ายหน้าต่างรายละเอียด
             วัน) ตามที่ขอ — เดิมอยู่เหนือปฏิทินด้านหลัง ซึ่งหน้าต่างนี้บังไว้
