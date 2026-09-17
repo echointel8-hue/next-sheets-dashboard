@@ -43,6 +43,7 @@ interface BookingPayload {
   destination: string;
   participants: number;
   contactPhone: string;
+  companions: string;
 }
 
 function readBookingPayload(body: unknown): BookingPayload | null {
@@ -55,6 +56,9 @@ function readBookingPayload(body: unknown): BookingPayload | null {
   if (typeof b.contactPhone !== "string" || !b.contactPhone.trim()) return null;
   if (typeof b.participants !== "number" || !Number.isFinite(b.participants) || b.participants < 0) return null;
   const destination = typeof b.destination === "string" ? b.destination.trim() : "";
+  // ผู้ร่วมเดินทาง — optional, car only (derived down to "" for a room the
+  // same way destination is, right below where this payload is consumed).
+  const companions = typeof b.companions === "string" ? b.companions.trim() : "";
 
   const start = new Date(b.startTime).getTime();
   const end = new Date(b.endTime).getTime();
@@ -68,6 +72,7 @@ function readBookingPayload(body: unknown): BookingPayload | null {
     destination,
     participants: b.participants,
     contactPhone: b.contactPhone.trim(),
+    companions,
   };
 }
 
@@ -125,6 +130,7 @@ export async function POST(request: NextRequest) {
       endTime: payload.endTime,
       purpose: payload.purpose,
       destination: resource.type === "car" ? payload.destination : "",
+      companions: resource.type === "car" ? payload.companions : "",
       participants: payload.participants,
       contactPhone: payload.contactPhone,
       bookedByUsername: session.username,

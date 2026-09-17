@@ -30,7 +30,10 @@ export default async function BookingRoomPage() {
   let initial: BookingLoadResult;
   try {
     const [resources, bookings] = await Promise.all([getBookingResources(), getBookings()]);
-    initial = { resources, bookings };
+    // ห้องประชุมไม่มีขั้นตอนใบสั่งงานเดินทาง (เฉพาะรถเท่านั้น) — ไม่ต้องดึง
+    // TripOrders ที่นี่ ใส่ [] เฉยๆ ก็พอ (BookingDashboardData ต้องมี field
+    // นี้เสมอเพราะ type เดียวกันใช้ร่วมกับหน้า /booking/car)
+    initial = { resources, bookings, tripOrders: [] };
   } catch (err) {
     initial = { error: err instanceof Error ? err.message : String(err) };
   }

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
-import { getBookingResources, getBookings } from "@/lib/sheets";
+import { getBookingResources, getBookings, getTripOrders } from "@/lib/sheets";
 import BookingDashboard, { type BookingLoadResult } from "@/components/BookingDashboard";
 
 // Overrides ../layout.tsx's generic booking-subtree title with this page's
@@ -29,8 +29,12 @@ export default async function BookingCarPage() {
 
   let initial: BookingLoadResult;
   try {
-    const [resources, bookings] = await Promise.all([getBookingResources(), getBookings()]);
-    initial = { resources, bookings };
+    const [resources, bookings, tripOrders] = await Promise.all([
+      getBookingResources(),
+      getBookings(),
+      getTripOrders(),
+    ]);
+    initial = { resources, bookings, tripOrders };
   } catch (err) {
     initial = { error: err instanceof Error ? err.message : String(err) };
   }

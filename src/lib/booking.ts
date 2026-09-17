@@ -139,6 +139,67 @@ export interface Booking {
    * cancelled — see isBookingCancelled. */
   cancelledAt: string;
   cancelledByUsername: string;
+  /** ผู้ร่วมเดินทาง — free text, optional, car only (same "only meaningful
+   * for a car" shape as destination above; always "" for a room booking).
+   * Filled in by the requester at booking time, never touched by
+   * management — distinct from TripOrder below, which is management's own
+   * car/driver/time decision and never edits the original request. */
+  companions: string;
+  /** Blank until a superadmin/management account dispatches this car
+   * booking by creating a TripOrder covering it (see createTripOrder in
+   * lib/sheets.ts) — that's what moves it out of "pending" now, replacing
+   * the old plain approve toggle. Sharing the same TripOrderId across
+   * several bookings is exactly what "combine these trips" means — see
+   * TripOrder.bookingIds below. Always "" for a room booking (rooms never
+   * go through review) and for a rejected car booking. */
+  tripOrderId: string;
+}
+
+/**
+ * ใบสั่งงาน/ใบเดินทาง — management's own record of which car, which driver,
+ * and what actual time window will serve one or more car booking *requests*
+ * (Booking above). Creating one is now the only way a pending car booking
+ * becomes "approved" — see setBookingApprovalStatus / createTripOrder in
+ * lib/sheets.ts and POST /api/booking/trip-orders.
+ *
+ * Deliberately a separate record rather than an edit to the original
+ * Booking rows it covers: the hospital was explicit that the original
+ * request (who asked, for what, when, to where) must stay exactly as
+ * submitted — management's decision lives here instead, and every covered
+ * Booking just carries a `tripOrderId` pointer to it (see above). Covering
+ * more than one bookingId here *is* the "combine several requests into one
+ * trip" (carpool) feature — there's no separate merge mechanism, issuing a
+ * TripOrder for multiple bookingIds at once *is* the merge.
+ */
+export interface TripOrder {
+  tripOrderId: string;
+  /** The car actually assigned — may differ from what any individual
+   * covered booking originally requested (management's call, per the
+   * hospital's explicit "management decides which car" request). */
+  resourceId: string;
+  /** Snapshot of the assigned car's name at dispatch time, same rationale
+   * as Booking.resourceName. */
+  resourceName: string;
+  /** ชื่อพนักงานขับรถ — free text, required. The one new field this whole
+   * feature was originally requested for. */
+  driverName: string;
+  /** Actual dispatch time window — management's call, may differ from any
+   * individual covered booking's originally requested time (e.g. when
+   * combining several requests, the unified pickup/return window). Same
+   * "local wall-clock, no timezone conversion" string convention as every
+   * other timestamp here. */
+  startTime: string;
+  endTime: string;
+  /** หมายเหตุ — free text, optional (route/stops/anything management wants
+   * noted alongside the dispatch). */
+  notes: string;
+  /** The car booking request(s) this dispatch covers — one for an ordinary
+   * single approval, more than one when combining trips. Every bookingId
+   * here must reference a car booking that was "pending" at the moment this
+   * TripOrder was created. */
+  bookingIds: string[];
+  createdByUsername: string;
+  createdAt: string;
 }
 
 export function isBookingCancelled(booking: Pick<Booking, "cancelledAt">): boolean {
@@ -264,15 +325,22 @@ export function canCancelBooking(
   return booking.bookedByUsername === session.username || hasPermission(session, "cancelAnyBooking");
 }
 
-/** Who may approve/reject a pending car booking: any account with the
- * superadmin role — per the hospital's explicit choice, this is *not*
- * narrowed to the single bootstrap account the way
- * canManageBookingResources is; every superadmin (bootstrap or one created
- * later through /manage/users) can review car bookings, matching
- * canCancelBooking's "any superadmin" reach above. Room bookings never
- * reach this check — they have no pending state to review. Backed by
- * hasPermission()'s "approveCarBooking" key — same unchanged default (any
- * superadmin), now also grantable per account. */
+/** Who may review a pending car booking: any account with the superadmin
+ * role — per the hospital's explicit choice, this is *not* narrowed to the
+ * single bootstrap account the way canManageBookingResources is; every
+ * superadmin (bootstrap or one created later through /manage/users) can
+ * review car bookings, matching canCancelBooking's "any superadmin" reach
+ * above. Room bookings never reach this check — they have no pending state
+ * to review. Backed by hasPermission()'s "approveCarBooking" key — same
+ * unchanged default (any superadmin), now also grantable per account.
+ *
+ * Gates two distinct actions now, both still "reviewing a pending car
+ * booking": rejecting one outright (unchanged — PATCH
+ * /api/booking/bookings/[bookingId]), or *approving* one by dispatching it —
+ * creating a TripOrder that assigns a real car/driver/time to it, alone or
+ * combined with other pending requests (POST /api/booking/trip-orders). See
+ * TripOrder's doc comment above for why approval moved from a plain toggle
+ * to issuing a dispatch record. */
 export function canApproveCarBooking(session: PermissionSession): boolean {
   return hasPermission(session, "approveCarBooking");
 }

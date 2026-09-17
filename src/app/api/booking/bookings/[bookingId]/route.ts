@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { canApproveCarBooking, canCancelBooking } from "@/lib/booking";
-import { appendEditLog, cancelBooking, getBookings, setBookingApprovalStatus } from "@/lib/sheets";
+import { appendEditLog, cancelBooking, getBookings, rejectCarBooking } from "@/lib/sheets";
 
 export const dynamic = "force-dynamic";
 
@@ -59,18 +59,29 @@ function readApprovalPayload(body: unknown): "approved" | "rejected" | null {
   return v === "approved" || v === "rejected" ? v : null;
 }
 
-/** Approves or rejects a pending car booking. Reachable only by an account
- * with the superadmin role — see canApproveCarBooking in lib/booking.ts,
- * which (unlike canManageBookingResources) is not narrowed to the
- * bootstrap account only, per the hospital's explicit choice. Room
- * bookings never have anything to approve — setBookingApprovalStatus
- * itself rejects those, and any booking that's already been reviewed. */
+/** Rejects a pending car booking. Reachable only by an account with the
+ * superadmin role — see canApproveCarBooking in lib/booking.ts, which
+ * (unlike canManageBookingResources) is not narrowed to the bootstrap
+ * account only, per the hospital's explicit choice.
+ *
+ * This is now reject-only — "approving" a car booking is no longer a
+ * status flip here. Per the hospital's explicit later request, the
+ * original booking request must never be edited by management at all;
+ * a car booking instead becomes approved by being dispatched via a
+ * separate TripOrder (car + driver + unified time, possibly covering
+ * several bookings at once — see POST /api/booking/trip-orders and
+ * createTripOrder in lib/sheets.ts). Sending approvalStatus: "approved"
+ * here is rejected with a message pointing at that endpoint, rather than
+ * silently accepted — see rejectCarBooking's doc comment in lib/sheets.ts
+ * for why "approved" was removed from that function entirely. Room
+ * bookings never have anything to approve — rejectCarBooking itself
+ * rejects those, and any booking that's already been reviewed. */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ bookingId: string }> }) {
   const { session, response } = requireSession(request);
   if (!session) return response;
   if (!canApproveCarBooking(session)) {
     return NextResponse.json(
-      { error: "อนุมัติ/ไม่อนุมัติการจองรถได้เฉพาะสิทธิ์ Superadmin เท่านั้น" },
+      { error: "ไม่อนุมัติการจองรถได้เฉพาะสิทธิ์ Superadmin เท่านั้น" },
       { status: 403 }
     );
   }
@@ -86,12 +97,21 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!approvalStatus) {
     return NextResponse.json({ error: "ข้อมูลที่ส่งมาไม่ถูกต้อง" }, { status: 400 });
   }
+  if (approvalStatus === "approved") {
+    return NextResponse.json(
+      {
+        error:
+          "การอนุมัติการจองรถต้องออกใบสั่งงานเดินทาง (ระบุรถ/คนขับ/เวลา) ผ่านหน้าจัดรถ ไม่สามารถอนุมัติตรงนี้ได้อีกต่อไป",
+      },
+      { status: 400 }
+    );
+  }
 
   try {
-    const updated = await setBookingApprovalStatus(bookingId, approvalStatus, session.username);
+    const updated = await rejectCarBooking(bookingId, session.username);
     await appendEditLog({
       timestamp: new Date().toISOString(),
-      action: approvalStatus === "approved" ? "อนุมัติการจองรถ" : "ไม่อนุมัติการจองรถ",
+      action: "ไม่อนุมัติการจองรถ",
       actor: session.username,
       department: session.department,
       oldValue: "",

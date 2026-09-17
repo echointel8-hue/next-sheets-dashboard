@@ -7,12 +7,14 @@ import { getLatestMaintenanceLogByAsset, type MaintenanceLogEntry } from "@/lib/
 import { resolveColorOrder } from "@/lib/actionColors";
 import { isPermissionKey, type PermissionKey } from "@/lib/permissions";
 import {
+  formatBookingDateTime,
   hasBookingConflict,
   isBookingCancelled,
   type Booking,
   type BookingApprovalStatus,
   type BookingResource,
   type BookingResourceType,
+  type TripOrder,
 } from "@/lib/booking";
 
 export type { EquipmentRow, FieldMap };
@@ -32,6 +34,7 @@ export type {
   BookingApprovalStatus,
   BookingResource,
   BookingResourceType,
+  TripOrder,
 };
 
 // Each record pairs a row's data with its 1-based row number in the sheet
@@ -306,8 +309,16 @@ export type EditLogAction =
   | "แก้ไขทรัพยากรจอง"
   | "จองทรัพยากร"
   | "ยกเลิกการจอง"
+  // "อนุมัติการจองรถ" retired from the write path (approval now always goes
+  // through "ออกใบสั่งงานเดินทาง" below) but kept in the union — old EditLog
+  // rows already logged with this action string still need to type-check
+  // against anything that reads EditLog rows back typed as EditLogAction.
   | "อนุมัติการจองรถ"
-  | "ไม่อนุมัติการจองรถ";
+  | "ไม่อนุมัติการจองรถ"
+  // Dispatching one or more pending car bookings at once (POST
+  // /api/booking/trip-orders) — the new "approve" for a car booking; see
+  // TripOrder's doc comment in lib/booking.ts.
+  | "ออกใบสั่งงานเดินทาง";
 
 /** Appends one row to the EditLog tab — header row (created ahead of time
  * by the sheet owner, not by this app; see the project setup notes) must be:
@@ -1549,6 +1560,12 @@ const BOOKINGS_HEADER_ROW = [
   "Purpose", "Destination", "Participants", "ContactPhone", "BookedByUsername",
   "BookedByDisplayName", "Department", "CreatedAt", "CancelledAt", "CancelledByUsername",
   "ApprovalStatus", "ApprovedAt", "ApprovedByUsername",
+  // Added after the original 19 columns (same one-time manual-column-add
+  // pattern as ExtraPermissions/RevokedPermissions on the Users tab) — a
+  // sheet that predates this feature just has blank T/U cells, which reads
+  // back as "no companions" / "not yet dispatched" (see rowToBooking),
+  // nothing existing breaks until the sheet owner adds these two by hand.
+  "Companions", "TripOrderId",
 ];
 
 function getBookingResourcesTab(): string {
@@ -1616,6 +1633,8 @@ function rowToBooking(row: string[]): Booking {
     approvalStatus: parseApprovalStatus(col(16)),
     approvedAt: col(17),
     approvedByUsername: col(18),
+    companions: col(19),
+    tripOrderId: col(20).trim(),
   };
 }
 
@@ -1624,7 +1643,7 @@ function bookingToRow(b: Booking): (string | number)[] {
     b.bookingId, b.resourceId, b.resourceType, b.resourceName, b.startTime, b.endTime,
     b.purpose, b.destination, b.participants, b.contactPhone, b.bookedByUsername,
     b.bookedByDisplayName, b.department, b.createdAt, b.cancelledAt, b.cancelledByUsername,
-    b.approvalStatus, b.approvedAt, b.approvedByUsername,
+    b.approvalStatus, b.approvedAt, b.approvedByUsername, b.companions, b.tripOrderId,
   ];
 }
 
@@ -1774,7 +1793,7 @@ export async function getBookings(): Promise<Booking[]> {
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:S100000`,
+      range: `${tab}!A2:U100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -1814,6 +1833,9 @@ export async function createBooking(input: {
   bookedByDisplayName: string;
   department: string;
   approvalStatus: BookingApprovalStatus;
+  /** ผู้ร่วมเดินทาง — optional, car only; "" for a room booking, same
+   * derivation the caller already does for destination. */
+  companions: string;
 }): Promise<Booking> {
   const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
   const tab = getBookingsTab();
@@ -1844,6 +1866,8 @@ export async function createBooking(input: {
     approvalStatus: input.approvalStatus,
     approvedAt: "",
     approvedByUsername: "",
+    companions: input.companions,
+    tripOrderId: "",
   };
 
   try {
@@ -1894,7 +1918,7 @@ export async function cancelBooking(bookingId: string, cancelledByUsername: stri
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:S100000`,
+      range: `${tab}!A2:U100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -1917,7 +1941,7 @@ export async function cancelBooking(bookingId: string, cancelledByUsername: stri
   try {
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${tab}!A${sheetRow}:S${sheetRow}`,
+      range: `${tab}!A${sheetRow}:U${sheetRow}`,
       // RAW — see the note on createBooking's append() above.
       valueInputOption: "RAW",
       requestBody: { values: [bookingToRow(merged)] },
@@ -1930,19 +1954,23 @@ export async function cancelBooking(bookingId: string, cancelledByUsername: stri
   return merged;
 }
 
-/** Approves or rejects a *pending* car booking — the superadmin review step
- * a car booking needs before it counts as confirmed (see
+/** Rejects a *pending* car booking outright — the superadmin review step a
+ * car booking needs before it's settled either way (see
  * BookingApprovalStatus in lib/booking.ts). Find-by-id scan, same reasoning
- * as cancelBooking. Only ever moves a booking out of "pending" — approving
- * or rejecting one that's already been reviewed, or isn't a car booking,
- * throws instead of silently overwriting a prior decision; the permission
- * check itself (canApproveCarBooking) is the API route's job, not this
- * function's, same split as cancelBooking/canCancelBooking. */
-export async function setBookingApprovalStatus(
-  bookingId: string,
-  approvalStatus: "approved" | "rejected",
-  approvedByUsername: string
-): Promise<Booking> {
+ * as cancelBooking. Only ever moves a booking out of "pending" — rejecting
+ * one that's already been reviewed (or was cancelled by its owner first, or
+ * isn't a car booking) throws instead of silently overwriting a prior
+ * decision; the permission check itself (canApproveCarBooking) is the API
+ * route's job, not this function's, same split as
+ * cancelBooking/canCancelBooking.
+ *
+ * "approved" is deliberately not an accepted value here anymore — approving
+ * a pending car booking now means dispatching it via createTripOrder below
+ * (which does its own approvalStatus/approvedAt/approvedByUsername write,
+ * alongside setting tripOrderId), never this plain toggle. Keeping this
+ * function reject-only means there's no code path left that can mark a
+ * booking "approved" without a TripOrder backing it. */
+export async function rejectCarBooking(bookingId: string, rejectedByUsername: string): Promise<Booking> {
   const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
   const tab = getBookingsTab();
   const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
@@ -1951,7 +1979,7 @@ export async function setBookingApprovalStatus(
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:S100000`,
+      range: `${tab}!A2:U100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -1973,24 +2001,237 @@ export async function setBookingApprovalStatus(
   }
   const merged: Booking = {
     ...current,
-    approvalStatus,
+    approvalStatus: "rejected",
     approvedAt: new Date().toISOString(),
-    approvedByUsername,
+    approvedByUsername: rejectedByUsername,
   };
   const sheetRow = idx + 2;
 
   try {
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${tab}!A${sheetRow}:S${sheetRow}`,
+      range: `${tab}!A${sheetRow}:U${sheetRow}`,
       // RAW — see the note on createBooking's append() above.
       valueInputOption: "RAW",
       requestBody: { values: [bookingToRow(merged)] },
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`บันทึกผลการอนุมัติไม่สำเร็จ: ${message}`);
+    throw new Error(`บันทึกผลการไม่อนุมัติไม่สำเร็จ: ${message}`);
   }
 
   return merged;
+}
+
+// ---------------------------------------------------------------------------
+// TripOrders tab — the dispatch/merge record for car bookings (see
+// TripOrder's doc comment in lib/booking.ts for why this exists as its own
+// tab rather than editing Bookings rows directly). Same manually-created-tab
+// convention as every other tab here — the sheet owner creates it by hand
+// before the first dispatch can be issued. Header row:
+// TripOrderId | ResourceId | ResourceName | DriverName | StartTime | EndTime
+// | Notes | BookingIds | CreatedByUsername | CreatedAt
+// BookingIds is a comma-separated list of Bookings-tab BookingId values,
+// same encoding as Users' ExtraPermissions/RevokedPermissions columns.
+// ---------------------------------------------------------------------------
+
+const TRIP_ORDERS_HEADER_ROW = [
+  "TripOrderId", "ResourceId", "ResourceName", "DriverName", "StartTime", "EndTime",
+  "Notes", "BookingIds", "CreatedByUsername", "CreatedAt",
+];
+
+function getTripOrdersTab(): string {
+  return process.env.GOOGLE_SHEET_TRIP_ORDERS_TAB?.trim() || "TripOrders";
+}
+
+function rowToTripOrder(row: string[]): TripOrder {
+  const col = (i: number) => (row[i] ?? "").toString();
+  return {
+    tripOrderId: col(0).trim(),
+    resourceId: col(1),
+    resourceName: col(2),
+    driverName: col(3),
+    startTime: col(4),
+    endTime: col(5),
+    notes: col(6),
+    bookingIds: col(7)
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== ""),
+    createdByUsername: col(8),
+    createdAt: col(9),
+  };
+}
+
+function tripOrderToRow(t: TripOrder): (string | number)[] {
+  return [
+    t.tripOrderId, t.resourceId, t.resourceName, t.driverName, t.startTime, t.endTime,
+    t.notes, t.bookingIds.join(","), t.createdByUsername, t.createdAt,
+  ];
+}
+
+/** Every dispatch record ever issued — callers join against
+ * Booking.tripOrderId themselves (see BookingDashboard), same "read
+ * everything, filter/join client-side" shape as getBookings and
+ * getBookingResources. Empty array (not an error) if the tab doesn't exist
+ * yet — no car booking has ever been dispatched. */
+export async function getTripOrders(): Promise<TripOrder[]> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getTripOrdersTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:J100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      return [];
+    }
+    throw new Error(`อ่านรายการใบสั่งงานไม่สำเร็จ: ${message}`);
+  }
+
+  return (values ?? [])
+    .filter((row) => (row[0] ?? "").toString().trim() !== "")
+    .map(rowToTripOrder);
+}
+
+/** Dispatches one or more *pending* car bookings at once — appends the
+ * TripOrder row, then flips every covered booking to "approved" and points
+ * its tripOrderId at the new record, in a single batchUpdate (one API call
+ * for N rows, not N separate calls — this app has been burned before by
+ * unbatched per-row Sheets writes piling up quota usage, see proxy.ts/
+ * sheets.ts's global timeout comment). This *is* the "combine several
+ * requests into one trip" feature: pass every bookingId that should share
+ * this car/driver/time and they're merged by construction — there is no
+ * separate merge step.
+ *
+ * Every covered booking is re-validated against the *current* Bookings tab
+ * (never trust a caller's stale list) before anything is written: it must
+ * exist, be a car booking, not be cancelled, and still be "pending" — if
+ * any one of them fails that, the whole call throws before writing
+ * anything, rather than partially dispatching some and silently skipping
+ * others. The TripOrders row is written before the booking rows are
+ * updated: if the batchUpdate that follows fails partway (Sheets isn't
+ * transactional), every booking that *did* get updated already points at a
+ * TripOrder that genuinely exists — never a dangling reference. */
+export async function createTripOrder(input: {
+  resourceId: string;
+  resourceName: string;
+  driverName: string;
+  startTime: string;
+  endTime: string;
+  notes: string;
+  bookingIds: string[];
+  createdByUsername: string;
+}): Promise<{ tripOrder: TripOrder; bookings: Booking[] }> {
+  if (input.bookingIds.length === 0) {
+    throw new Error("กรุณาเลือกรายการจองที่จะออกใบสั่งงานอย่างน้อย 1 รายการ");
+  }
+
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const bookingsTab = getBookingsTab();
+  const tripOrdersTab = getTripOrdersTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${bookingsTab}!A2:U100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`อ่านรายการจองไม่สำเร็จ: ${message}`);
+  }
+  const rows = values ?? [];
+
+  // Locate + validate every covered booking up front — see the doc comment
+  // above for why nothing gets written until every one of them checks out.
+  const targets: { rowIndex: number; booking: Booking }[] = [];
+  for (const bookingId of input.bookingIds) {
+    const idx = rows.findIndex((row) => (row[0] ?? "").toString().trim() === bookingId);
+    if (idx === -1) {
+      throw new Error(`ไม่พบรายการจอง (${bookingId}) — อาจถูกยกเลิกไปแล้ว`);
+    }
+    const booking = rowToBooking(rows[idx]);
+    if (booking.resourceType !== "car") {
+      throw new Error(`${booking.resourceName}: ไม่ใช่การจองรถ ออกใบสั่งงานไม่ได้`);
+    }
+    if (isBookingCancelled(booking)) {
+      throw new Error(`${booking.resourceName} (${formatBookingDateTime(booking.startTime)}): ถูกยกเลิกไปแล้ว`);
+    }
+    if (booking.approvalStatus !== "pending") {
+      throw new Error(`${booking.resourceName} (${formatBookingDateTime(booking.startTime)}): ถูกพิจารณาไปแล้ว`);
+    }
+    targets.push({ rowIndex: idx, booking });
+  }
+
+  const tripOrder: TripOrder = {
+    tripOrderId: randomUUID(),
+    resourceId: input.resourceId,
+    resourceName: input.resourceName,
+    driverName: input.driverName,
+    startTime: input.startTime,
+    endTime: input.endTime,
+    notes: input.notes,
+    bookingIds: input.bookingIds,
+    createdByUsername: input.createdByUsername,
+    createdAt: new Date().toISOString(),
+  };
+
+  try {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: `${tripOrdersTab}!A1`,
+      // RAW — see the note on createBooking's append() above.
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: [tripOrderToRow(tripOrder)] },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      throw new Error(
+        `ยังไม่พบแท็บชื่อ "${tripOrdersTab}" ในสเปรดชีต — สร้างแท็บนี้ก่อน (หัวตาราง: ${TRIP_ORDERS_HEADER_ROW.join(" | ")}) หรือตั้งค่า GOOGLE_SHEET_TRIP_ORDERS_TAB ให้ตรงกับชื่อแท็บจริง`
+      );
+    }
+    throw new Error(`บันทึกใบสั่งงานไม่สำเร็จ: ${message}`);
+  }
+
+  const updatedBookings: Booking[] = targets.map(({ booking }) => ({
+    ...booking,
+    approvalStatus: "approved",
+    approvedAt: tripOrder.createdAt,
+    approvedByUsername: input.createdByUsername,
+    tripOrderId: tripOrder.tripOrderId,
+  }));
+
+  try {
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        valueInputOption: "RAW",
+        data: targets.map(({ rowIndex }, i) => ({
+          range: `${bookingsTab}!A${rowIndex + 2}:U${rowIndex + 2}`,
+          values: [bookingToRow(updatedBookings[i])],
+        })),
+      },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    // The TripOrder row above already exists at this point — see the doc
+    // comment's note on write order — so this is never a dangling
+    // reference, just an incomplete one that needs a retry.
+    throw new Error(
+      `บันทึกใบสั่งงานสำเร็จ แต่ปรับสถานะการจองที่เกี่ยวข้องไม่สำเร็จ (${message}) — กรุณาตรวจสอบรายการจองและลองออกใบสั่งงานอีกครั้งหากยังค้างอยู่`
+    );
+  }
+
+  return { tripOrder, bookings: updatedBookings };
 }

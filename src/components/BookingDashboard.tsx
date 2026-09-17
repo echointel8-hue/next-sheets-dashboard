@@ -8,7 +8,6 @@ import {
   CalendarDays,
   CalendarPlus,
   Car,
-  Check,
   DoorOpen,
   ImageOff,
   List,
@@ -18,6 +17,7 @@ import {
   Phone,
   Plus,
   Power,
+  Truck,
   Users,
   X as XIcon,
 } from "lucide-react";
@@ -32,6 +32,7 @@ import {
   type Booking,
   type BookingResource,
   type BookingResourceType,
+  type TripOrder,
 } from "@/lib/booking";
 import {
   canAccessItDashboardClient,
@@ -44,10 +45,12 @@ import AppShell from "@/components/AppShell";
 import BookingResourceFormModal from "@/components/BookingResourceFormModal";
 import BookingFormModal from "@/components/BookingFormModal";
 import BookingCalendar from "@/components/BookingCalendar";
+import TripOrderModal from "@/components/TripOrderModal";
 
 export interface BookingDashboardData {
   resources: BookingResource[];
   bookings: Booking[];
+  tripOrders: TripOrder[];
 }
 export type BookingLoadResult = BookingDashboardData | { error: string };
 
@@ -112,14 +115,20 @@ export default function BookingDashboard({
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [togglingResourceId, setTogglingResourceId] = useState<string | null>(null);
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
-  const [approvingBookingId, setApprovingBookingId] = useState<string | null>(null);
+  const [rejectingBookingId, setRejectingBookingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
+  // รายการจองรถที่ "รออนุมัติ" ที่ถูกเลือกไว้เพื่อรวมออกใบสั่งงานเดียวกัน —
+  // เลือกได้มากกว่า 1 รายการ นั่นคือฟีเจอร์ "รวมเที่ยว/คาร์พูล" ในตัว ไม่มี
+  // ขั้นตอนรวมแยกต่างหาก ดู TripOrderModal ที่ถูกเปิดจาก tripOrderModalOpen
+  const [selectedBookingIds, setSelectedBookingIds] = useState<Set<string>>(new Set());
+  const [tripOrderModalOpen, setTripOrderModalOpen] = useState(false);
   // เฉพาะการจองรถต้องมีขั้นตอนอนุมัติ — ห้องประชุมไม่มี (ยืนยันทันทีเหมือนเดิม)
   const canApprove = type === "car" && canApproveCarBooking(session);
 
   const resources = isError(data) ? [] : data.resources;
   const bookings = isError(data) ? [] : data.bookings;
+  const tripOrders = isError(data) ? [] : data.tripOrders;
 
   // `resources`/`bookings` above are freshly re-derived from `data` on
   // every render (not stable references), so depending on `data` itself —
@@ -138,6 +147,25 @@ export default function BookingDashboard({
         .slice()
         .sort((a, b) => (a.startTime < b.startTime ? 1 : -1)),
     [data, type] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // Booking.bookingId -> the TripOrder that dispatched it — every booking
+  // covers at most one TripOrder (createTripOrder validates "pending" up
+  // front, so a booking can never be picked up by two), so a plain Map is
+  // enough. Used to show "คนขับ: ..." on an approved car booking without
+  // ever having edited the booking row itself.
+  const tripOrderByBookingId: Map<string, TripOrder> = useMemo(() => {
+    const map = new Map<string, TripOrder>();
+    for (const t of tripOrders) {
+      for (const bookingId of t.bookingIds) map.set(bookingId, t);
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  const selectedBookings = useMemo(
+    () => typeBookings.filter((b) => selectedBookingIds.has(b.bookingId)),
+    [typeBookings, selectedBookingIds]
   );
 
   // Color each resource of the current type by when it was *created*
@@ -229,18 +257,22 @@ export default function BookingDashboard({
     }
   }
 
-  async function handleApprovalDecision(booking: Booking, approvalStatus: "approved" | "rejected") {
-    setApprovingBookingId(booking.bookingId);
+  /** Rejects a pending car booking outright — single click, no TripOrder
+   * involved. "Approving" is handled entirely by handleTripOrderCreated
+   * below now — see PATCH /api/booking/bookings/[bookingId]'s doc comment
+   * for why this endpoint no longer accepts approvalStatus: "approved". */
+  async function handleReject(booking: Booking) {
+    setRejectingBookingId(booking.bookingId);
     setActionError(null);
     try {
       const res = await fetch(`/api/booking/bookings/${booking.bookingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approvalStatus }),
+        body: JSON.stringify({ approvalStatus: "rejected" }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setActionError(json.error || "บันทึกผลการอนุมัติไม่สำเร็จ");
+        setActionError(json.error || "บันทึกผลการไม่อนุมัติไม่สำเร็จ");
         return;
       }
       const updated = json.booking as Booking;
@@ -249,11 +281,44 @@ export default function BookingDashboard({
           ? prev
           : { ...prev, bookings: prev.bookings.map((b) => (b.bookingId === updated.bookingId ? updated : b)) }
       );
+      setSelectedBookingIds((prev) => {
+        if (!prev.has(updated.bookingId)) return prev;
+        const next = new Set(prev);
+        next.delete(updated.bookingId);
+        return next;
+      });
     } catch {
-      setActionError("บันทึกผลการอนุมัติไม่สำเร็จ กรุณาลองใหม่");
+      setActionError("บันทึกผลการไม่อนุมัติไม่สำเร็จ กรุณาลองใหม่");
     } finally {
-      setApprovingBookingId(null);
+      setRejectingBookingId(null);
     }
+  }
+
+  function toggleBookingSelection(booking: Booking) {
+    setSelectedBookingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(booking.bookingId)) next.delete(booking.bookingId);
+      else next.add(booking.bookingId);
+      return next;
+    });
+  }
+
+  /** Merges the newly-dispatched TripOrder + its updated (now "approved")
+   * bookings into local state — the bookings' own fields never changed,
+   * only approvalStatus/tripOrderId, same as what createTripOrder actually
+   * wrote server-side. */
+  function handleTripOrderCreated({ tripOrder, bookings: updatedBookings }: { tripOrder: TripOrder; bookings: Booking[] }) {
+    setData((prev) => {
+      if (isError(prev)) return prev;
+      const updatedById = new Map(updatedBookings.map((b) => [b.bookingId, b]));
+      return {
+        ...prev,
+        tripOrders: [...prev.tripOrders, tripOrder],
+        bookings: prev.bookings.map((b) => updatedById.get(b.bookingId) ?? b),
+      };
+    });
+    setSelectedBookingIds(new Set());
+    setTripOrderModalOpen(false);
   }
 
   const typeLabel = type === "car" ? "รถ" : "ห้องประชุม";
@@ -477,6 +542,16 @@ export default function BookingDashboard({
                       รายการ
                     </button>
                   </div>
+                  {canApprove && selectedBookingIds.size > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setTripOrderModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-br from-sky-600 to-sky-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-opacity hover:opacity-90"
+                    >
+                      <Truck size={14} strokeWidth={2} aria-hidden="true" />
+                      ออกใบสั่งงานเดินทาง ({selectedBookingIds.size.toLocaleString("th-TH")})
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setBookingModalOpen(true)}
@@ -503,8 +578,11 @@ export default function BookingDashboard({
                   cancellingBookingId={cancellingBookingId}
                   showDestination={type === "car"}
                   canApprove={canApprove}
-                  onApprovalDecision={handleApprovalDecision}
-                  approvingBookingId={approvingBookingId}
+                  onReject={handleReject}
+                  rejectingBookingId={rejectingBookingId}
+                  selectedBookingIds={selectedBookingIds}
+                  onToggleSelect={toggleBookingSelection}
+                  tripOrderByBookingId={tripOrderByBookingId}
                 />
               ) : (
                 <div className="overflow-x-auto">
@@ -577,32 +655,38 @@ export default function BookingDashboard({
                               </span>
                             </td>
                             <td className="px-2 py-2.5 text-right">
-                              <div className="flex flex-wrap justify-end gap-1.5">
+                              <div className="flex flex-wrap items-center justify-end gap-1.5">
                                 {!cancelled && canApprove && booking.approvalStatus === "pending" && (
                                   <>
+                                    <label className={`${ACTION_BUTTON} cursor-pointer border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800`}>
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedBookingIds.has(booking.bookingId)}
+                                        onChange={() => toggleBookingSelection(booking)}
+                                        className="h-3.5 w-3.5 accent-[var(--brand)]"
+                                      />
+                                      เลือกจัดรถ
+                                    </label>
                                     <button
                                       type="button"
-                                      onClick={() => handleApprovalDecision(booking, "approved")}
-                                      disabled={approvingBookingId === booking.bookingId}
-                                      className={`${ACTION_BUTTON} border-emerald-200 text-emerald-700 hover:bg-emerald-50 focus-visible:outline-emerald-600 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`}
-                                    >
-                                      {approvingBookingId === booking.bookingId ? (
-                                        <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-                                      ) : (
-                                        <Check size={12} strokeWidth={2} aria-hidden="true" />
-                                      )}
-                                      อนุมัติ
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleApprovalDecision(booking, "rejected")}
-                                      disabled={approvingBookingId === booking.bookingId}
+                                      onClick={() => handleReject(booking)}
+                                      disabled={rejectingBookingId === booking.bookingId}
                                       className={`${ACTION_BUTTON} border-red-200 text-red-700 hover:bg-red-50 focus-visible:outline-red-600 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30`}
                                     >
-                                      <XIcon size={12} strokeWidth={2} aria-hidden="true" />
+                                      {rejectingBookingId === booking.bookingId ? (
+                                        <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                                      ) : (
+                                        <XIcon size={12} strokeWidth={2} aria-hidden="true" />
+                                      )}
                                       ไม่อนุมัติ
                                     </button>
                                   </>
+                                )}
+                                {!cancelled && tripOrderByBookingId.get(booking.bookingId) && (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 px-2 py-1 text-xs font-medium text-sky-700 dark:border-sky-900/50 dark:text-sky-300">
+                                    <Truck size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                                    {tripOrderByBookingId.get(booking.bookingId)!.driverName || "—"}
+                                  </span>
                                 )}
                                 {!cancelled && canCancelBooking(booking, session) && (
                                   <button
@@ -648,6 +732,14 @@ export default function BookingDashboard({
           resources={activeTypeResources}
           onClose={() => setBookingModalOpen(false)}
           onSaved={handleBookingSaved}
+        />
+      )}
+      {tripOrderModalOpen && (
+        <TripOrderModal
+          bookings={selectedBookings}
+          resources={activeTypeResources}
+          onClose={() => setTripOrderModalOpen(false)}
+          onCreated={handleTripOrderCreated}
         />
       )}
     </main>

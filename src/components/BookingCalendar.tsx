@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Ban, Building2, Check, ChevronLeft, ChevronRight, Loader2, MapPin, Phone, Users, X } from "lucide-react";
+import { Ban, Building2, ChevronLeft, ChevronRight, Loader2, MapPin, Phone, Truck, Users, X } from "lucide-react";
 import type { Role } from "@/lib/auth";
 import { actionColorVars, type ActionColor } from "@/lib/actionColors";
 import type { PermissionKey } from "@/lib/permissions";
@@ -13,6 +13,7 @@ import {
   isBookingCancelled,
   splitBookingDateTime,
   type Booking,
+  type TripOrder,
 } from "@/lib/booking";
 
 // Tone -> badge classes for bookingStatusLabel's four tones — same mapping
@@ -114,8 +115,11 @@ export default function BookingCalendar({
   cancellingBookingId,
   showDestination,
   canApprove,
-  onApprovalDecision,
-  approvingBookingId,
+  onReject,
+  rejectingBookingId,
+  selectedBookingIds,
+  onToggleSelect,
+  tripOrderByBookingId,
 }: {
   typeLabel: string;
   bookings: Booking[];
@@ -128,8 +132,21 @@ export default function BookingCalendar({
    * in lib/booking.ts. Room calendars never pass true, since room bookings
    * have no pending state to review. */
   canApprove: boolean;
-  onApprovalDecision: (booking: Booking, approvalStatus: "approved" | "rejected") => void;
-  approvingBookingId: string | null;
+  /** Rejects a pending car booking outright — the only single-click decision
+   * left here. "Approving" is no longer a status flip: it only happens by
+   * dispatching a TripOrder (see selectedBookingIds/onToggleSelect below and
+   * TripOrderModal), which combining >1 selection into is exactly the
+   * carpool feature. */
+  onReject: (booking: Booking) => void;
+  rejectingBookingId: string | null;
+  /** Pending car bookings picked to go into the same TripOrder — owned by
+   * BookingDashboard so it survives switching between calendar/list view. */
+  selectedBookingIds: Set<string>;
+  onToggleSelect: (booking: Booking) => void;
+  /** Booking.bookingId -> the TripOrder that dispatched it (once approved
+   * this way) — lets a booking card show which car/driver it ended up with,
+   * without ever having edited the booking row itself. */
+  tripOrderByBookingId: Map<string, TripOrder>;
 }) {
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
@@ -294,8 +311,11 @@ export default function BookingCalendar({
           cancellingBookingId={cancellingBookingId}
           showDestination={showDestination}
           canApprove={canApprove}
-          onApprovalDecision={onApprovalDecision}
-          approvingBookingId={approvingBookingId}
+          onReject={onReject}
+          rejectingBookingId={rejectingBookingId}
+          selectedBookingIds={selectedBookingIds}
+          onToggleSelect={onToggleSelect}
+          tripOrderByBookingId={tripOrderByBookingId}
           onClose={() => setSelectedDateKey(null)}
         />
       )}
@@ -313,8 +333,11 @@ function DayDetailModal({
   cancellingBookingId,
   showDestination,
   canApprove,
-  onApprovalDecision,
-  approvingBookingId,
+  onReject,
+  rejectingBookingId,
+  selectedBookingIds,
+  onToggleSelect,
+  tripOrderByBookingId,
   onClose,
 }: {
   dateKey: string;
@@ -326,8 +349,11 @@ function DayDetailModal({
   cancellingBookingId: string | null;
   showDestination: boolean;
   canApprove: boolean;
-  onApprovalDecision: (booking: Booking, approvalStatus: "approved" | "rejected") => void;
-  approvingBookingId: string | null;
+  onReject: (booking: Booking) => void;
+  rejectingBookingId: string | null;
+  selectedBookingIds: Set<string>;
+  onToggleSelect: (booking: Booking) => void;
+  tripOrderByBookingId: Map<string, TripOrder>;
   onClose: () => void;
 }) {
   const [y, mo, d] = dateKey.split("-");
@@ -403,6 +429,23 @@ function DayDetailModal({
                       {b.destination}
                     </span>
                   )}
+                  {showDestination && b.companions && (
+                    <span className="inline-flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                      ผู้ร่วมเดินทาง: {b.companions}
+                    </span>
+                  )}
+                  {showDestination && tripOrderByBookingId.get(b.bookingId) && (
+                    <span className="flex items-start gap-1.5 rounded-lg bg-sky-50 p-2 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
+                      <Truck size={13} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+                      <span>
+                        คนขับ: {tripOrderByBookingId.get(b.bookingId)!.driverName || "—"}
+                        {tripOrderByBookingId.get(b.bookingId)!.bookingIds.length > 1 && (
+                          <> (ร่วมเที่ยวกับอีก {tripOrderByBookingId.get(b.bookingId)!.bookingIds.length - 1} คำขอ)</>
+                        )}
+                      </span>
+                    </span>
+                  )}
                   {b.department && (
                     <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--brand-strong)]">
                       <Building2 size={14} strokeWidth={2} aria-hidden="true" className="shrink-0" />
@@ -420,29 +463,29 @@ function DayDetailModal({
                     </span>
                     <span>{b.bookedByDisplayName || b.bookedByUsername}</span>
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
                     {!cancelled && canApprove && b.approvalStatus === "pending" && (
                       <>
+                        <label className="inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-full border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                          <input
+                            type="checkbox"
+                            checked={selectedBookingIds.has(b.bookingId)}
+                            onChange={() => onToggleSelect(b)}
+                            className="h-3.5 w-3.5 accent-[var(--brand)]"
+                          />
+                          เลือกจัดรถ
+                        </label>
                         <button
                           type="button"
-                          onClick={() => onApprovalDecision(b, "approved")}
-                          disabled={approvingBookingId === b.bookingId}
-                          className="inline-flex w-fit items-center gap-1 rounded-full border border-emerald-200 px-2 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 disabled:opacity-60 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
-                        >
-                          {approvingBookingId === b.bookingId ? (
-                            <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-                          ) : (
-                            <Check size={12} strokeWidth={2} aria-hidden="true" />
-                          )}
-                          อนุมัติ
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onApprovalDecision(b, "rejected")}
-                          disabled={approvingBookingId === b.bookingId}
+                          onClick={() => onReject(b)}
+                          disabled={rejectingBookingId === b.bookingId}
                           className="inline-flex w-fit items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-60 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
                         >
-                          <X size={12} strokeWidth={2} aria-hidden="true" />
+                          {rejectingBookingId === b.bookingId ? (
+                            <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                          ) : (
+                            <X size={12} strokeWidth={2} aria-hidden="true" />
+                          )}
                           ไม่อนุมัติ
                         </button>
                       </>

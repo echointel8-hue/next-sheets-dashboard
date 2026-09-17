@@ -105,6 +105,7 @@ export default function BookingFormModal({
   const endTime = combineDateTime(endDate, endHour, endMinute);
   const [purpose, setPurpose] = useState("");
   const [destination, setDestination] = useState("");
+  const [companions, setCompanions] = useState("");
   const [participants, setParticipants] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [saving, setSaving] = useState(false);
@@ -182,6 +183,7 @@ export default function BookingFormModal({
           endTime,
           purpose: purpose.trim(),
           destination: resourceType === "car" ? destination.trim() : "",
+          companions: resourceType === "car" ? companions.trim() : "",
           participants: participantsNum,
           contactPhone: contactPhone.trim(),
         }),
@@ -399,6 +401,19 @@ export default function BookingFormModal({
                   value={destination}
                   onChange={(e) => setDestination(e.target.value)}
                   disabled={saving}
+                  className={INPUT_CLASS}
+                />
+              </label>
+            )}
+            {resourceType === "car" && (
+              <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+                ผู้ร่วมเดินทาง (ไม่บังคับ)
+                <input
+                  type="text"
+                  value={companions}
+                  onChange={(e) => setCompanions(e.target.value)}
+                  disabled={saving}
+                  placeholder="เช่น ชื่อเพื่อนร่วมเดินทาง คั่นด้วยจุลภาค"
                   className={INPUT_CLASS}
                 />
               </label>
