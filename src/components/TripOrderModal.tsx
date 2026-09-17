@@ -28,15 +28,17 @@ function combineDateTime(date: string, hour: string, minute: string): string {
   return date ? `${date}T${hour}:${minute}` : "";
 }
 
-/** ช่วงเวลาเริ่มต้นของใบสั่งงาน — ครอบคลุมทุกคำขอที่เลือกไว้พอดี: เริ่มต้น
- * ปัดลงถึงครึ่งชั่วโมงก่อนหน้า (ไม่ตัดเวลาที่เร็วที่สุดออก) และสิ้นสุดปัดขึ้น
- * ถึงครึ่งชั่วโมงถัดไป (ไม่ตัดเวลาที่ช้าที่สุดออก) ฝ่ายบริหารยังปรับเปลี่ยน
- * ได้อิสระทั้งหมด นี่แค่ค่าเริ่มต้นที่สมเหตุสมผล. */
-function defaultTripOrderParts(bookings: { startTime: string; endTime: string }[]): {
-  startDate: string;
+/** เวลารวมของใบสั่งงาน — ครอบคลุมทุกคำขอที่เลือกไว้พอดี: เริ่มต้นปัดลงถึง
+ * ครึ่งชั่วโมงก่อนหน้า (ไม่ตัดเวลาที่เร็วที่สุดออก) และสิ้นสุดปัดขึ้นถึงครึ่ง
+ * ชั่วโมงถัดไป (ไม่ตัดเวลาที่ช้าที่สุดออก) — เช่น คำขอ A 09:00-10:00 รวมกับ
+ * คำขอ B 08:00-09:00 ได้เวลารวม 08:00-10:00 อัตโนมัติ ไม่มีวันที่ในนี้แล้ว
+ * (ดูคอมเมนต์ที่ tripDateKey ด้านล่างว่าทำไม) เรียกใหม่ทุกครั้งที่รายการที่
+ * เลือกไว้เปลี่ยน (ติ๊กเพิ่ม/ถอนคำขออื่น) ไม่ใช่แค่ตอนเปิดหน้าต่างครั้งแรก —
+ * ตามที่โรงพยาบาลขอ ฝ่ายบริหารจึงปรับเวลาเองไม่ได้แล้วเช่นกัน (ปรับอัตโนมัติ
+ * ล้วนๆ ตามคำขอที่เลือกไว้). */
+function autoTimeParts(bookings: { startTime: string; endTime: string }[]): {
   startHour: string;
   startMinute: MinuteOption;
-  endDate: string;
   endHour: string;
   endMinute: MinuteOption;
 } {
@@ -59,10 +61,8 @@ function defaultTripOrderParts(bookings: { startTime: string; endTime: string }[
   }
 
   return {
-    startDate: `${start.getFullYear()}-${pad2(start.getMonth() + 1)}-${pad2(start.getDate())}`,
     startHour: pad2(start.getHours()),
     startMinute: start.getMinutes() === 30 ? "30" : "00",
-    endDate: `${end.getFullYear()}-${pad2(end.getMonth() + 1)}-${pad2(end.getDate())}`,
     endHour: pad2(end.getHours()),
     endMinute: end.getMinutes() === 30 ? "30" : "00",
   };
@@ -173,21 +173,48 @@ export default function TripOrderModal({
   }, [resources, editing]);
 
   const [resourceId, setResourceId] = useState(editing?.resourceId ?? resources[0]?.resourceId ?? "");
-  const defaultParts = useMemo(
-    () =>
-      editing
-        ? defaultTripOrderParts([{ startTime: editing.startTime, endTime: editing.endTime }])
-        : defaultTripOrderParts(bookings),
-    [bookings, editing]
+  // วันเดินทางเดียว ไม่ให้เลือกเอง — คำขอที่รวมกันได้ต้องเป็นวันเดียวกัน
+  // ทุกรายการเสมออยู่แล้ว (บังคับผ่าน eligibleCandidates ข้างบน) จึงไม่มี
+  // ความจำเป็นต้องมีช่องเลือกวันที่ให้ฝ่ายบริหารกรอก ตามที่ขอ — ในโหมดแก้ไข
+  // ใช้วันที่ของใบสั่งงานเดิม ในโหมดสร้างใหม่ใช้วันที่ของคำขอที่เลือกไว้แรก
+  // สุด (ทุกรายการอยู่วันเดียวกันอยู่แล้วไม่ว่าจะอ้างอิงรายการไหน)
+  const tripDateKey = useMemo(
+    () => (editing ? editing.startTime : (bookings[0]?.startTime ?? "")).slice(0, 10),
+    [editing, bookings]
   );
-  const [startDate, setStartDate] = useState(defaultParts.startDate);
-  const [startHour, setStartHour] = useState(defaultParts.startHour);
-  const [startMinute, setStartMinute] = useState<MinuteOption>(defaultParts.startMinute);
-  const [endDate, setEndDate] = useState(defaultParts.endDate);
-  const [endHour, setEndHour] = useState(defaultParts.endHour);
-  const [endMinute, setEndMinute] = useState<MinuteOption>(defaultParts.endMinute);
-  const startTime = combineDateTime(startDate, startHour, startMinute);
-  const endTime = combineDateTime(endDate, endHour, endMinute);
+  const initialTimeParts = useMemo(
+    () => (editing ? autoTimeParts([{ startTime: editing.startTime, endTime: editing.endTime }]) : autoTimeParts(bookings)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ตั้งใจให้เป็นค่าเริ่มต้นครั้งแรกเท่านั้น การปรับเวลาอัตโนมัติต่อจากนี้เทียบกับ extraBookingIds แทนแล้ว (ดูโค้ดด้านล่าง) ไม่ใช่ผูกกับ bookings/editing เพื่อไม่ให้ re-render ของ parent (เช่น NotificationBell poll ทุก 15 วินาที) มารีเซ็ตเวลาที่กำลังคำนวณอยู่โดยไม่มีการเปลี่ยนรายการที่เลือกจริง
+    []
+  );
+  const [startHour, setStartHour] = useState(initialTimeParts.startHour);
+  const [startMinute, setStartMinute] = useState<MinuteOption>(initialTimeParts.startMinute);
+  const [endHour, setEndHour] = useState(initialTimeParts.endHour);
+  const [endMinute, setEndMinute] = useState<MinuteOption>(initialTimeParts.endMinute);
+  // ปรับเวลารวมอัตโนมัติใหม่ทุกครั้งที่รายการที่เลือกเปลี่ยน (ติ๊กเพิ่ม/ถอน
+  // คำขออื่นในกล่อง "เพิ่มคำขออื่น") — เทียบ extraBookingIds ของ render นี้
+  // กับของ render ก่อนหน้า (เก็บไว้ใน prevExtraBookingIds) แล้วปรับ state
+  // เวลาไปพร้อมกันระหว่าง render เลย (รูปแบบที่ React แนะนำสำหรับ "derived
+  // state ที่ต้องรีเซ็ตเมื่อค่าที่อ้างอิงเปลี่ยน" — ดู
+  // https://react.dev/learn/you-might-not-need-an-effect — ไม่ใช้ useEffect
+  // เพราะจะโดน react-hooks/set-state-in-effect และเกิด render พิเศษเพิ่มอีก
+  // รอบโดยไม่จำเป็น) เทียบกับ extraBookingIds เท่านั้น (ไม่ใช่
+  // includedBookings ทั้งก้อน) เพราะ extraBookingIds เปลี่ยนเฉพาะตอนผู้ใช้ติ๊ก
+  // เองจริงๆ ส่วน includedBookings/bookings อาจเป็น array ใหม่ทุก re-render
+  // ของ parent (เช่น NotificationBell poll ทุก 15 วินาที) โดยเนื้อหาไม่ได้
+  // เปลี่ยนเลย ถ้าเทียบกับตัวนั้นจะรีเซ็ตเวลาที่ฝ่ายบริหารเพิ่งดูอยู่โดยไม่มี
+  // เหตุผล ข้ามในโหมดแก้ไขเสมอ (ไม่มีการติ๊กเพิ่มคำขอในโหมดนั้น).
+  const [prevExtraBookingIds, setPrevExtraBookingIds] = useState(extraBookingIds);
+  if (!editing && extraBookingIds !== prevExtraBookingIds) {
+    setPrevExtraBookingIds(extraBookingIds);
+    const parts = autoTimeParts(includedBookings);
+    setStartHour(parts.startHour);
+    setStartMinute(parts.startMinute);
+    setEndHour(parts.endHour);
+    setEndMinute(parts.endMinute);
+  }
+  const startTime = combineDateTime(tripDateKey, startHour, startMinute);
+  const endTime = combineDateTime(tripDateKey, endHour, endMinute);
   const [driverName, setDriverName] = useState(editing?.driverName ?? "");
   const [notes, setNotes] = useState(editing?.notes ?? "");
   const [saving, setSaving] = useState(false);
@@ -434,17 +461,26 @@ export default function TripOrderModal({
               />
             </label>
 
+            <div className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+              วันเดินทาง
+              {/* ไม่มีช่องให้แก้ — คำขอที่รวมกันได้ต้องเป็นวันเดียวกันทุก
+                  รายการอยู่แล้ว (บังคับไว้ตอนเลือก/เพิ่มคำขอด้านบน) จึงตรึง
+                  ไว้ตามวันที่ของคำขอที่เลือกไว้เลย ไม่ต้องให้ฝ่ายบริหารกรอกซ้ำ
+                  ตามที่ขอ */}
+              <p className={`${INPUT_CLASS} flex items-center bg-zinc-50 text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400`}>
+                {tripDateKey
+                  ? `${tripDateKey.slice(8, 10)}/${tripDateKey.slice(5, 7)}/${tripDateKey.slice(0, 4)}`
+                  : "—"}
+              </p>
+            </div>
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
-                วันเวลาเริ่มต้น (รวม)
+                เวลาเริ่มต้น (รวม)
+                {/* ปรับอัตโนมัติจากเวลาเริ่มเร็วที่สุด/สิ้นสุดช้าที่สุดของคำขอ
+                    ที่เลือกไว้ (ดู autoTimeParts ด้านบน) — ยังกดเลือกเองผ่าน
+                    select ได้อยู่ แต่จะถูกคำนวณใหม่ทับทุกครั้งที่ติ๊กเพิ่ม/
+                    ถอนคำขออื่น ตามที่ขอ */}
                 <div className="flex gap-2">
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    disabled={saving}
-                    className={`${INPUT_CLASS} min-w-0 flex-1`}
-                  />
                   <select
                     value={startHour}
                     onChange={(e) => setStartHour(e.target.value)}
@@ -477,15 +513,8 @@ export default function TripOrderModal({
                 </div>
               </div>
               <div className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
-                วันเวลาสิ้นสุด (รวม)
+                เวลาสิ้นสุด (รวม)
                 <div className="flex gap-2">
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    disabled={saving}
-                    className={`${INPUT_CLASS} min-w-0 flex-1`}
-                  />
                   <select
                     value={endHour}
                     onChange={(e) => setEndHour(e.target.value)}
