@@ -22,6 +22,10 @@ interface TripOrderEditPayload {
   startTime?: string;
   endTime?: string;
   notes?: string;
+  /** เพิ่มคำขอจองรถ "รออนุมัติ" อื่นเข้าใบสั่งงานนี้ — ตามที่โรงพยาบาลขอเพิ่ม
+   * ภายหลัง (เผื่อกรณีอนุมัติไปแล้วแต่มีกลุ่มอื่นอยากเดินทางไปด้วย) ดูคอมเมนต์
+   * เต็มที่ updateTripOrder ใน lib/sheets.ts */
+  addBookingIds?: string[];
 }
 
 function readEditPayload(body: unknown): TripOrderEditPayload | null {
@@ -53,6 +57,12 @@ function readEditPayload(body: unknown): TripOrderEditPayload | null {
     result.startTime = b.startTime;
     result.endTime = b.endTime;
   }
+  if ("addBookingIds" in b) {
+    if (!Array.isArray(b.addBookingIds) || !b.addBookingIds.every((id) => typeof id === "string" && id.trim())) {
+      return null;
+    }
+    result.addBookingIds = (b.addBookingIds as string[]).map((id) => id.trim());
+  }
 
   return Object.keys(result).length > 0 ? result : null;
 }
@@ -60,10 +70,13 @@ function readEditPayload(body: unknown): TripOrderEditPayload | null {
 /** Edits an already-issued TripOrder's own car/driver/time/notes — "แก้ไข
  * ข้อมูลเท่าที่จำเป็น" for management, per the hospital's explicit later
  * request. Same permission gate as everything else in the car-booking
- * review flow — see canApproveCarBooking in lib/booking.ts. Never touches
- * which booking requests this TripOrder covers, and never edits the
- * covered bookings' own rows — see updateTripOrder's doc comment in
- * lib/sheets.ts. */
+ * review flow — see canApproveCarBooking in lib/booking.ts. Never edits the
+ * bookings this TripOrder already covers, and never *removes* any of them
+ * — the one exception is `addBookingIds`, a later explicit request letting
+ * management add other still-pending car bookings into an already-approved
+ * trip (e.g. another department wants to ride along after the fact) — see
+ * updateTripOrder's doc comment in lib/sheets.ts for the full story and its
+ * validation. */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ tripOrderId: string }> }) {
   const { session, response } = requireSession(request);
   if (!session) return response;
@@ -106,18 +119,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       resourceName = resource.name;
     }
 
-    const updated = await updateTripOrder(tripOrderId, { ...edits, resourceName });
+    const { tripOrder: updated, addedBookings } = await updateTripOrder(tripOrderId, { ...edits, resourceName }, session.username);
     await appendEditLog({
       timestamp: new Date().toISOString(),
       action: "แก้ไขใบสั่งงานเดินทาง",
       actor: session.username,
       department: session.department,
       oldValue: "",
-      newValue: `${updated.resourceName} คนขับ: ${updated.driverName} (${updated.bookingIds.length} รายการจอง) ${requestAuditTag(
-        request
-      )}`,
+      newValue: `${updated.resourceName} คนขับ: ${updated.driverName} (${updated.bookingIds.length} รายการจอง${
+        addedBookings.length > 0 ? ` — เพิ่มเข้ามาใหม่ ${addedBookings.length} รายการ` : ""
+      }) ${requestAuditTag(request)}`,
     });
-    return NextResponse.json({ tripOrder: updated });
+    return NextResponse.json({ tripOrder: updated, addedBookings });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });

@@ -85,14 +85,21 @@ function autoTimeParts(bookings: { startTime: string; endTime: string }[]): {
  * `onCreated` — POST /api/booking/trip-orders) หรือแก้ไขใบสั่งงานที่ออกไป
  * แล้ว (ส่ง `editing`, เรียก `onUpdated` แทน — PATCH
  * /api/booking/trip-orders/[tripOrderId]) — แก้ได้เฉพาะรถ/คนขับ/เวลา/
- * หมายเหตุ ("เท่าที่จำเป็น" ตามที่โรงพยาบาลขอ) รายการคำขอจองที่ครอบคลุมจะ
- * ไม่เปลี่ยนแปลงในโหมดแก้ไข (แสดงไว้ให้ดูอย่างเดียว เหมือนโหมดสร้างใหม่).
+ * หมายเหตุ ("เท่าที่จำเป็น" ตามที่โรงพยาบาลขอ) รายการคำขอจองที่ครอบคลุมอยู่
+ * เดิมจะไม่ถูกแก้ไข/เอาออกในโหมดแก้ไข (แสดงไว้ให้ดูอย่างเดียว เหมือนโหมดสร้าง
+ * ใหม่) — *เพิ่ม* รายการใหม่เข้าไปได้เท่านั้น ดูย่อหน้าถัดไป.
  *
- * โหมดสร้างใหม่เท่านั้น: ถ้าผู้เรียกส่ง `candidateBookings` มาด้วย (คำขอ
- * จองรถ "รออนุมัติ" อื่นๆ ที่ยังไม่ถูกเลือกไว้แต่แรก) คอมโพเนนต์นี้จะกรองให้
- * เหลือเฉพาะวันเดียวกับคำขอที่เลือกไว้แล้ว แล้วแสดงเป็นรายการให้ติ๊กเพิ่มเข้า
- * ใบสั่งงานเดียวกันได้เอง — สำหรับกรณีเดินทางไปทางเดียวกัน/วันเดียวกัน ตามที่
- * โรงพยาบาลขอเพิ่มภายหลัง ยังคงเป็นแค่ "เลือกได้เอง" ไม่มีการจัดกลุ่มอัตโนมัติ.
+ * ถ้าผู้เรียกส่ง `candidateBookings` มาด้วย (คำขอจองรถ "รออนุมัติ" อื่นๆ ที่
+ * ยังไม่ถูกเลือกไว้แต่แรก) คอมโพเนนต์นี้จะกรองให้เหลือเฉพาะวันเดียวกับคำขอที่
+ * เลือก/ครอบคลุมอยู่แล้ว แล้วแสดงเป็นรายการให้ติ๊กเพิ่มเข้าใบสั่งงานเดียวกัน
+ * ได้เอง — สำหรับกรณีเดินทางไปทางเดียวกัน/วันเดียวกัน ใช้ได้ทั้งสองโหมด:
+ * โหมดสร้างใหม่ (ตามที่โรงพยาบาลขอเพิ่มภายหลัง) และโหมดแก้ไข (ตามที่ขอเพิ่ม
+ * อีกครั้งภายหลัง — "เผื่อในกรณีอนุมัติไปแล้ว แต่มีกลุ่มที่ต้องการเดินทางไปด้วย
+ * จะได้สามารถแก้ไขและเพิ่มรายการใหม่เข้าไปได้" — ใบสั่งงานเดิมยังคงเป็นใบ
+ * เดียวกัน ไม่มีการออกใบใหม่หรือย้ายรายการข้ามใบ) ยังคงเป็นแค่ "เลือกได้เอง"
+ * ไม่มีการจัดกลุ่มอัตโนมัติทั้งสองโหมด — เวลารวมของใบสั่งงาน (ดู autoTimeParts
+ * ด้านล่าง) จะขยายให้ครอบคลุมรายการที่เพิ่งติ๊กเพิ่มโดยอัตโนมัติถ้าจำเป็น ไม่ว่า
+ * จะอยู่โหมดไหนก็ตาม.
  */
 export default function TripOrderModal({
   bookings,
@@ -109,11 +116,12 @@ export default function TripOrderModal({
    * รายการคำขอที่ใบสั่งงานนี้ครอบคลุมอยู่แล้ว (แสดงผลอย่างเดียว ไม่เปลี่ยน
    * ได้ตรงนี้) — คัดกรองมาจากผู้เรียกใช้ทั้งสองกรณี. */
   bookings: Booking[];
-  /** โหมดสร้างใหม่เท่านั้น (ไม่มีผลในโหมดแก้ไข) — คำขอจองรถ "รออนุมัติ" อื่นๆ
-   * ที่ยังไม่ได้เลือกไว้ ให้ผู้ใช้เลือกเพิ่มเข้าใบสั่งงานเดียวกันได้เอง ถ้าจะ
-   * เดินทางไปด้วยกัน คอมโพเนนต์นี้กรองเหลือเฉพาะวันเดียวกับ `bookings` ที่
-   * เลือกไว้แล้วให้เอง (ไม่ต้องกรองมาก่อน) และตัด bookingId ที่ซ้ำกับ
-   * `bookings` ออกให้เองด้วย. */
+  /** ใช้ได้ทั้งสองโหมด — คำขอจองรถ "รออนุมัติ" อื่นๆ ที่ยังไม่ได้เลือก/ยังไม่
+   * ถูกครอบคลุมไว้ ให้ผู้ใช้เลือกเพิ่มเข้าใบสั่งงานเดียวกันได้เอง ถ้าจะเดินทาง
+   * ไปด้วยกัน (โหมดแก้ไข: เพิ่มเข้าใบสั่งงานที่อนุมัติไปแล้ว ตามที่โรงพยาบาล
+   * ขอเพิ่มภายหลัง) คอมโพเนนต์นี้กรองเหลือเฉพาะวันเดียวกับ `bookings` ที่
+   * เลือก/ครอบคลุมอยู่แล้วให้เอง (ไม่ต้องกรองมาก่อน) และตัด bookingId ที่ซ้ำ
+   * กับ `bookings` ออกให้เองด้วย. */
   candidateBookings?: Booking[];
   /** รถที่เปิดใช้งานอยู่ (ประเภท car) — ในโหมดแก้ไข ถ้ารถที่ถูกมอบหมายไว้เดิม
    * ไม่อยู่ในรายการนี้แล้ว (เช่น ถูกปิดใช้งานไปหลังออกใบสั่งงาน) คอมโพเนนต์นี้
@@ -130,23 +138,26 @@ export default function TripOrderModal({
   onClose: () => void;
   /** โหมดสร้างใหม่เท่านั้น */
   onCreated?: (result: { tripOrder: TripOrder; bookings: Booking[] }) => void;
-  /** โหมดแก้ไขเท่านั้น */
-  onUpdated?: (tripOrder: TripOrder) => void;
+  /** โหมดแก้ไขเท่านั้น — `addedBookings` ว่างเปล่าถ้าไม่ได้ติ๊กเพิ่มคำขอใหม่
+   * เข้ามาเลย (แก้แค่รถ/คนขับ/หมายเหตุตามปกติ) ไม่ว่างเมื่อมีการเพิ่ม (ตามที่
+   * ขอเพิ่มภายหลัง — ดูคอมเมนต์ที่ eligibleCandidates ด้านบน) ผู้เรียกต้อง
+   * merge รายการเหล่านี้เข้า state การจองเองด้วย ไม่ใช่แค่ TripOrder. */
+  onUpdated?: (result: { tripOrder: TripOrder; addedBookings: Booking[] }) => void;
 }) {
   // วันที่ (YYYY-MM-DD) ของคำขอที่เลือกไว้แต่แรกทั้งหมด — ใช้กรอง
   // candidateBookings ให้เหลือเฉพาะวันเดียวกัน (ดูคอมเมนต์ที่ prop ด้านบน)
   const initialDates = useMemo(() => new Set(bookings.map((b) => b.startTime.slice(0, 10))), [bookings]);
-  // ตัวเลือก "เพิ่มคำขออื่น" ที่แสดงจริง — เฉพาะโหมดสร้างใหม่ (editing ไม่ส่ง
-  // candidateBookings มาอยู่แล้ว แต่กันไว้อีกชั้นด้วย !editing), วันเดียวกับ
-  // ที่เลือกไว้แล้ว, และไม่ซ้ำกับที่เลือกไว้แล้ว
+  // ตัวเลือก "เพิ่มคำขออื่น" ที่แสดงจริง — ใช้ได้ทั้งสองโหมดแล้ว (เดิมเฉพาะ
+  // โหมดสร้างใหม่ — เปิดให้ใช้ในโหมดแก้ไขด้วยตามที่ขอเพิ่มภายหลัง) กรองเหลือ
+  // เฉพาะวันเดียวกับที่เลือก/ครอบคลุมไว้แล้ว และไม่ซ้ำกับที่เลือก/ครอบคลุมอยู่
+  // แล้ว — ผู้เรียกเป็นคนกำหนดว่าจะส่ง candidateBookings มาด้วยหรือไม่
+  // (ไม่ส่งมา = ไม่มีให้เลือกเพิ่ม ไม่ว่าโหมดไหน)
   const eligibleCandidates = useMemo(
     () =>
-      editing
-        ? []
-        : (candidateBookings ?? []).filter(
-            (b) => initialDates.has(b.startTime.slice(0, 10)) && !bookings.some((ib) => ib.bookingId === b.bookingId)
-          ),
-    [editing, candidateBookings, initialDates, bookings]
+      (candidateBookings ?? []).filter(
+        (b) => initialDates.has(b.startTime.slice(0, 10)) && !bookings.some((ib) => ib.bookingId === b.bookingId)
+      ),
+    [candidateBookings, initialDates, bookings]
   );
   // คำขอที่ผู้ใช้ติ๊กเพิ่มจาก eligibleCandidates (bookingId) — เริ่มว่างเสมอ
   // ผู้ใช้ต้องเลือกเองทีละรายการ ไม่มีการเลือกอัตโนมัติ
@@ -201,14 +212,20 @@ export default function TripOrderModal({
   // โหมดสร้างใหม่: จากเวลาเริ่มเร็วที่สุด/สิ้นสุดช้าที่สุดของคำขอที่เลือกไว้
   // ทั้งหมด (autoTimeParts ด้านบน) คำนวณใหม่ทุกครั้งที่ includedBookings
   // เปลี่ยน (ติ๊กเพิ่ม/ถอนคำขออื่น) โหมดแก้ไข: ใช้เวลาที่บันทึกไว้ในใบสั่งงาน
-  // เดิมเสมอ (ไม่มีการติ๊กเพิ่มคำขอในโหมดนี้อยู่แล้ว)
-  const { startHour, startMinute, endHour, endMinute } = useMemo(
-    () =>
-      editing
-        ? autoTimeParts([{ startTime: editing.startTime, endTime: editing.endTime }])
-        : autoTimeParts(includedBookings),
-    [editing, includedBookings]
-  );
+  // เดิมเป็นฐานเสมอ (ไม่หดแคบกว่าที่บันทึกไว้แต่แรกเด็ดขาด แม้จะเคยถูกฝ่าย
+  // บริหารปรับกว้างกว่าคำขอเดิมไว้ก่อนหน้านี้ก็ตาม) — แต่ถ้ามีการติ๊กเพิ่มคำขอ
+  // ใหม่เข้ามา (ตามที่ขอเพิ่มภายหลัง — ดูคอมเมนต์ที่ eligibleCandidates
+  // ด้านบน) จะขยายช่วงเวลาให้ครอบคลุมคำขอที่เพิ่งเพิ่มเข้ามาโดยอัตโนมัติด้วย
+  // เช่นกัน (ไม่ขยายเกินความจำเป็น — ยังปัดลง/ปัดขึ้นครึ่งชั่วโมงแบบเดียวกับ
+  // โหมดสร้างใหม่)
+  const { startHour, startMinute, endHour, endMinute } = useMemo(() => {
+    if (!editing) return autoTimeParts(includedBookings);
+    const addedBookings = includedBookings.filter((b) => !bookings.some((ib) => ib.bookingId === b.bookingId));
+    if (addedBookings.length === 0) {
+      return autoTimeParts([{ startTime: editing.startTime, endTime: editing.endTime }]);
+    }
+    return autoTimeParts([{ startTime: editing.startTime, endTime: editing.endTime }, ...addedBookings]);
+  }, [editing, includedBookings, bookings]);
   const startTime = combineDateTime(tripDateKey, startHour, startMinute);
   const endTime = combineDateTime(tripDateKey, endHour, endMinute);
 
@@ -352,6 +369,12 @@ export default function TripOrderModal({
             startTime,
             endTime,
             notes: notes.trim(),
+            // คำขอที่เพิ่งติ๊กเพิ่มจาก eligibleCandidates เท่านั้น (ไม่ใช่
+            // includedBookings ทั้งก้อน) — รายการเดิมที่ใบสั่งงานนี้ครอบคลุม
+            // อยู่แล้วไม่ต้องส่งซ้ำ ดูคอมเมนต์ที่ updateTripOrder ใน
+            // lib/sheets.ts ว่ารายการซ้ำ/ที่ครอบคลุมอยู่แล้วจะถูกข้ามอยู่แล้ว
+            // เช่นกัน แต่ส่งเฉพาะของใหม่ตั้งแต่ต้นให้ชัดเจนกว่า
+            addBookingIds: [...extraBookingIds],
           }),
         });
         const json = await res.json().catch(() => ({}));
@@ -365,7 +388,10 @@ export default function TripOrderModal({
           setSaving(false);
           return;
         }
-        onUpdated?.(json.tripOrder as TripOrder);
+        onUpdated?.({
+          tripOrder: json.tripOrder as TripOrder,
+          addedBookings: (Array.isArray(json.addedBookings) ? json.addedBookings : []) as Booking[],
+        });
         return;
       }
 
@@ -535,13 +561,17 @@ export default function TripOrderModal({
               </div>
             )}
 
-            {/* เฉพาะโหมดสร้างใหม่: คำขอจองรถ "รออนุมัติ" อื่นในวันเดียวกันที่
-                ยังไม่ถูกเลือกไว้แต่แรก — ให้ติ๊กเพิ่มเข้าใบสั่งงานเดียวกันได้
-                เองถ้าจะเดินทางไปทางเดียวกัน ตามที่โรงพยาบาลขอเพิ่มภายหลัง */}
+            {/* คำขอจองรถ "รออนุมัติ" อื่นในวันเดียวกันที่ยังไม่ถูกเลือก/ยังไม่
+                ถูกครอบคลุมไว้แต่แรก — ให้ติ๊กเพิ่มเข้าใบสั่งงานเดียวกันได้เอง
+                ถ้าจะเดินทางไปทางเดียวกัน ใช้ได้ทั้งโหมดสร้างใหม่ (ตามที่
+                โรงพยาบาลขอเพิ่มภายหลัง) และโหมดแก้ไข (ตามที่ขอเพิ่มอีกครั้ง
+                ภายหลัง — เผื่อกรณีอนุมัติไปแล้วแต่มีกลุ่มอื่นอยากไปด้วย) */}
             {eligibleCandidates.length > 0 && (
               <div className="flex flex-col gap-1.5 rounded-xl border border-dashed border-sky-200 bg-sky-50/60 p-3 dark:border-sky-900/50 dark:bg-sky-950/20">
                 <p className="text-xs font-medium text-sky-800 dark:text-sky-200">
-                  คำขอจองรถอื่นในวันเดียวกัน — เลือกเพิ่มได้ถ้าจะเดินทางไปด้วยกัน
+                  {editing
+                    ? "คำขอจองรถอื่นในวันเดียวกัน — เลือกเพิ่มเข้าใบสั่งงานนี้ได้ถ้าจะเดินทางไปด้วยกัน"
+                    : "คำขอจองรถอื่นในวันเดียวกัน — เลือกเพิ่มได้ถ้าจะเดินทางไปด้วยกัน"}
                 </p>
                 <ul className="flex flex-col gap-1.5">
                   {eligibleCandidates.map((b) => (

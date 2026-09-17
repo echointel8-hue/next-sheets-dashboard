@@ -2359,14 +2359,32 @@ export async function createTripOrder(input: {
 /** Edits an already-issued TripOrder's own car/driver/time/notes — "แก้ไข
  * ข้อมูลเท่าที่จำเป็น" for management, per the hospital's explicit later
  * request (e.g. the assigned driver calls in sick and someone else takes
- * the trip, or the pickup time slips by half an hour). Deliberately does
- * NOT accept bookingIds — which requests this TripOrder covers is fixed at
- * creation; combining/splitting requests means issuing a new TripOrder
- * (reject the old dispatch's effect is out of scope here — this is a
- * correction to the dispatch details, not a re-triage). Never touches the
- * Bookings rows it covers: they already point at this tripOrderId and stay
- * "approved" throughout, exactly as before the edit. Find-by-id scan, same
- * reasoning as every other single-row lookup in this file. */
+ * the trip, or the pickup time slips by half an hour). Never touches the
+ * Bookings rows this TripOrder already covers: they already point at this
+ * tripOrderId and stay "approved" throughout, exactly as before the edit.
+ * Find-by-id scan, same reasoning as every other single-row lookup in this
+ * file.
+ *
+ * `addBookingIds` — a later, explicit addition per the hospital's request:
+ * "เผื่อในกรณีอนุมัติไปแล้ว แต่มีกลุ่มที่ต้องการเดินทางไปด้วยจะได้สามารถ
+ * แก้ไขและเพิ่มรายการใหม่เข้าไปได้" (a car's already been dispatched, but
+ * another group wants to ride along too — let management add them in
+ * rather than issuing a whole separate TripOrder for the same trip). Only
+ * ever *adds* — there is still no way to remove a booking this TripOrder
+ * already covers, or to move it to a different TripOrder, from here; that
+ * stays a "re-triage" outside this function's scope, same as before. Every
+ * added booking is re-validated against the *current* Bookings tab (never
+ * trust a caller's stale list) exactly like createTripOrder does: it must
+ * exist, be a car booking, not be cancelled, and still be "pending" — if
+ * any one of them fails that, nothing is written at all (not even the
+ * TripOrder's own field edits), so a bad add never silently drops just the
+ * one bad row while the rest go through half-applied. IDs already covered
+ * (or repeated in the same call) are silently ignored rather than erroring
+ * — see addBookingIds' own filtering below. The TripOrder row (already
+ * carrying the expanded bookingIds list) is written before the newly-added
+ * bookings' own rows are flipped to "approved" — same "never a dangling
+ * TripOrder reference, only ever a booking that hasn't caught up yet"
+ * tradeoff as createTripOrder's own write order, for the same reason. */
 export async function updateTripOrder(
   tripOrderId: string,
   updates: {
@@ -2376,30 +2394,74 @@ export async function updateTripOrder(
     startTime?: string;
     endTime?: string;
     notes?: string;
-  }
-): Promise<TripOrder> {
+    addBookingIds?: string[];
+  },
+  actorUsername: string
+): Promise<{ tripOrder: TripOrder; addedBookings: Booking[] }> {
   const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
   const tripOrdersTab = getTripOrdersTab();
+  const bookingsTab = getBookingsTab();
   const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
 
-  let values: string[][] | undefined;
+  let tripValues: string[][] | undefined;
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `${tripOrdersTab}!A2:J100000`,
     });
-    values = res.data.values as string[][] | undefined;
+    tripValues = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`อ่านรายการใบสั่งงานไม่สำเร็จ: ${message}`);
   }
 
-  const rows = values ?? [];
-  const idx = rows.findIndex((row) => (row[0] ?? "").toString().trim() === tripOrderId);
-  if (idx === -1) {
+  const tripRows = tripValues ?? [];
+  const tripIdx = tripRows.findIndex((row) => (row[0] ?? "").toString().trim() === tripOrderId);
+  if (tripIdx === -1) {
     throw new Error("ไม่พบใบสั่งงานนี้");
   }
-  const current = rowToTripOrder(rows[idx]);
+  const current = rowToTripOrder(tripRows[tripIdx]);
+
+  // ตัดรายการที่ครอบคลุมอยู่แล้ว (หรือซ้ำกันเองในคำขอเดียวกัน) ออกก่อนเสมอ —
+  // ไม่ถือเป็นข้อผิดพลาด แค่ไม่มีอะไรต้องทำเพิ่มสำหรับรายการนั้น
+  const addBookingIds = Array.from(new Set(updates.addBookingIds ?? [])).filter(
+    (id) => !current.bookingIds.includes(id)
+  );
+
+  const bookingTargets: { rowIndex: number; booking: Booking }[] = [];
+  if (addBookingIds.length > 0) {
+    let bookingValues: string[][] | undefined;
+    try {
+      const res = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: `${bookingsTab}!A2:W100000`,
+      });
+      bookingValues = res.data.values as string[][] | undefined;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`อ่านรายการจองไม่สำเร็จ: ${message}`);
+    }
+    const bookingRows = bookingValues ?? [];
+
+    for (const bookingId of addBookingIds) {
+      const idx = bookingRows.findIndex((row) => (row[0] ?? "").toString().trim() === bookingId);
+      if (idx === -1) {
+        throw new Error(`ไม่พบรายการจอง (${bookingId}) — อาจถูกยกเลิกไปแล้ว`);
+      }
+      const booking = rowToBooking(bookingRows[idx]);
+      if (booking.resourceType !== "car") {
+        throw new Error(`${booking.resourceName}: ไม่ใช่การจองรถ เพิ่มเข้าใบสั่งงานนี้ไม่ได้`);
+      }
+      if (isBookingCancelled(booking)) {
+        throw new Error(`${booking.resourceName} (${formatBookingDateTime(booking.startTime)}): ถูกยกเลิกไปแล้ว`);
+      }
+      if (booking.approvalStatus !== "pending") {
+        throw new Error(`${booking.resourceName} (${formatBookingDateTime(booking.startTime)}): ถูกพิจารณาไปแล้ว`);
+      }
+      bookingTargets.push({ rowIndex: idx, booking });
+    }
+  }
+
   const merged: TripOrder = {
     ...current,
     resourceId: updates.resourceId ?? current.resourceId,
@@ -2408,8 +2470,9 @@ export async function updateTripOrder(
     startTime: updates.startTime ?? current.startTime,
     endTime: updates.endTime ?? current.endTime,
     notes: updates.notes ?? current.notes,
+    bookingIds: bookingTargets.length > 0 ? [...current.bookingIds, ...addBookingIds] : current.bookingIds,
   };
-  const sheetRow = idx + 2;
+  const sheetRow = tripIdx + 2;
 
   try {
     await sheets.spreadsheets.values.update({
@@ -2424,5 +2487,37 @@ export async function updateTripOrder(
     throw new Error(`บันทึกการแก้ไขใบสั่งงานไม่สำเร็จ: ${message}`);
   }
 
-  return merged;
+  let addedBookings: Booking[] = [];
+  if (bookingTargets.length > 0) {
+    const approvedAt = new Date().toISOString();
+    addedBookings = bookingTargets.map(({ booking }) => ({
+      ...booking,
+      approvalStatus: "approved",
+      approvedAt,
+      approvedByUsername: actorUsername,
+      tripOrderId: merged.tripOrderId,
+    }));
+    try {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: bookingTargets.map(({ rowIndex }, i) => ({
+            range: `${bookingsTab}!A${rowIndex + 2}:W${rowIndex + 2}`,
+            values: [bookingToRow(addedBookings[i])],
+          })),
+        },
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      // TripOrder row above already carries the expanded bookingIds — see
+      // this function's doc comment for why that's never a dangling
+      // reference, just an incomplete one that needs a retry.
+      throw new Error(
+        `บันทึกการแก้ไขใบสั่งงานสำเร็จ แต่ปรับสถานะคำขอที่เพิ่มเข้ามาไม่สำเร็จ (${message}) — กรุณาตรวจสอบรายการจองและลองใหม่หากยังค้างอยู่`
+      );
+    }
+  }
+
+  return { tripOrder: merged, addedBookings };
 }

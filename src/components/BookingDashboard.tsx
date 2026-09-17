@@ -440,16 +440,30 @@ export default function BookingDashboard({
   }
 
   /** ผลจากการแก้ไขใบสั่งงานที่ออกไปแล้ว — แทนที่ TripOrder เดิมใน state ด้วย
-   * ตัวที่แก้ไขแล้ว (ไม่ใช่ append ใหม่เหมือน handleTripOrderCreated) และไม่
-   * ต้องแตะ bookings เลย เพราะการแก้ไขใบสั่งงานไม่เปลี่ยนแถวการจองที่ครอบคลุม
-   * อยู่ (ดู updateTripOrder ใน lib/sheets.ts). */
-  function handleTripOrderUpdated(updated: TripOrder) {
-    setData((prev) =>
-      isError(prev)
-        ? prev
-        : { ...prev, tripOrders: prev.tripOrders.map((t) => (t.tripOrderId === updated.tripOrderId ? updated : t)) }
-    );
+   * ตัวที่แก้ไขแล้ว (ไม่ใช่ append ใหม่เหมือน handleTripOrderCreated) ปกติ
+   * ไม่ต้องแตะ bookings เลย เพราะการแก้ไขใบสั่งงานไม่เปลี่ยนแถวการจองที่
+   * ครอบคลุมอยู่เดิม (ดู updateTripOrder ใน lib/sheets.ts) — ยกเว้นตอนนี้มี
+   * addedBookings ด้วยแล้ว (ตามที่ขอเพิ่มภายหลัง — เผื่อกรณีอนุมัติไปแล้วแต่มี
+   * กลุ่มอื่นอยากไปด้วย) ซึ่งต้อง merge เข้า data.bookings เหมือนกับที่
+   * handleTripOrderCreated ทำกับคำขอที่เพิ่งอนุมัติใหม่ทุกประการ (แค่ replace
+   * ตัวเดิมด้วยตัวใหม่ที่ approvalStatus/tripOrderId เปลี่ยนแล้ว ไม่ได้
+   * เปลี่ยนฟิลด์อื่นของคำขอเลย). */
+  function handleTripOrderUpdated({ tripOrder, addedBookings }: { tripOrder: TripOrder; addedBookings: Booking[] }) {
+    setData((prev) => {
+      if (isError(prev)) return prev;
+      const addedById = new Map(addedBookings.map((b) => [b.bookingId, b]));
+      return {
+        ...prev,
+        tripOrders: prev.tripOrders.map((t) => (t.tripOrderId === tripOrder.tripOrderId ? tripOrder : t)),
+        bookings: addedById.size > 0 ? prev.bookings.map((b) => addedById.get(b.bookingId) ?? b) : prev.bookings,
+      };
+    });
     setEditTripOrderTarget(null);
+    if (addedBookings.length > 0) {
+      setSuccessMessage(
+        `บันทึกการแก้ไขสำเร็จ — เพิ่มคำขอใหม่เข้าใบสั่งงานนี้ ${addedBookings.length.toLocaleString("th-TH")} รายการ`
+      );
+    }
   }
 
   function handleManagementEditSaved(updated: Booking) {
@@ -900,6 +914,13 @@ export default function BookingDashboard({
         <TripOrderModal
           editing={editTripOrderTarget}
           bookings={typeBookings.filter((b) => b.tripOrderId === editTripOrderTarget.tripOrderId)}
+          // คำขอจองรถรออนุมัติอื่นๆ ในวันเดียวกัน — ให้เพิ่มเข้าใบสั่งงานที่
+          // อนุมัติไปแล้วนี้ได้เอง ตามที่ขอเพิ่มภายหลัง ("เผื่อในกรณีอนุมัติไป
+          // แล้ว แต่มีกลุ่มที่ต้องการเดินทางไปด้วยจะได้สามารถแก้ไขและเพิ่ม
+          // รายการใหม่เข้าไปได้") เหมือนกับที่ส่งให้โหมดสร้างใหม่ด้านบนทุก
+          // ประการ (ไม่ต้องกันรายการที่เลือกไว้ใน selectedBookingIds ออก
+          // เพราะโหมดแก้ไขนี้ไม่ได้ใช้ selectedBookingIds เลย)
+          candidateBookings={typeBookings.filter((b) => b.approvalStatus === "pending" && !isBookingCancelled(b))}
           resources={activeTypeResources}
           existingTripOrders={activeTripOrders}
           onClose={() => setEditTripOrderTarget(null)}
