@@ -61,7 +61,18 @@ interface Toast {
  */
 export default function NotificationBell({ enabled, username }: { enabled: boolean; username: string }) {
   const router = useRouter();
-  const [pending, setPending] = useState<Booking[]>([]);
+  // `pending` และ `tripOrders` (ใบสั่งงานที่ยังมีผลอยู่ — ใช้เช็ครถไม่ว่างใน
+  // TripOrderModal ที่เปิดจากปุ่ม "จัดรถ" ในแผงนี้) รวมเป็น state ก้อนเดียว
+  // ตั้งใจ ไม่ใช้ useState แยกสองตัว — poll() ด้านล่างต้องอัปเดตทั้งคู่พร้อม
+  // กันทุกรอบ ถ้าแยก state จะกลายเป็นเรียก setState 2 ครั้งซ้อนกันภายใน
+  // effect เดียว (ผ่าน poll()) ซึ่ง react-hooks/set-state-in-effect เตือนว่า
+  // ทำให้เกิด re-render ซ้อนกันหลายรอบโดยไม่จำเป็น รวมเป็นก้อนเดียวแล้วอัปเดต
+  // ด้วย setState ครั้งเดียวจบ
+  const [approvalPanel, setApprovalPanel] = useState<{ pending: Booking[]; tripOrders: TripOrder[] }>({
+    pending: [],
+    tripOrders: [],
+  });
+  const pending = approvalPanel.pending;
   const [open, setOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [actingId, setActingId] = useState<string | null>(null);
@@ -110,6 +121,20 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
 
       // --- ส่วนที่ 1: แผงรออนุมัติ (superadmin เท่านั้น) ---
       if (enabled) {
+        // ตัดใบสั่งงานที่ทุกคำขอที่ครอบคลุมถูกยกเลิกไปหมดแล้วออก ก่อนเก็บไว้ให้
+        // TripOrderModal (เปิดจากปุ่ม "จัดรถ" ในแผงนี้ — เฉพาะ superadmin เห็น
+        // อยู่แล้ว ตามเงื่อนไข `enabled` เดียวกัน) ใช้เช็ครถไม่ว่าง — เหตุผล
+        // เดียวกับ activeTripOrders ใน BookingDashboard.tsx (ไม่งั้นรถจะค้าง
+        // สถานะ "ไม่ว่าง" ทั้งที่ไม่มีใครใช้จริงแล้ว) — คำนวณไว้ก่อน แล้วรวม
+        // กับ stillPending ด้านล่าง อัปเดตพร้อมกันด้วย setApprovalPanel ครั้ง
+        // เดียว (ดูคอมเมนต์ที่ประกาศ approvalPanel ด้านบนว่าทำไมต้องรวม)
+        const activeTripOrders = tripOrders.filter((t) =>
+          t.bookingIds.some((id) => {
+            const b = bookings.find((bk) => bk.bookingId === id);
+            return b ? !isBookingCancelled(b) : true;
+          })
+        );
+
         const stillPending = bookings
           .filter((b) => b.resourceType === "car" && b.approvalStatus === "pending" && !isBookingCancelled(b))
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -131,7 +156,7 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
           );
         }
         seenIds.current = currentIds;
-        setPending(stillPending);
+        setApprovalPanel({ pending: stillPending, tripOrders: activeTripOrders });
       }
 
       // --- ส่วนที่ 2: toast แจ้งผลการจองรถของ "ตัวเอง" (ทุกบัญชี) ---
@@ -192,7 +217,7 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
         setActionError(data.error || "เกิดข้อผิดพลาด");
         return;
       }
-      setPending((prev) => prev.filter((b) => b.bookingId !== bookingId));
+      setApprovalPanel((prev) => ({ ...prev, pending: prev.pending.filter((b) => b.bookingId !== bookingId) }));
       seenIds.current?.delete(bookingId);
     } catch {
       setActionError("เกิดข้อผิดพลาดในการเชื่อมต่อ");
@@ -223,7 +248,10 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
   }
 
   function handleTripOrderCreated({ tripOrder }: { tripOrder: TripOrder; bookings: Booking[] }) {
-    setPending((prev) => prev.filter((b) => !tripOrder.bookingIds.includes(b.bookingId)));
+    setApprovalPanel((prev) => ({
+      ...prev,
+      pending: prev.pending.filter((b) => !tripOrder.bookingIds.includes(b.bookingId)),
+    }));
     for (const bookingId of tripOrder.bookingIds) seenIds.current?.delete(bookingId);
     setDispatchBooking(null);
   }
@@ -360,6 +388,7 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
           // จัดรถอยู่ตอนนี้ออกก่อน
           candidateBookings={pending.filter((b) => b.bookingId !== dispatchBooking.bookingId)}
           resources={carResources}
+          existingTripOrders={approvalPanel.tripOrders}
           onClose={() => setDispatchBooking(null)}
           onCreated={handleTripOrderCreated}
         />

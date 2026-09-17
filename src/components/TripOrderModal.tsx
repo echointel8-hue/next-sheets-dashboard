@@ -97,6 +97,7 @@ export default function TripOrderModal({
   bookings,
   candidateBookings,
   resources,
+  existingTripOrders,
   editing,
   onClose,
   onCreated,
@@ -117,6 +118,12 @@ export default function TripOrderModal({
    * ไม่อยู่ในรายการนี้แล้ว (เช่น ถูกปิดใช้งานไปหลังออกใบสั่งงาน) คอมโพเนนต์นี้
    * จะเติมให้เองเพื่อให้ตัวเลือกเดิมยังแสดงถูกต้อง. */
   resources: BookingResource[];
+  /** ใบสั่งงานเดินทางทั้งหมดที่ออกไปแล้ว (ทุกคัน/ทุกวัน) — ใช้เช็คว่ารถคันไหน
+   * "ไม่ว่าง" ในช่วงเวลาของใบสั่งงานนี้บ้าง (ถูกจัดไปทับกับใบสั่งงานอื่นแล้ว)
+   * เพื่อล็อกไม่ให้เลือกซ้ำ ตามที่ขอเพิ่มภายหลัง — ดู conflictingResourceIds
+   * ด้านล่าง คอมโพเนนต์นี้กรองเทียบช่วงเวลาเองทั้งหมด ผู้เรียกส่งมาทั้งก้อนได้
+   * เลยไม่ต้องกรองมาก่อน. */
+  existingTripOrders: TripOrder[];
   /** ใส่ค่านี้เพื่อเปิดในโหมดแก้ไขใบสั่งงานที่มีอยู่แล้ว — ไม่ใส่ = โหมดสร้างใหม่. */
   editing?: TripOrder;
   onClose: () => void;
@@ -177,13 +184,6 @@ export default function TripOrderModal({
   }, [resources, editing]);
 
   const [resourceId, setResourceId] = useState(editing?.resourceId ?? resources[0]?.resourceId ?? "");
-  // พรีวิวรูป+รายละเอียดของรถที่เลือกอยู่ — เหมือนกับตอนจองรถใหม่ใน
-  // BookingFormModal.tsx ทุกประการ (ดูคอมเมนต์ที่นั่นสำหรับรายละเอียด) ให้
-  // ฝ่ายบริหารเห็นรถจริงก่อนออกใบสั่งงาน ไม่ใช่แค่ชื่อเฉยๆ ตามที่ขอ
-  const selectedResource = useMemo(
-    () => effectiveResources.find((r) => r.resourceId === resourceId),
-    [effectiveResources, resourceId]
-  );
   // วันเดินทางเดียว ไม่ให้เลือกเอง — คำขอที่รวมกันได้ต้องเป็นวันเดียวกัน
   // ทุกรายการเสมออยู่แล้ว (บังคับผ่าน eligibleCandidates ข้างบน) จึงไม่มี
   // ความจำเป็นต้องมีช่องเลือกวันที่ให้ฝ่ายบริหารกรอก ตามที่ขอ — ในโหมดแก้ไข
@@ -210,6 +210,45 @@ export default function TripOrderModal({
   );
   const startTime = combineDateTime(tripDateKey, startHour, startMinute);
   const endTime = combineDateTime(tripDateKey, endHour, endMinute);
+
+  /** รถที่ "ไม่ว่าง" สำหรับช่วงเวลารวมของใบสั่งงานนี้ — คือรถที่ถูกใบสั่งงาน
+   * อื่น (ที่ยังไม่ถูกยกเลิก/ไม่ใช่ใบนี้เอง) จัดคาบเกี่ยวกับช่วงเวลานี้ไปแล้ว
+   * ตามที่ขอเพิ่มภายหลัง ("เอาออกไม่ให้เป็นตัวเลือก หรืออยู่สถานะล็อกไม่ให้
+   * เลือก") — เลือกทำแบบล็อกไว้ (แสดงในรายการแต่กดเลือกไม่ได้ + บอกเหตุผล)
+   * แทนการเอาออกทั้งหมด ให้ฝ่ายบริหารยังเห็นว่ารถคันนั้นมีอยู่แต่ไม่ว่าง
+   * ไม่ใช่หายไปเฉยๆ โดยไม่มีคำอธิบาย
+   *
+   * ตรวจแบบ "ช่วงเวลาคาบเกี่ยวกัน" มาตรฐาน (start1 < end2 && start2 < end1)
+   * — ตัวแปร startTime/endTime ที่นี่เป็นสตริง "YYYY-MM-DDTHH:MM" แบบเดียวกับ
+   * TripOrder.startTime/endTime เทียบกันตรงๆ ด้วย string comparison ได้เลย
+   * (ตามรูปแบบเดียวกับ nowDateTimeStr ใน BookingFormModal.tsx) โหมดแก้ไข
+   * ไม่เทียบกับใบสั่งงานเดิมของตัวเอง (editing.tripOrderId) — ไม่งั้นจะชนกับ
+   * ตัวเองเสมอ */
+  const conflictingResourceIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!startTime || !endTime) return ids;
+    for (const t of existingTripOrders) {
+      if (editing && t.tripOrderId === editing.tripOrderId) continue;
+      if (t.startTime < endTime && startTime < t.endTime) ids.add(t.resourceId);
+    }
+    return ids;
+  }, [existingTripOrders, editing, startTime, endTime]);
+
+  /** ค่าที่ "ใช้จริง" สำหรับแสดง/เลือก/ส่งบันทึก — ต่างจาก resourceId (state
+   * ดิบที่ผู้ใช้กดเลือกเอง หรือค่าเริ่มต้น) ตรงที่คำนวณสดทุกครั้งที่เรนเดอร์
+   * แทนการ setState ในนี้ ถ้ารถที่เลือกอยู่กลายเป็น "ไม่ว่าง" (เช่น ค่า
+   * default ตอนเปิดหน้าต่าง หรือช่วงเวลารวมขยับไปชนหลังติ๊กเพิ่ม/ถอนคำขอ) จะ
+   * สลับไปคันแรกที่ยังว่างให้อัตโนมัติ โดยไม่แตะ resourceId เดิมเลย — ถ้า
+   * ภายหลังช่วงเวลาขยับกลับมาไม่ชนแล้ว ค่าที่ผู้ใช้เลือกไว้แต่แรกจะกลับมาใช้
+   * เองโดยอัตโนมัติเช่นกัน (ไม่มีอะไรถูกลืมค่าไว้ถาวร) */
+  const selectedResourceId = conflictingResourceIds.has(resourceId)
+    ? (effectiveResources.find((r) => !conflictingResourceIds.has(r.resourceId))?.resourceId ?? resourceId)
+    : resourceId;
+  // พรีวิวรูป+รายละเอียดของรถที่เลือกอยู่จริง (selectedResourceId ไม่ใช่
+  // resourceId ดิบ — ดูคอมเมนต์ด้านบน) — เหมือนกับตอนจองรถใหม่ใน
+  // BookingFormModal.tsx ทุกประการ (ดูคอมเมนต์ที่นั่นสำหรับรายละเอียด) ให้
+  // ฝ่ายบริหารเห็นรถจริงก่อนออกใบสั่งงาน ไม่ใช่แค่ชื่อเฉยๆ ตามที่ขอ
+  const selectedResource = effectiveResources.find((r) => r.resourceId === selectedResourceId);
 
   // เส้นเวลาเดินทาง — โซนเวลาที่แสดงคือเวลารวมของใบสั่งงาน (startHour:
   // startMinute – endHour:endMinute ด้านบน) เพราะการันตีครอบคลุมทุกคำขอที่
@@ -278,8 +317,12 @@ export default function TripOrderModal({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!resourceId) {
+    if (!selectedResourceId) {
       setError("กรุณาเลือกรถที่จะใช้");
+      return;
+    }
+    if (conflictingResourceIds.has(selectedResourceId)) {
+      setError("รถคันนี้ถูกจัดไปในใบสั่งงานอื่นทับช่วงเวลานี้แล้ว กรุณาเลือกคันอื่น");
       return;
     }
     if (!driverName.trim()) {
@@ -303,7 +346,7 @@ export default function TripOrderModal({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            resourceId,
+            resourceId: selectedResourceId,
             driverName: driverName.trim(),
             startTime,
             endTime,
@@ -329,7 +372,7 @@ export default function TripOrderModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          resourceId,
+          resourceId: selectedResourceId,
           driverName: driverName.trim(),
           startTime,
           endTime,
@@ -522,18 +565,29 @@ export default function TripOrderModal({
               รถที่ใช้
               <select
                 ref={firstInputRef}
-                value={resourceId}
+                value={selectedResourceId}
                 onChange={(e) => setResourceId(e.target.value)}
                 disabled={saving || effectiveResources.length === 0}
                 className={INPUT_CLASS}
               >
                 {effectiveResources.length === 0 && <option value="">ไม่มีรถที่เปิดใช้งาน</option>}
-                {effectiveResources.map((r) => (
-                  <option key={r.resourceId} value={r.resourceId}>
-                    {r.name}
-                  </option>
-                ))}
+                {effectiveResources.map((r) => {
+                  const conflicted = conflictingResourceIds.has(r.resourceId);
+                  return (
+                    <option key={r.resourceId} value={r.resourceId} disabled={conflicted}>
+                      {r.name}
+                      {conflicted ? " — ไม่ว่าง (ถูกจัดในช่วงเวลานี้แล้ว)" : ""}
+                    </option>
+                  );
+                })}
               </select>
+              {/* เฉพาะตอนมีรถถูกล็อกจริง — บอกเหตุผลสั้นๆ ว่าทำไมบางคันเลือก
+                  ไม่ได้ ตามที่ขอ ("อยู่สถานะล็อกไม่ให้เลือก") */}
+              {conflictingResourceIds.size > 0 && (
+                <span className="text-xs font-normal text-amber-700 dark:text-amber-400">
+                  รถที่ขึ้น &quot;ไม่ว่าง&quot; ถูกจัดไปในใบสั่งงานอื่นทับช่วงเวลา {startHour}:{startMinute}–{endHour}:{endMinute} น. แล้ว จึงเลือกไม่ได้
+                </span>
+              )}
             </label>
 
             {/* พรีวิวรูป+รายละเอียดของรถที่เลือกอยู่ — เหมือนกับตอนจองรถใหม่ใน

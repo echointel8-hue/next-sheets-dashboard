@@ -193,6 +193,29 @@ export default function BookingDashboard({
     [typeBookings, selectedBookingIds]
   );
 
+  /** ใบสั่งงานที่ยัง "มีผล" จริง — ตัดใบที่ทุกคำขอที่ครอบคลุมถูกยกเลิกไปหมด
+   * แล้วออก ไม่งั้นรถคันนั้นจะค้างสถานะ "ไม่ว่าง" ตลอดไปในหน้าต่างสั่งงาน
+   * เดินทาง (TripOrderModal's conflictingResourceIds) ทั้งที่ไม่มีใครใช้จริง
+   * แล้ว — ใช้ `bookings` (ทั้งหมด ไม่ใช่ typeBookings) เพราะ TripOrder อ้างอิง
+   * เฉพาะคำขอจองรถอยู่แล้วโดยธรรมชาติ (ห้องประชุมไม่มีใบสั่งงาน) หา booking
+   * ไม่เจอ (ไม่ควรเกิด) ให้ถือว่ายังมีผลอยู่ไว้ก่อน ปลอดภัยกว่าการปล่อยให้
+   * เลือกซ้ำโดยไม่ตั้งใจ */
+  const activeTripOrders = useMemo(
+    () =>
+      tripOrders.filter((t) =>
+        t.bookingIds.some((id) => {
+          const b = bookings.find((bk) => bk.bookingId === id);
+          return b ? !isBookingCancelled(b) : true;
+        })
+      ),
+    // `tripOrders`/`bookings` are freshly re-derived from `data` on every
+    // render (not stable references, same as typeResources/typeBookings
+    // above) — depending on `data` itself (stable between renders) is the
+    // correct/equivalent dependency here too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data]
+  );
+
   // Color each resource of the current type by when it was *created*
   // (createdAt, append-only) rather than by typeResources' own
   // alphabetical display order — the same "index-based assignment must
@@ -820,6 +843,7 @@ export default function BookingDashboard({
             (b) => b.approvalStatus === "pending" && !isBookingCancelled(b) && !selectedBookingIds.has(b.bookingId)
           )}
           resources={activeTypeResources}
+          existingTripOrders={activeTripOrders}
           onClose={() => setTripOrderModalOpen(false)}
           onCreated={handleTripOrderCreated}
         />
@@ -829,6 +853,7 @@ export default function BookingDashboard({
           editing={editTripOrderTarget}
           bookings={typeBookings.filter((b) => b.tripOrderId === editTripOrderTarget.tripOrderId)}
           resources={activeTypeResources}
+          existingTripOrders={activeTripOrders}
           onClose={() => setEditTripOrderTarget(null)}
           onUpdated={handleTripOrderUpdated}
         />
