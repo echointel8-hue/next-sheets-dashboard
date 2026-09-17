@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, CheckCircle2, Loader2, Truck, X as XIcon } from "lucide-react";
-import { formatBookingDateTime, isBookingCancelled, type Booking, type BookingResource, type TripOrder } from "@/lib/booking";
+import {
+  formatBookingDateTime,
+  isBookingCancelled,
+  TRIP_ORDER_CHANGED_EVENT,
+  type Booking,
+  type BookingResource,
+  type TripOrder,
+} from "@/lib/booking";
 import TripOrderModal from "@/components/TripOrderModal";
 
 // No websocket/push available — the backend is Google Sheets, read on
@@ -40,7 +47,7 @@ interface Toast {
  *    ปฏิเสธไปแล้ว
  *
  * 2. Toast แจ้งผลการจองรถของ "ตัวเอง" — ทุกบัญชีเห็น (ไม่ผูกกับ `enabled`
- *    เลย) เมื่อคำขอจองรถของบัญชีนี้เปลี่ยนจาก "รออนุมัติ" เป็น "ยืนยันแล้ว"
+ *    เลย) เมื่อคำขอจองรถของบัญชีนี้เปลี่ยนจาก "รออนุมัติ" เป็น "อนุญาต"
  *    (มีคนออกใบสั่งงานเดินทางให้แล้ว) จะเด้ง toast บอกรายละเอียดรถ/คนขับที่
  *    จัดให้ ตามที่โรงพยาบาลขอ — ใช้ ref แยกต่างหาก (seenBookingStatuses)
  *    ติดตามสถานะล่าสุดที่เห็นของแต่ละคำขอ ไม่เกี่ยวกับ seenIds ของส่วนที่ 1
@@ -254,6 +261,12 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
     }));
     for (const bookingId of tripOrder.bookingIds) seenIds.current?.delete(bookingId);
     setDispatchBooking(null);
+    // แจ้งหน้าจองรถ (BookingDashboard.tsx) ที่อาจเปิดอยู่พร้อมกัน (เช่น
+    // อนุมัติจากป็อปอัปนี้ขณะดูปฏิทินอยู่) ให้รีเฟรชข้อมูลสดใหม่ทันที — ไม่งั้น
+    // ปฏิทินจะยังค้างสถานะ "รออนุมัติ" เดิมจนกว่าจะรีเฟรชหน้าเอง เพราะสอง
+    // คอมโพเนนต์นี้มี state แยกกันคนละก้อน ไม่ได้แชร์กัน (ดูคอมเมนต์ที่ประกาศ
+    // TRIP_ORDER_CHANGED_EVENT ใน lib/booking.ts)
+    window.dispatchEvent(new Event(TRIP_ORDER_CHANGED_EVENT));
   }
 
   return (

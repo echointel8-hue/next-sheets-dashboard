@@ -581,13 +581,9 @@ export default function TripOrderModal({
                   );
                 })}
               </select>
-              {/* เฉพาะตอนมีรถถูกล็อกจริง — บอกเหตุผลสั้นๆ ว่าทำไมบางคันเลือก
-                  ไม่ได้ ตามที่ขอ ("อยู่สถานะล็อกไม่ให้เลือก") */}
-              {conflictingResourceIds.size > 0 && (
-                <span className="text-xs font-normal text-amber-700 dark:text-amber-400">
-                  รถที่ขึ้น &quot;ไม่ว่าง&quot; ถูกจัดไปในใบสั่งงานอื่นทับช่วงเวลา {startHour}:{startMinute}–{endHour}:{endMinute} น. แล้ว จึงเลือกไม่ได้
-                </span>
-              )}
+              {/* ตัดข้อความสรุปแยกบรรทัดออกตามที่ขอ — คำอธิบาย "ไม่ว่าง" ต่อ
+                  ท้ายชื่อรถแต่ละคันในตัวเลือก (ด้านบน) ให้ข้อมูลเพียงพออยู่
+                  แล้วโดยไม่ต้องมีข้อความซ้ำเพิ่มอีกบรรทัด */}
             </label>
 
             {/* พรีวิวรูป+รายละเอียดของรถที่เลือกอยู่ — เหมือนกับตอนจองรถใหม่ใน
@@ -695,7 +691,7 @@ export default function TripOrderModal({
                 ) : (
                   <Save size={16} strokeWidth={2} aria-hidden="true" />
                 )}
-                {editing ? "บันทึกการแก้ไข" : "ออกใบสั่งงาน"}
+                {editing ? "บันทึกการแก้ไข" : "อนุมัติ"}
               </button>
             </div>
           </form>

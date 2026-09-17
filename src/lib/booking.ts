@@ -124,6 +124,18 @@ export type BookingApprovalStatus = "pending" | "approved" | "rejected";
  * resourceId is required from the client at all). */
 export const PENDING_CAR_RESOURCE_NAME = "รถ (รอบริหารจัดสรร)";
 
+/** ชื่อ window CustomEvent ที่ยิงออกไปทุกครั้งที่มีการออก/แก้ไขใบสั่งงาน
+ * เดินทาง (TripOrder) สำเร็จ — ไม่ว่าจะทำผ่านหน้าจองรถเอง (BookingDashboard)
+ * หรือผ่านป็อปอัปกระดิ่งแจ้งเตือนที่ลอยอยู่ทุกหน้า (NotificationBell) ก็ตาม
+ * ทั้งสองที่นี้ต่างคนต่างมี state ของตัวเอง ไม่ได้แชร์กันโดยตรง (ไม่มี
+ * SWR/React Query หรือ context กลางในระบบนี้) เดิมทำให้ปฏิทิน/รายการในหน้า
+ * จองรถไม่อัปเดตทันทีถ้าเพิ่งอนุมัติผ่านป็อปอัปกระดิ่งไป (ต้องรีเฟรชหน้าเอง
+ * ถึงจะเห็น) — ใช้ window event ธรรมดานี้แทนเพื่อบอกให้ทุกฝั่งที่กำลังแสดงผล
+ * อยู่รีเฟรชข้อมูลสดใหม่ทันที ตามที่ขอเพิ่มภายหลัง (ดู
+ * BookingDashboard.tsx's refreshData / NotificationBell.tsx's
+ * handleTripOrderCreated) */
+export const TRIP_ORDER_CHANGED_EVENT = "ttk:trip-order-changed";
+
 export interface Booking {
   bookingId: string;
   /** "" for every car booking (see PENDING_CAR_RESOURCE_NAME above) — still
@@ -305,7 +317,7 @@ export function bookingStatusLabel(
   if (isBookingCancelled(booking)) return { text: "ยกเลิกแล้ว", tone: "cancelled" };
   if (booking.approvalStatus === "pending") return { text: "รออนุมัติ", tone: "pending" };
   if (booking.approvalStatus === "rejected") return { text: "ไม่อนุมัติ", tone: "rejected" };
-  return { text: "ยืนยันแล้ว", tone: "approved" };
+  return { text: "อนุญาต", tone: "approved" };
 }
 
 /** Splits a startTime/endTime string ("2026-08-25T14:30", the raw

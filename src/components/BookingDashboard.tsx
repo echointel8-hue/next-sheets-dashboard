@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Ban,
@@ -31,6 +31,7 @@ import {
   carBookingDisplayName,
   formatBookingDateTime,
   isBookingCancelled,
+  TRIP_ORDER_CHANGED_EVENT,
   type Booking,
   type BookingResource,
   type BookingResourceType,
@@ -266,6 +267,49 @@ export default function BookingDashboard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, type]);
 
+  /** ดึงข้อมูลรถ/ห้อง + การจอง + ใบสั่งงานเดินทางทั้งหมดใหม่จากเซิร์ฟเวอร์ ผ่าน
+   * client API เดียวกับที่ NotificationBell ใช้อยู่แล้ว (ไม่ใช่ฟังก์ชัน
+   * server-only ที่ใช้ตอนโหลดหน้าแรกใน page.tsx) — best-effort ล้วนๆ ถ้าดึง
+   * ไม่สำเร็จก็แค่คงข้อมูลเดิมไว้ก่อน ไม่ throw ให้หน้าใช้งานไม่ได้ ดูคอมเมนต์
+   * ที่ useEffect ด้านล่างว่าใช้ทำอะไร */
+  const refreshData = useCallback(async () => {
+    try {
+      const [resourcesRes, bookingsRes, tripOrdersRes] = await Promise.all([
+        fetch("/api/booking/resources", { cache: "no-store" }),
+        fetch("/api/booking/bookings", { cache: "no-store" }),
+        fetch("/api/booking/trip-orders", { cache: "no-store" }),
+      ]);
+      if (!resourcesRes.ok || !bookingsRes.ok) return;
+      const resourcesJson = await resourcesRes.json().catch(() => ({}));
+      const bookingsJson = await bookingsRes.json().catch(() => ({}));
+      const tripOrdersJson = tripOrdersRes.ok ? await tripOrdersRes.json().catch(() => ({})) : {};
+      if (!Array.isArray(resourcesJson.resources) || !Array.isArray(bookingsJson.bookings)) return;
+      setData({
+        resources: resourcesJson.resources,
+        bookings: bookingsJson.bookings,
+        tripOrders: Array.isArray(tripOrdersJson.tripOrders) ? tripOrdersJson.tripOrders : [],
+      });
+    } catch {
+      // best-effort — เน็ตสะดุดชั่วคราวแค่ไม่อัปเดตรอบนี้ ปรัชญาเดียวกับ
+      // NotificationBell's poll()
+    }
+  }, []);
+
+  // ฟัง TRIP_ORDER_CHANGED_EVENT (ดูคอมเมนต์ที่ประกาศไว้ใน lib/booking.ts) —
+  // แก้บั๊ก "อนุมัติแล้วปฏิทินไม่อัปเดตทันที ต้องรีเฟรชเอง" กรณีที่การอนุมัติ
+  // เกิดขึ้นผ่านป็อปอัปกระดิ่งแจ้งเตือน (NotificationBell.tsx) ซึ่งมี state
+  // ของตัวเองแยกต่างหาก ไม่ได้แก้ `data` ของหน้านี้โดยตรง — เฉพาะรถเท่านั้น
+  // (type === "car") เพราะ TripOrder มีความหมายกับการจองรถเท่านั้น ห้อง
+  // ประชุมไม่มีใบสั่งงานเดินทางให้ต้องรีเฟรชตามอยู่แล้ว ส่วนการอนุมัติที่เกิด
+  // จากหน้านี้เอง (handleTripOrderCreated/handleTripOrderUpdated ด้านล่าง)
+  // ยังคงอัปเดต state ทันทีแบบเดิมโดยไม่ต้องรอ event นี้ — เร็วกว่า ไม่ต้อง
+  // รอ round-trip ไปเซิร์ฟเวอร์อีกรอบ
+  useEffect(() => {
+    if (type !== "car") return;
+    window.addEventListener(TRIP_ORDER_CHANGED_EVENT, refreshData);
+    return () => window.removeEventListener(TRIP_ORDER_CHANGED_EVENT, refreshData);
+  }, [type, refreshData]);
+
   function handleResourceSaved(resource: BookingResource) {
     setData((prev) => {
       if (isError(prev)) return prev;
@@ -396,7 +440,7 @@ export default function BookingDashboard({
     setSelectedBookingIds(new Set());
     setTripOrderModalOpen(false);
     setSuccessMessage(
-      `ออกใบสั่งงานเดินทางสำเร็จ (${tripOrder.resourceName} · คนขับ: ${tripOrder.driverName || "—"}) — รายการจองที่เกี่ยวข้อง ${updatedBookings.length.toLocaleString("th-TH")} รายการปรับสถานะเป็น "ยืนยันแล้ว" ในปฏิทินแล้ว`
+      `อนุมัติสำเร็จ (${tripOrder.resourceName} · คนขับ: ${tripOrder.driverName || "—"}) — รายการจองที่เกี่ยวข้อง ${updatedBookings.length.toLocaleString("th-TH")} รายการปรับสถานะเป็น "อนุญาต" ในปฏิทินแล้ว`
     );
   }
 
