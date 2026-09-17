@@ -2,13 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Loader2, Save, Truck, Users, X } from "lucide-react";
+import { AlertTriangle, ImageOff, Loader2, Save, Truck, Users, X } from "lucide-react";
 import {
   formatBookingDateTime,
+  splitBookingDateTime,
   type Booking,
   type BookingResource,
   type TripOrder,
 } from "@/lib/booking";
+import { buildActionColorMap, actionColorVars } from "@/lib/actionColors";
 
 const INPUT_CLASS =
   "h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:disabled:bg-zinc-800/60 dark:disabled:text-zinc-500";
@@ -173,6 +175,13 @@ export default function TripOrderModal({
   }, [resources, editing]);
 
   const [resourceId, setResourceId] = useState(editing?.resourceId ?? resources[0]?.resourceId ?? "");
+  // พรีวิวรูป+รายละเอียดของรถที่เลือกอยู่ — เหมือนกับตอนจองรถใหม่ใน
+  // BookingFormModal.tsx ทุกประการ (ดูคอมเมนต์ที่นั่นสำหรับรายละเอียด) ให้
+  // ฝ่ายบริหารเห็นรถจริงก่อนออกใบสั่งงาน ไม่ใช่แค่ชื่อเฉยๆ ตามที่ขอ
+  const selectedResource = useMemo(
+    () => effectiveResources.find((r) => r.resourceId === resourceId),
+    [effectiveResources, resourceId]
+  );
   // วันเดินทางเดียว ไม่ให้เลือกเอง — คำขอที่รวมกันได้ต้องเป็นวันเดียวกัน
   // ทุกรายการเสมออยู่แล้ว (บังคับผ่าน eligibleCandidates ข้างบน) จึงไม่มี
   // ความจำเป็นต้องมีช่องเลือกวันที่ให้ฝ่ายบริหารกรอก ตามที่ขอ — ในโหมดแก้ไข
@@ -215,6 +224,49 @@ export default function TripOrderModal({
   }
   const startTime = combineDateTime(tripDateKey, startHour, startMinute);
   const endTime = combineDateTime(tripDateKey, endHour, endMinute);
+
+  // เส้นเวลาเดินทาง — โซนเวลาที่แสดงคือเวลารวมของใบสั่งงาน (startHour:
+  // startMinute – endHour:endMinute ด้านบน) เพราะการันตีครอบคลุมทุกคำขอที่
+  // เลือกไว้อยู่แล้ว (มาจาก autoTimeParts ตัวเดียวกัน) แต่ละแถบด้านล่างคือ
+  // ช่วงเวลาที่คำขอแต่ละรายการระบุไว้เอง วางเทียบกันให้เห็นว่าใครไปช่วงไหน
+  // กับรถคันเดียวกันนี้บ้าง ตามที่ขอ ("สวยๆ")
+  const timelineDomain = useMemo(() => {
+    const startMin = Number(startHour) * 60 + Number(startMinute);
+    const rawEndMin = Number(endHour) * 60 + Number(endMinute);
+    return { startMin, endMin: rawEndMin > startMin ? rawEndMin : startMin + 30 };
+  }, [startHour, startMinute, endHour, endMinute]);
+  const timelineRows = useMemo(() => {
+    const domainSpan = Math.max(timelineDomain.endMin - timelineDomain.startMin, 1);
+    return includedBookings.map((b) => {
+      const startParts = splitBookingDateTime(b.startTime);
+      const endParts = splitBookingDateTime(b.endTime);
+      const bStartMin = startParts
+        ? Number(startParts.time.slice(0, 2)) * 60 + Number(startParts.time.slice(3, 5))
+        : timelineDomain.startMin;
+      const bEndMin = endParts
+        ? Number(endParts.time.slice(0, 2)) * 60 + Number(endParts.time.slice(3, 5))
+        : timelineDomain.endMin;
+      const leftPct = Math.min(100, Math.max(0, ((bStartMin - timelineDomain.startMin) / domainSpan) * 100));
+      const rawWidthPct = ((bEndMin - bStartMin) / domainSpan) * 100;
+      // ความกว้างขั้นต่ำ 3% กันแถบหายไปเลยตอนช่วงเวลาสั้นมากเทียบกับช่วงรวม
+      const widthPct = Math.min(100 - leftPct, Math.max(rawWidthPct, 3));
+      return {
+        bookingId: b.bookingId,
+        label: b.department || b.bookedByDisplayName || b.bookedByUsername,
+        timeLabel: `${startParts?.time ?? "--:--"}–${endParts?.time ?? "--:--"}`,
+        leftPct,
+        widthPct,
+      };
+    });
+  }, [includedBookings, timelineDomain]);
+  // สีประจำแต่ละแถว — ใช้ชุดสีเดียวกับที่ใช้ทั่วทั้งแอป (buildActionColorMap,
+  // ผ่านการตรวจสอบ colorblind-safe แล้ว ดู lib/actionColors.ts) คีย์ด้วย
+  // bookingId เพื่อให้สีคงที่ตราบใดที่ยังไม่มีการติ๊กเพิ่ม/ถอนคำขอ
+  const timelineColorMap = useMemo(
+    () => buildActionColorMap(includedBookings.map((b) => b.bookingId)),
+    [includedBookings]
+  );
+
   const [driverName, setDriverName] = useState(editing?.driverName ?? "");
   const [notes, setNotes] = useState(editing?.notes ?? "");
   const [saving, setSaving] = useState(false);
@@ -450,6 +502,39 @@ export default function TripOrderModal({
               </select>
             </label>
 
+            {/* พรีวิวรูป+รายละเอียดของรถที่เลือกอยู่ — เหมือนกับตอนจองรถใหม่ใน
+                BookingFormModal.tsx ทุกประการ (ดูคอมเมนต์ที่นั่นสำหรับ
+                รายละเอียด) ให้ฝ่ายบริหารเห็นรถจริงก่อนออกใบสั่งงาน ไม่ใช่แค่
+                ชื่อเฉยๆ ตามที่ขอ */}
+            {effectiveResources.length > 0 && (
+              <div className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 dark:border-zinc-700 dark:bg-zinc-800/60">
+                <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md bg-zinc-100 dark:bg-zinc-800">
+                  {selectedResource?.imageDataUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- data: URL from the sheet, not a static/remote asset next/image can optimize
+                    <img
+                      src={selectedResource.imageDataUrl}
+                      alt={selectedResource.name}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <ImageOff size={16} strokeWidth={1.5} className="text-zinc-300 dark:text-zinc-600" aria-hidden="true" />
+                  )}
+                </div>
+                <div className="min-w-0 text-xs text-zinc-500 dark:text-zinc-400">
+                  {selectedResource?.detail ? (
+                    // whitespace-pre-line: คงการขึ้นบรรทัดใหม่ตามที่พิมพ์ไว้ใน
+                    // ช่อง "รายละเอียดเพิ่มเติม" เหมือน BookingFormModal.tsx
+                    <p className="whitespace-pre-line leading-5">{selectedResource.detail}</p>
+                  ) : (
+                    <p className="italic">ไม่มีรายละเอียดเพิ่มเติม</p>
+                  )}
+                  {!!selectedResource?.seatCount && (
+                    <p className="mt-0.5 leading-5">{selectedResource.seatCount.toLocaleString("th-TH")} ที่นั่ง</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
               ชื่อพนักงานขับรถ
               <input
@@ -547,6 +632,50 @@ export default function TripOrderModal({
                 </div>
               </div>
             </div>
+
+            {/* เส้นเวลาการเดินทาง — แสดงให้เห็นว่าแต่ละคำขอที่รวมอยู่ในใบ
+                สั่งงานนี้เดินทางช่วงไหนบ้างเทียบกับเวลารวมทั้งหมดของรถคันนี้
+                (แถบสีคือแต่ละคำขอ ตำแหน่ง/ความกว้างคำนวณจาก timelineRows
+                ด้านบน) ใช้ชุดสีเดียวกับที่ใช้ทั่วทั้งแอป (buildActionColorMap
+                จาก lib/actionColors.ts ซึ่งผ่านการตรวจสอบ colorblind-safe
+                แล้ว) ไม่สร้างชุดสีใหม่ ตามที่ขอ ("สวยๆ") */}
+            {timelineRows.length > 0 && (
+              <div className="flex flex-col gap-2.5 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
+                <div className="flex items-center justify-between text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                  <span>เส้นเวลาการเดินทาง</span>
+                  <span className="tabular-nums">
+                    {startHour}:{startMinute} – {endHour}:{endMinute}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {timelineRows.map((row) => {
+                    const color = timelineColorMap.get(row.bookingId);
+                    return (
+                      <div key={row.bookingId} className="flex items-center gap-2">
+                        <span
+                          className="w-20 shrink-0 truncate text-xs text-zinc-600 dark:text-zinc-300"
+                          title={row.label}
+                        >
+                          {row.label}
+                        </span>
+                        <div className="relative h-5 flex-1 rounded-full bg-zinc-200 dark:bg-zinc-700">
+                          {color && (
+                            <div
+                              className="absolute inset-y-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                              style={{ left: `${row.leftPct}%`, width: `${row.widthPct}%`, ...actionColorVars(color) }}
+                              title={`${row.label}: ${row.timeLabel}`}
+                            />
+                          )}
+                        </div>
+                        <span className="w-24 shrink-0 text-right text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
+                          {row.timeLabel}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
               หมายเหตุ (ไม่บังคับ)

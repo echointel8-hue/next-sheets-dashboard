@@ -71,7 +71,10 @@ export interface AppShellProps {
   /** Show the pending-car-booking-approval bell — only superadmin accounts
    * (see canApproveCarBooking in lib/booking.ts). Each caller computes this
    * from its own session/currentUser rather than AppShell re-deriving it,
-   * same pattern as the other can* flags above. */
+   * same pattern as the other can* flags above. NotificationBell itself is
+   * still mounted regardless of this flag — every account also gets a toast
+   * when their own car booking is approved, which isn't gated by this prop
+   * at all (see NotificationBell's own doc comment). */
   canApproveBookings: boolean;
   children: ReactNode;
 }
@@ -218,7 +221,7 @@ export default function AppShell({
       {/* Fixed-position, so it renders once here rather than being
           duplicated inside both the desktop sidebar and the mobile topbar
           markup below — see NotificationBell's own doc comment. */}
-      <NotificationBell enabled={canApproveBookings} />
+      <NotificationBell enabled={canApproveBookings} username={username} />
 
       {/* Desktop sidebar — persistent, always visible at lg+. A light
           surface with a soft top-to-bottom white→emerald-50 wash rather

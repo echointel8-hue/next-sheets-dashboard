@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, Loader2, Truck, X as XIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Bell, CheckCircle2, Loader2, Truck, X as XIcon } from "lucide-react";
 import { formatBookingDateTime, isBookingCancelled, type Booking, type BookingResource, type TripOrder } from "@/lib/booking";
 import TripOrderModal from "@/components/TripOrderModal";
 
@@ -17,33 +18,49 @@ const TOAST_DURATION_MS = 6000;
 interface Toast {
   id: string;
   text: string;
+  // "pending" (ค่าเริ่มต้น เมื่อไม่ระบุ) = มีคำขอรออนุมัติใหม่ (เฉพาะ superadmin
+  // เห็น) คลิกแล้วเปิดแผงรออนุมัติ — "approved" = การจองรถของ "ตัวเอง" เพิ่ง
+  // ได้รับการอนุมัติ (ทุกคนเห็น) คลิกแล้วพาไปหน้าจองรถแทน ไอคอน/ปลายทางคลิก
+  // ต่างกันตามชนิดนี้ — ดู render ของ toast ด้านล่าง
+  kind?: "approved";
 }
 
 /**
- * Bell notification for pending car-booking approvals — shown only to
- * superadmin accounts (see canApproveCarBooking in lib/booking.ts; the
- * `enabled` prop is computed by each AppShell caller from its own
- * session/currentUser). Mounted once inside AppShell so it keeps polling
- * and can pop a toast no matter which authenticated page is open,
- * including right after login (the first poll's already-pending count
- * summarizes as a toast too) and while the app is left open on any screen.
+ * ลอยอยู่เหนือทุกหน้า (mounted once ผ่าน AppShell) สองหน้าที่แยกกันชัดเจน:
  *
- * Reuses the existing GET /api/booking/bookings list (already used by
- * BookingDashboard) rather than a dedicated endpoint — filtered
- * client-side to car + pending + not cancelled. "ไม่อนุมัติ" still calls
- * the existing PATCH /api/booking/bookings/[bookingId] directly (reject is
- * a single-click decision, unchanged). "จัดรถ" no longer flips a status
- * here — it opens the same TripOrderModal the booking dashboard uses, so
- * dispatching straight from this popup still goes through the one
- * required path (car + driver + time -> POST /api/booking/trip-orders)
- * instead of the old direct-approve call, which the server now refuses.
+ * 1. กระดิ่งแจ้งเตือนคำขอจองรถรออนุมัติ — แสดงเฉพาะ superadmin (ดู
+ *    canApproveCarBooking ใน lib/booking.ts; `enabled` คำนวณจาก
+ *    session/currentUser ของแต่ละ AppShell caller เอง) ส่วนนี้เท่านั้นที่ถูก
+ *    ซ่อนทั้งหมดเมื่อ `enabled` เป็น false — "ไม่อนุมัติ" ยังเรียก PATCH
+ *    /api/booking/bookings/[bookingId] ตรงๆ (การตัดสินใจแบบกดครั้งเดียว
+ *    เหมือนเดิม) "จัดรถ" ไม่ได้เปลี่ยนสถานะตรงนี้อีกต่อไป — เปิด
+ *    TripOrderModal ตัวเดียวกับที่หน้าจองรถใช้แทน เพื่อให้การจัดรถจากป็อปอัป
+ *    นี้ยังผ่านเส้นทางเดียวที่ถูกต้องเสมอ (รถ+คนขับ+เวลา -> POST
+ *    /api/booking/trip-orders) แทนการเรียก approve ตรงๆ แบบเก่าที่เซิร์ฟเวอร์
+ *    ปฏิเสธไปแล้ว
+ *
+ * 2. Toast แจ้งผลการจองรถของ "ตัวเอง" — ทุกบัญชีเห็น (ไม่ผูกกับ `enabled`
+ *    เลย) เมื่อคำขอจองรถของบัญชีนี้เปลี่ยนจาก "รออนุมัติ" เป็น "ยืนยันแล้ว"
+ *    (มีคนออกใบสั่งงานเดินทางให้แล้ว) จะเด้ง toast บอกรายละเอียดรถ/คนขับที่
+ *    จัดให้ ตามที่โรงพยาบาลขอ — ใช้ ref แยกต่างหาก (seenBookingStatuses)
+ *    ติดตามสถานะล่าสุดที่เห็นของแต่ละคำขอ ไม่เกี่ยวกับ seenIds ของส่วนที่ 1
+ *    เลย ใช้ toast stack เดียวกัน (ด้านล่างสุดขวา) กับส่วนที่ 1 เพื่อไม่ให้มี
+ *    กล่อง toast ลอยซ้อนกันสองกล่องตำแหน่งเดียวกันเวลาบัญชีเดียวกันเป็นทั้ง
+ *    superadmin และมีคำขอจองรถของตัวเองด้วย
+ *
+ * ทั้งสองส่วนแชร์ poll() เดียวกัน (ดึง GET /api/booking/bookings — และตอนนี้
+ * GET /api/booking/trip-orders เพิ่มด้วยสำหรับส่วนที่ 2 — ทุก 15 วินาที) และ
+ * useEffect เดียวกัน (ทำงานเสมอ ไม่ผูกกับ `enabled` อีกต่อไป เพราะส่วนที่ 2
+ * ต้องทำงานสำหรับทุกบัญชี) มีแค่ตัวกระดิ่ง+แผงของส่วนที่ 1 เท่านั้นที่ยังคง
+ * ถูกซ่อนเมื่อ `enabled` เป็น false
  *
  * Per explicit scope choices: no persisted notification history — "seen"
- * bookingIds live only in this tab's memory for this session, and the
- * panel always shows exactly "what's pending right now" (scrollable if
+ * bookingIds/statuses live only in this tab's memory for this session, and
+ * the panel always shows exactly "what's pending right now" (scrollable if
  * there are several), not a permanent log of past decisions.
  */
-export default function NotificationBell({ enabled }: { enabled: boolean }) {
+export default function NotificationBell({ enabled, username }: { enabled: boolean; username: string }) {
+  const router = useRouter();
   const [pending, setPending] = useState<Booking[]>([]);
   const [open, setOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -57,11 +74,17 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
   // null = no poll has completed yet, so the very first result is treated
   // as "what's already waiting" (one summary toast) rather than diffed
   // against an empty set (which would also work, but this reads clearer).
+  // เฉพาะส่วนที่ 1 (แผงรออนุมัติ, superadmin เท่านั้น).
   const seenIds = useRef<Set<string> | null>(null);
+  // สถานะล่าสุดที่เคยเห็นของคำขอจองรถ "ของบัญชีนี้เอง" แต่ละรายการ (bookingId
+  // -> approvalStatus) — เฉพาะส่วนที่ 2 (toast แจ้งผลของตัวเอง, ทุกบัญชี)
+  // null = ยังไม่เคย poll เลย เหมือน seenIds ด้านบน (ตั้ง baseline เงียบๆ
+  // ครั้งแรก ไม่ toast ย้อนหลังสำหรับคำขอที่อนุมัติไปนานแล้วก่อนเปิดหน้านี้)
+  const seenBookingStatuses = useRef<Map<string, Booking["approvalStatus"]> | null>(null);
 
-  const pushToast = useCallback((text: string) => {
+  const pushToast = useCallback((text: string, kind?: Toast["kind"]) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    setToasts((prev) => [...prev, { id, text }]);
+    setToasts((prev) => [...prev, { id, text, kind }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, TOAST_DURATION_MS);
@@ -69,44 +92,88 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
 
   const poll = useCallback(async () => {
     try {
-      const res = await fetch("/api/booking/bookings", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
+      // ทั้งสองส่วน (แผงรออนุมัติของ superadmin + toast ผลของตัวเอง) ต้องใช้
+      // GET /api/booking/bookings เหมือนกัน ส่วนที่ 2 ยังต้องรู้ว่าใครจัดรถ/
+      // คนขับคนไหนให้ด้วย เลยดึง GET /api/booking/trip-orders คู่กันไปเลย
+      // (เปิดให้ทุกบัญชีที่ล็อกอินอยู่แล้วอ่านได้ ไม่ใช่แค่ superadmin)
+      const [bookingsRes, tripOrdersRes] = await Promise.all([
+        fetch("/api/booking/bookings", { cache: "no-store" }),
+        fetch("/api/booking/trip-orders", { cache: "no-store" }),
+      ]);
+      if (!bookingsRes.ok) return;
+      const data = await bookingsRes.json();
       const bookings: Booking[] = Array.isArray(data.bookings) ? data.bookings : [];
-      const stillPending = bookings
-        .filter((b) => b.resourceType === "car" && b.approvalStatus === "pending" && !isBookingCancelled(b))
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      // Best-effort — ถ้าดึงใบสั่งงานไม่สำเร็จ toast ของส่วนที่ 2 ยังขึ้นได้
+      // แค่ไม่มีรายละเอียดรถ/คนขับแนบมา (ดูจุดที่ใช้ tripOrders ด้านล่าง)
+      const tripOrdersData = tripOrdersRes.ok ? await tripOrdersRes.json().catch(() => ({})) : {};
+      const tripOrders: TripOrder[] = Array.isArray(tripOrdersData.tripOrders) ? tripOrdersData.tripOrders : [];
 
-      const currentIds = new Set(stillPending.map((b) => b.bookingId));
-      if (seenIds.current) {
-        const newOnes = stillPending.filter((b) => !seenIds.current!.has(b.bookingId));
-        if (newOnes.length === 1) {
-          const requester = newOnes[0].bookedByDisplayName || newOnes[0].bookedByUsername;
-          pushToast(`มีรายการจองรถรออนุมัติใหม่: ${newOnes[0].resourceName} (${requester})`);
-        } else if (newOnes.length > 1) {
-          pushToast(`มีรายการจองรถรออนุมัติใหม่ ${newOnes.length} รายการ`);
+      // --- ส่วนที่ 1: แผงรออนุมัติ (superadmin เท่านั้น) ---
+      if (enabled) {
+        const stillPending = bookings
+          .filter((b) => b.resourceType === "car" && b.approvalStatus === "pending" && !isBookingCancelled(b))
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+        const currentIds = new Set(stillPending.map((b) => b.bookingId));
+        if (seenIds.current) {
+          const newOnes = stillPending.filter((b) => !seenIds.current!.has(b.bookingId));
+          if (newOnes.length === 1) {
+            const requester = newOnes[0].bookedByDisplayName || newOnes[0].bookedByUsername;
+            pushToast(`มีรายการจองรถรออนุมัติใหม่: ${newOnes[0].resourceName} (${requester})`);
+          } else if (newOnes.length > 1) {
+            pushToast(`มีรายการจองรถรออนุมัติใหม่ ${newOnes.length} รายการ`);
+          }
+        } else if (stillPending.length > 0) {
+          pushToast(
+            stillPending.length === 1
+              ? "มีรายการจองรถรออนุมัติ 1 รายการ"
+              : `มีรายการจองรถรออนุมัติ ${stillPending.length} รายการ`
+          );
         }
-      } else if (stillPending.length > 0) {
-        pushToast(
-          stillPending.length === 1
-            ? "มีรายการจองรถรออนุมัติ 1 รายการ"
-            : `มีรายการจองรถรออนุมัติ ${stillPending.length} รายการ`
-        );
+        seenIds.current = currentIds;
+        setPending(stillPending);
       }
-      seenIds.current = currentIds;
-      setPending(stillPending);
+
+      // --- ส่วนที่ 2: toast แจ้งผลการจองรถของ "ตัวเอง" (ทุกบัญชี) ---
+      // เฉพาะการจองรถ (ห้องประชุมยืนยันทันทีอยู่แล้ว ไม่มีสถานะรออนุมัติให้
+      // เปลี่ยนแปลง) ของบัญชีนี้เอง ที่ยังไม่ถูกยกเลิก
+      const myCarBookings = bookings.filter(
+        (b) => b.resourceType === "car" && b.bookedByUsername === username && !isBookingCancelled(b)
+      );
+      if (seenBookingStatuses.current) {
+        const newlyApproved = myCarBookings.filter(
+          (b) => b.approvalStatus === "approved" && seenBookingStatuses.current!.get(b.bookingId) === "pending"
+        );
+        if (newlyApproved.length === 1) {
+          const b = newlyApproved[0];
+          const trip = tripOrders.find((t) => t.tripOrderId === b.tripOrderId);
+          pushToast(
+            `การจองรถ "${b.resourceName}" (${formatBookingDateTime(b.startTime)} – ${formatBookingDateTime(
+              b.endTime
+            )}) ได้รับการอนุมัติแล้ว` +
+              (trip ? ` — รถที่จัดให้: ${trip.resourceName} คนขับ: ${trip.driverName || "-"}` : ""),
+            "approved"
+          );
+        } else if (newlyApproved.length > 1) {
+          pushToast(`การจองรถของคุณได้รับการอนุมัติแล้ว ${newlyApproved.length} รายการ — ดูรายละเอียดที่หน้าจองรถ`, "approved");
+        }
+      }
+      const nextStatuses = new Map<string, Booking["approvalStatus"]>();
+      for (const b of myCarBookings) nextStatuses.set(b.bookingId, b.approvalStatus);
+      seenBookingStatuses.current = nextStatuses;
     } catch {
       // Best-effort — a transient poll failure just tries again next
       // interval, same philosophy as other background refreshes here.
     }
-  }, [pushToast]);
+  }, [pushToast, enabled, username]);
 
   useEffect(() => {
-    if (!enabled) return;
+    // ทำงานเสมอ ไม่ผูกกับ `enabled` อีกต่อไป — ส่วนที่ 2 (toast แจ้งผลการจอง
+    // รถของตัวเอง) ต้องทำงานสำหรับทุกบัญชี ไม่ใช่แค่ superadmin
     poll();
     const interval = setInterval(poll, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [enabled, poll]);
+  }, [poll]);
 
   /** Rejects a pending car booking outright — the only decision left that's
    * a direct status flip. See the top doc comment for why "approve" is
@@ -161,111 +228,125 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
     setDispatchBooking(null);
   }
 
-  if (!enabled) return null;
-
   return (
     <>
-      {/* Fixed, not embedded in the sidebar/topbar markup, so the same
-          trigger appears in a stable spot across both the desktop sidebar
-          layout and the mobile topbar without duplicating it in each. On
-          mobile it sits just below the 56px topbar; on desktop (no topbar)
-          it sits near the very top of the viewport instead. */}
-      <div className="fixed right-3 top-[68px] z-50 lg:right-4 lg:top-4">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-label="การแจ้งเตือนรายการรออนุมัติ"
-          className="relative flex h-10 w-10 items-center justify-center rounded-full border border-emerald-900/10 bg-white text-zinc-600 shadow-sm transition-colors hover:bg-emerald-50 hover:text-emerald-700 dark:border-emerald-400/10 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-emerald-950/40"
-        >
-          <Bell size={18} strokeWidth={2} aria-hidden="true" />
-          {pending.length > 0 && (
-            <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
-              {pending.length > 99 ? "99+" : pending.length}
-            </span>
+      {/* ส่วนที่ 1 เท่านั้นที่ถูกซ่อนทั้งหมดเมื่อ enabled เป็น false — ส่วนที่ 2
+          (toast ด้านล่าง) ต้องแสดงสำหรับทุกบัญชีเสมอ */}
+      {enabled && (
+        // Fixed, not embedded in the sidebar/topbar markup, so the same
+        // trigger appears in a stable spot across both the desktop sidebar
+        // layout and the mobile topbar without duplicating it in each. On
+        // mobile it sits just below the 56px topbar; on desktop (no topbar)
+        // it sits near the very top of the viewport instead.
+        <div className="fixed right-3 top-[68px] z-50 lg:right-4 lg:top-4">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-label="การแจ้งเตือนรายการรออนุมัติ"
+            className="relative flex h-10 w-10 items-center justify-center rounded-full border border-emerald-900/10 bg-white text-zinc-600 shadow-sm transition-colors hover:bg-emerald-50 hover:text-emerald-700 dark:border-emerald-400/10 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-emerald-950/40"
+          >
+            <Bell size={18} strokeWidth={2} aria-hidden="true" />
+            {pending.length > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+                {pending.length > 99 ? "99+" : pending.length}
+              </span>
+            )}
+          </button>
+
+          {open && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden="true" />
+              <div className="absolute right-0 z-50 mt-2 w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-emerald-900/10 bg-white shadow-xl dark:border-emerald-400/10 dark:bg-zinc-900">
+                <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
+                  <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">การจองรถรออนุมัติ</span>
+                  <span className="text-xs text-zinc-400 dark:text-zinc-500">{pending.length} รายการ</span>
+                </div>
+                {actionError && <p className="px-4 py-2 text-xs text-red-600 dark:text-red-400">{actionError}</p>}
+                <div className="max-h-[22rem] overflow-y-auto p-2">
+                  {pending.length === 0 ? (
+                    <p className="px-3 py-6 text-center text-sm text-zinc-400 dark:text-zinc-500">
+                      ไม่มีรายการรออนุมัติ
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {pending.map((b) => (
+                        <li key={b.bookingId} className="rounded-xl border border-zinc-100 p-3 dark:border-zinc-800">
+                          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">{b.resourceName}</p>
+                          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                            {formatBookingDateTime(b.startTime)} – {formatBookingDateTime(b.endTime)}
+                          </p>
+                          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                            {b.bookedByDisplayName || b.bookedByUsername}
+                            {b.department ? ` · ${b.department}` : ""}
+                          </p>
+                          {b.purpose && <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">{b.purpose}</p>}
+                          <div className="mt-2 flex gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => openDispatch(b)}
+                              disabled={actingId === b.bookingId}
+                              className="inline-flex items-center gap-1 rounded-full border border-sky-200 px-2 py-1 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-50 disabled:opacity-60 dark:border-sky-900/50 dark:text-sky-300 dark:hover:bg-sky-950/30"
+                            >
+                              <Truck size={12} strokeWidth={2} aria-hidden="true" />
+                              จัดรถ
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => reject(b.bookingId)}
+                              disabled={actingId === b.bookingId}
+                              className="inline-flex items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-60 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
+                            >
+                              {actingId === b.bookingId ? (
+                                <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                              ) : (
+                                <XIcon size={12} strokeWidth={2} aria-hidden="true" />
+                              )}
+                              ไม่อนุมัติ
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </>
           )}
-        </button>
+        </div>
+      )}
 
-        {open && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden="true" />
-            <div className="absolute right-0 z-50 mt-2 w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-emerald-900/10 bg-white shadow-xl dark:border-emerald-400/10 dark:bg-zinc-900">
-              <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
-                <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">การจองรถรออนุมัติ</span>
-                <span className="text-xs text-zinc-400 dark:text-zinc-500">{pending.length} รายการ</span>
-              </div>
-              {actionError && <p className="px-4 py-2 text-xs text-red-600 dark:text-red-400">{actionError}</p>}
-              <div className="max-h-[22rem] overflow-y-auto p-2">
-                {pending.length === 0 ? (
-                  <p className="px-3 py-6 text-center text-sm text-zinc-400 dark:text-zinc-500">
-                    ไม่มีรายการรออนุมัติ
-                  </p>
-                ) : (
-                  <ul className="space-y-2">
-                    {pending.map((b) => (
-                      <li key={b.bookingId} className="rounded-xl border border-zinc-100 p-3 dark:border-zinc-800">
-                        <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">{b.resourceName}</p>
-                        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                          {formatBookingDateTime(b.startTime)} – {formatBookingDateTime(b.endTime)}
-                        </p>
-                        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                          {b.bookedByDisplayName || b.bookedByUsername}
-                          {b.department ? ` · ${b.department}` : ""}
-                        </p>
-                        {b.purpose && <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">{b.purpose}</p>}
-                        <div className="mt-2 flex gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => openDispatch(b)}
-                            disabled={actingId === b.bookingId}
-                            className="inline-flex items-center gap-1 rounded-full border border-sky-200 px-2 py-1 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-50 disabled:opacity-60 dark:border-sky-900/50 dark:text-sky-300 dark:hover:bg-sky-950/30"
-                          >
-                            <Truck size={12} strokeWidth={2} aria-hidden="true" />
-                            จัดรถ
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => reject(b.bookingId)}
-                            disabled={actingId === b.bookingId}
-                            className="inline-flex items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-60 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
-                          >
-                            {actingId === b.bookingId ? (
-                              <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-                            ) : (
-                              <XIcon size={12} strokeWidth={2} aria-hidden="true" />
-                            )}
-                            ไม่อนุมัติ
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Toast stack — independent of the panel above (visible whether or
-          not it's open) so a new pending request is noticed even while the
-          admin is looking at something else entirely. */}
+      {/* Toast stack — ใช้ร่วมกันทั้งสองส่วน (แสดงเสมอไม่ว่า enabled จะเป็น
+          อะไร) เพื่อไม่ให้มีกล่อง toast ลอยซ้อนกันสองกล่องตำแหน่งเดียวกัน */}
       <div className="fixed bottom-4 right-4 z-50 flex w-[calc(100vw-2rem)] max-w-sm flex-col gap-2">
         {toasts.map((t) => (
           <button
             key={t.id}
             type="button"
             onClick={() => {
-              setOpen(true);
+              if (t.kind === "approved") {
+                router.push("/booking/car");
+              } else {
+                setOpen(true);
+              }
               setToasts((prev) => prev.filter((x) => x.id !== t.id));
             }}
             className="flex items-start gap-2 rounded-xl border border-emerald-900/10 bg-white px-4 py-3 text-left text-sm text-zinc-700 shadow-lg dark:border-emerald-400/10 dark:bg-zinc-900 dark:text-zinc-200"
           >
-            <Bell
-              size={16}
-              strokeWidth={2}
-              className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-              aria-hidden="true"
-            />
+            {t.kind === "approved" ? (
+              <CheckCircle2
+                size={16}
+                strokeWidth={2}
+                className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                aria-hidden="true"
+              />
+            ) : (
+              <Bell
+                size={16}
+                strokeWidth={2}
+                className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                aria-hidden="true"
+              />
+            )}
             <span>{t.text}</span>
           </button>
         ))}
