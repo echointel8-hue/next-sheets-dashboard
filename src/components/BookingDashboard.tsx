@@ -9,14 +9,12 @@ import {
   CalendarPlus,
   Car,
   DoorOpen,
-  ImageOff,
   List,
   Loader2,
   MapPin,
   Pencil,
   Phone,
-  Plus,
-  Power,
+  Settings,
   Truck,
   Users,
   X as XIcon,
@@ -43,6 +41,7 @@ import {
 import type { PermissionKey } from "@/lib/permissions";
 import AppShell from "@/components/AppShell";
 import BookingResourceFormModal from "@/components/BookingResourceFormModal";
+import BookingResourceListModal from "@/components/BookingResourceListModal";
 import BookingFormModal from "@/components/BookingFormModal";
 import BookingCalendar from "@/components/BookingCalendar";
 import TripOrderModal from "@/components/TripOrderModal";
@@ -113,6 +112,10 @@ export default function BookingDashboard({
   const [resourceModal, setResourceModal] = useState<{ mode: "add" | "edit"; resource?: BookingResource } | null>(
     null
   );
+  // popup รายการรถ/ห้องประชุม (BookingResourceListModal) — เดิมแสดงค้างอยู่
+  // บนหน้าตลอดเวลาให้ทุกคนเห็น ย้ายมาซ่อนไว้หลังปุ่ม "จัดการข้อมูล..." ที่
+  // เห็นได้เฉพาะ canManageResources เท่านั้นแทน ตามที่ขอ
+  const [resourceListModalOpen, setResourceListModalOpen] = useState(false);
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [togglingResourceId, setTogglingResourceId] = useState<string | null>(null);
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
@@ -431,114 +434,26 @@ export default function BookingDashboard({
 
         {!isError(data) && (
           <>
-            {/* รายการ{typeLabel} */}
-            <div className={`${CARD} flex flex-col gap-3 p-4`}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
+            {/* รายการ{typeLabel} — เดิมแสดงค้างไว้ตลอดให้ทุกคนเห็น ตอนนี้ซ่อน
+                ไว้หลังปุ่มนี้แทน เห็นได้เฉพาะผู้มีสิทธิจัดการทรัพยากร
+                (canManageResources) เท่านั้น ตามที่ขอ — เนื้อหาเดิมทั้งหมด
+                ย้ายไปอยู่ใน BookingResourceListModal ซึ่งเปิดจากปุ่มนี้ */}
+            {canManageResources && (
+              <div className={`${CARD} flex flex-wrap items-center justify-between gap-2 p-4`}>
                 <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
                   <TypeIcon size={15} strokeWidth={2} aria-hidden="true" />
-                  รายการ{typeLabel}
+                  ข้อมูล{typeLabel}ในระบบ
                 </div>
-                {canManageResources && (
-                  <button
-                    type="button"
-                    onClick={() => setResourceModal({ mode: "add" })}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] px-3 py-1.5 text-xs font-medium text-[var(--brand-contrast)] shadow-sm transition-opacity hover:opacity-90"
-                  >
-                    <Plus size={14} strokeWidth={2} aria-hidden="true" />
-                    เพิ่ม{typeLabel}ใหม่
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setResourceListModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  <Settings size={14} strokeWidth={2} aria-hidden="true" />
+                  จัดการข้อมูล{typeLabel}
+                </button>
               </div>
-
-              {typeResources.length === 0 ? (
-                <p className="py-4 text-center text-sm text-zinc-500 dark:text-zinc-400">
-                  ยังไม่มี{typeLabel}ในระบบ
-                </p>
-              ) : (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {typeResources.map((resource) => (
-                    <div
-                      key={resource.resourceId}
-                      className={`flex flex-col gap-2 rounded-xl border p-3 ${
-                        resource.active
-                          ? "border-zinc-200 dark:border-zinc-700"
-                          : "border-zinc-200 bg-zinc-50 opacity-70 dark:border-zinc-800 dark:bg-zinc-950/40"
-                      }`}
-                    >
-                      {/* รูปภาพ — ให้ผู้จองได้พิจารณาก่อนตัดสินใจจอง (ที่นี่
-                          และอีกครั้งในตัวเลือกตอนจอง — ดู BookingFormModal) */}
-                      <div className="flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
-                        {resource.imageDataUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element -- data: URL from the sheet, not a static/remote asset next/image can optimize
-                          <img
-                            src={resource.imageDataUrl}
-                            alt={resource.name}
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <ImageOff size={22} strokeWidth={1.5} className="text-zinc-300 dark:text-zinc-600" aria-hidden="true" />
-                        )}
-                      </div>
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-                          {resource.name}
-                        </span>
-                        {!resource.active && (
-                          <span className="shrink-0 rounded-full bg-zinc-200 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
-                            ปิดใช้งาน
-                          </span>
-                        )}
-                      </div>
-                      {resource.detail && (
-                        // whitespace-pre-line: เก็บการขึ้นบรรทัดใหม่ตามที่ผู้ดูแลพิมพ์ไว้ในช่อง
-                        // "รายละเอียดเพิ่มเติม" (textarea) — ก่อนหน้านี้ <p> ปกติจะยุบทุกบรรทัด
-                        // รวมเป็นย่อหน้าเดียว ทำให้ข้อความที่แยกบรรทัด/หัวข้อย่อยอ่านยาก
-                        <p className="whitespace-pre-line text-[11px] leading-5 text-zinc-500 dark:text-zinc-400">
-                          {resource.detail}
-                        </p>
-                      )}
-                      {type === "car" && !!resource.seatCount && (
-                        <span className="inline-flex w-fit items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
-                          <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
-                          {resource.seatCount.toLocaleString("th-TH")} ที่นั่ง
-                        </span>
-                      )}
-                      {canManageResources && (
-                        <div className="mt-1 flex flex-wrap gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setResourceModal({ mode: "edit", resource })}
-                            className={`${ACTION_BUTTON} border-zinc-200 text-zinc-600 hover:bg-zinc-50 focus-visible:outline-zinc-500 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800`}
-                          >
-                            <Pencil size={12} strokeWidth={2} aria-hidden="true" />
-                            แก้ไข
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => toggleResourceActive(resource)}
-                            disabled={togglingResourceId === resource.resourceId}
-                            className={
-                              resource.active
-                                ? `${ACTION_BUTTON} border-amber-200 text-amber-700 hover:bg-amber-50 focus-visible:outline-amber-600 dark:border-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-950/30`
-                                : `${ACTION_BUTTON} border-emerald-200 text-emerald-700 hover:bg-emerald-50 focus-visible:outline-emerald-600 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30`
-                            }
-                          >
-                            {togglingResourceId === resource.resourceId ? (
-                              <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
-                            ) : resource.active ? (
-                              <Ban size={12} strokeWidth={2} aria-hidden="true" />
-                            ) : (
-                              <Power size={12} strokeWidth={2} aria-hidden="true" />
-                            )}
-                            {resource.active ? "ปิดใช้งาน" : "เปิดใช้งาน"}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            )}
 
             {/* รายการจอง{typeLabel} */}
             <div className={`${CARD} flex flex-col gap-3 p-4`}>
@@ -591,7 +506,7 @@ export default function BookingDashboard({
                       className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-br from-sky-600 to-sky-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-opacity hover:opacity-90"
                     >
                       <Truck size={14} strokeWidth={2} aria-hidden="true" />
-                      ออกใบสั่งงานเดินทาง ({selectedBookingIds.size.toLocaleString("th-TH")})
+                      สั่งงานเดินทาง ({selectedBookingIds.size.toLocaleString("th-TH")})
                     </button>
                   )}
                   <button
@@ -800,6 +715,18 @@ export default function BookingDashboard({
         )}
       </div>
 
+      {resourceListModalOpen && (
+        <BookingResourceListModal
+          typeLabel={typeLabel}
+          type={type}
+          resources={typeResources}
+          togglingResourceId={togglingResourceId}
+          onAdd={() => setResourceModal({ mode: "add" })}
+          onEdit={(resource) => setResourceModal({ mode: "edit", resource })}
+          onToggleActive={toggleResourceActive}
+          onClose={() => setResourceListModalOpen(false)}
+        />
+      )}
       {resourceModal && (
         <BookingResourceFormModal
           mode={resourceModal.mode}

@@ -117,7 +117,13 @@ function readNewUserPayload(body: unknown): NewUserPayload | null {
     username: b.username.trim(),
     password: b.password,
     role: b.role,
-    department: b.role === "admin" ? b.department.trim() : "",
+    // ทุกสิทธิ์ต้องระบุกลุ่มงานแล้วตอนนี้ (ไม่ใช่แค่ admin เหมือนก่อนหน้านี้)
+    // ตามที่ขอ เพื่อให้ superadmin/it ที่สร้างในระบบมีกลุ่มงานติดไปกับบัญชี
+    // ด้วย (เช่น ตอนจองห้องประชุม/จองรถจะได้ขึ้นหน่วยงาน) — ไม่กระทบสิทธิ์การ
+    // มองเห็น/จัดการข้อมูลของ superadmin/it เลย เพราะจุดที่ scope ตาม
+    // department (เช่น GET /api/manage/records) เช็คแค่ role === "admin"
+    // เท่านั้น ดูคอมเมนต์ที่ SessionPayload.department ใน lib/auth.ts
+    department: b.department.trim(),
     displayName: b.displayName.trim(),
     extraPermissions: readPermissionKeyArray(b.extraPermissions),
     revokedPermissions: readPermissionKeyArray(b.revokedPermissions),
@@ -143,8 +149,10 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
-  if (submitted.role === "admin" && submitted.department === "") {
-    return NextResponse.json({ error: "admin ต้องระบุกลุ่มงานที่รับผิดชอบ" }, { status: 400 });
+  // ทุกสิทธิ์ต้องระบุกลุ่มงาน ไม่ใช่แค่ admin แล้ว — ดูคอมเมนต์ที่
+  // readNewUserPayload ด้านบน
+  if (submitted.department === "") {
+    return NextResponse.json({ error: "ต้องระบุกลุ่มงานที่รับผิดชอบ" }, { status: 400 });
   }
   const capError = validatePermissionCap(submitted.extraPermissions, submitted.role);
   if (capError) {
@@ -249,8 +257,12 @@ export async function PATCH(request: NextRequest) {
 
   const nextRole = submitted.role;
   const nextDepartment = submitted.department;
-  if (nextRole === "admin" && nextDepartment === "") {
-    return NextResponse.json({ error: "admin ต้องระบุกลุ่มงานที่รับผิดชอบ" }, { status: 400 });
+  // ทุกสิทธิ์ต้องระบุกลุ่มงานแล้วตอนนี้ ไม่ใช่แค่ admin (ดูคอมเมนต์ที่
+  // readNewUserPayload ด้านบน) — ตรวจเฉพาะตอนที่คำขอนี้ส่ง department มา
+  // ด้วยจริงๆ เท่านั้น (เหมือนพฤติกรรมเดิมของเช็คนี้ ซึ่งเป็นการแก้ไขแบบ
+  // partial update — คำขอที่ไม่ได้แตะ department เลยไม่ควรถูกบังคับ)
+  if (nextDepartment !== undefined && nextDepartment === "") {
+    return NextResponse.json({ error: "ต้องระบุกลุ่มงานที่รับผิดชอบ" }, { status: 400 });
   }
 
   try {

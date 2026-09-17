@@ -44,8 +44,16 @@ export type Role = "superadmin" | "admin" | "it";
 export interface SessionPayload {
   username: string;
   role: Role;
-  /** Department the account is scoped to. Always empty for superadmin
-   * (every department); always set for admin. */
+  /** Department this account belongs to. Only actually *scopes* access for
+   * role "admin" (see /api/manage/records's GET — a superadmin/it account
+   * still sees every department regardless of what's here, per a later,
+   * explicit hospital request: giving those roles a department is purely so
+   * their own bookings show a department, e.g. when they book a car/room —
+   * see /api/booking/bookings — not to narrow what they can see/manage).
+   * Every account created/edited through /manage/users (UserFormModal) now
+   * requires picking one, whatever its role — always empty only for the one
+   * env-configured bootstrap account (isBootstrap below), which isn't
+   * managed through that UI at all. */
   department: string;
   /** True only for the one env-configured bootstrap account — the sole
    * account allowed to manage other users. A superadmin created through
@@ -178,15 +186,30 @@ export function createSessionToken(payload: Omit<SessionPayload, "exp">): string
   return `${payloadB64}.${sign(payloadB64)}`;
 }
 
-/** Validates signature + expiry, returns the decoded session, or null if
- * missing/invalid/expired/tampered. */
-export function verifySessionToken(token: string | undefined | null): SessionPayload | null {
-  if (!token) return null;
+/** ทำไม verifySessionToken ถึงไม่ผ่าน — ใช้เฉพาะจุดที่อยากแยกแยะสาเหตุให้
+ * ผู้ใช้เห็น (ตอนนี้คือ proxy.ts ตอน redirect หน้าเว็บไป /login เพื่อโชว์
+ * ข้อความ "ถูกเตะออกเพราะมีคนล็อกอินซ้ำ" ให้ตรงสาเหตุจริง — ดู
+ * verifySessionTokenWithReason ด้านล่าง) จุดอื่นที่แค่ต้องรู้ "ผ่าน/ไม่ผ่าน"
+ * เฉยๆ ไม่ต้องสนใจ type นี้เลย ใช้ verifySessionToken ตัวเดิมได้เหมือนเดิม
+ * ทุกที่. */
+export type SessionInvalidReason =
+  | "missing" // ไม่มีคุกกี้เลย (ยังไม่เคยล็อกอิน หรือหมดอายุไปนานแล้วจนคุกกี้หาย)
+  | "invalid" // รูปแบบ/ลายเซ็นไม่ถูกต้อง (เสียหาย/ถูกแก้ไข)
+  | "expired" // เลย exp ไปแล้ว (idle timeout 5 นาที)
+  | "superseded"; // บัญชีเดียวกันถูกล็อกอินจากที่อื่นทับ (1 บัญชี 1 เซสชัน)
+
+/** เหมือน verifySessionToken ทุกประการ แต่ส่งสาเหตุกลับมาด้วยเมื่อไม่ผ่าน —
+ * verifySessionToken ด้านล่างเป็นแค่ wrapper บางๆ ของฟังก์ชันนี้ (คืนแค่
+ * .session) เพื่อให้ทุกจุดเรียกเดิมไม่ต้องแก้อะไรเลย. */
+export function verifySessionTokenWithReason(
+  token: string | undefined | null
+): { session: SessionPayload; reason?: undefined } | { session: null; reason: SessionInvalidReason } {
+  if (!token) return { session: null, reason: "missing" };
   const dotIndex = token.indexOf(".");
-  if (dotIndex === -1) return null;
+  if (dotIndex === -1) return { session: null, reason: "invalid" };
   const payloadB64 = token.slice(0, dotIndex);
   const sig = token.slice(dotIndex + 1);
-  if (!payloadB64 || !sig) return null;
+  if (!payloadB64 || !sig) return { session: null, reason: "invalid" };
 
   let sigBuf: Buffer;
   let expectedBuf: Buffer;
@@ -194,15 +217,17 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
     sigBuf = Buffer.from(sig, "hex");
     expectedBuf = Buffer.from(sign(payloadB64), "hex");
   } catch {
-    return null;
+    return { session: null, reason: "invalid" };
   }
-  if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) return null;
+  if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) {
+    return { session: null, reason: "invalid" };
+  }
 
   let payload: SessionPayload;
   try {
     payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
   } catch {
-    return null;
+    return { session: null, reason: "invalid" };
   }
   if (
     typeof payload.username !== "string" ||
@@ -211,7 +236,7 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
     typeof payload.isBootstrap !== "boolean" ||
     typeof payload.exp !== "number"
   ) {
-    return null;
+    return { session: null, reason: "invalid" };
   }
   // A cookie signed before displayName existed on SessionPayload simply
   // won't have this field — tolerate that (fall back to the username)
@@ -232,7 +257,7 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
   // Same tolerance again, for sessionId — a cookie signed before the
   // single-active-session feature existed just won't have one.
   if (typeof payload.sessionId !== "string") payload.sessionId = "";
-  if (Date.now() > payload.exp) return null;
+  if (Date.now() > payload.exp) return { session: null, reason: "expired" };
 
   // Single active session per account (see the section below this
   // function): a non-empty sessionId participates in the check; an empty
@@ -254,11 +279,21 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
     } else if (current !== payload.sessionId) {
       // A different login for this account is now the active one —
       // "logging in elsewhere kicks the old session out immediately," per
-      // the hospital's explicit choice.
-      return null;
+      // the hospital's explicit choice. proxy.ts uses this specific reason
+      // to show the kicked-out person a clear notice on /login instead of
+      // just silently landing them there with no explanation.
+      return { session: null, reason: "superseded" };
     }
   }
-  return payload;
+  return { session: payload };
+}
+
+/** Validates signature + expiry, returns the decoded session, or null if
+ * missing/invalid/expired/tampered. Thin wrapper around
+ * verifySessionTokenWithReason for every call site that only needs
+ * "valid or not," which is almost all of them. */
+export function verifySessionToken(token: string | undefined | null): SessionPayload | null {
+  return verifySessionTokenWithReason(token).session;
 }
 
 // --- Single active session per account (in-memory, per Node process) ---

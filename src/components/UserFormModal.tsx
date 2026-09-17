@@ -144,8 +144,13 @@ export default function UserFormModal({
       setError("รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร");
       return;
     }
-    if (role === "admin" && department.trim() === "") {
-      setError("admin ต้องระบุกลุ่มงานที่รับผิดชอบ");
+    // ทุกสิทธิ์ต้องระบุกลุ่มงานแล้วตอนนี้ ไม่ใช่แค่ admin เหมือนก่อนหน้านี้ —
+    // ตามที่ขอ เพื่อให้ superadmin/it ที่สร้างในระบบมีกลุ่มงานติดไปกับบัญชี
+    // ด้วย (ไม่กระทบสิทธิ์การมองเห็น/จัดการข้อมูลเลย — ดูคอมเมนต์ที่
+    // SessionPayload.department ใน lib/auth.ts) เพื่อให้ตอนบัญชีเหล่านั้น
+    // จองห้องประชุม/จองรถแล้วมีหน่วยงานแสดงด้วย ซึ่งก่อนหน้านี้ไม่มี
+    if (department.trim() === "") {
+      setError("กรุณาเลือกกลุ่มงานที่รับผิดชอบ");
       return;
     }
 
@@ -274,27 +279,32 @@ export default function UserFormModal({
               </select>
             </label>
 
-            {role === "admin" && (
-              <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
-                กลุ่มงานที่รับผิดชอบ
-                <select
-                  value={department}
-                  onChange={(e) => setDepartment(e.target.value)}
-                  disabled={saving}
-                  className={INPUT_CLASS}
-                >
-                  <option value="">— เลือกกลุ่มงาน —</option>
-                  {DEPARTMENT_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                  {department && !DEPARTMENT_OPTIONS.includes(department) && (
-                    <option value={department}>{department}</option>
-                  )}
-                </select>
-              </label>
-            )}
+            {/* ทุกสิทธิ์ต้องเลือกกลุ่มงานแล้วตอนนี้ (เดิมแสดงเฉพาะ admin) —
+                ตามที่ขอ เพื่อให้บัญชี superadmin/it ที่สร้างในระบบมีหน่วยงาน
+                ติดไปด้วย (ไม่กระทบสิทธิ์การมองเห็น/จัดการข้อมูลของสองสิทธิ์
+                นี้เลย — ยังเห็น/จัดการได้ทุกแผนกเหมือนเดิมทุกประการ กลุ่มงาน
+                ตรงนี้มีผลแค่ตอนบัญชีนั้นจองห้องประชุม/จองรถ ให้มีหน่วยงาน
+                แสดงในรายการจองด้วย ดูคอมเมนต์ที่ SessionPayload.department ใน
+                lib/auth.ts) */}
+            <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+              กลุ่มงาน
+              <select
+                value={department}
+                onChange={(e) => setDepartment(e.target.value)}
+                disabled={saving}
+                className={INPUT_CLASS}
+              >
+                <option value="">— เลือกกลุ่มงาน —</option>
+                {DEPARTMENT_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+                {department && !DEPARTMENT_OPTIONS.includes(department) && (
+                  <option value={department}>{department}</option>
+                )}
+              </select>
+            </label>
 
             <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
               <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">สิทธิ์เฉพาะบัญชี</p>

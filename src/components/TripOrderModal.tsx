@@ -22,9 +22,11 @@ const INPUT_CLASS =
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
-const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => pad2(i));
-const MINUTE_OPTIONS = ["00", "30"] as const;
-type MinuteOption = (typeof MINUTE_OPTIONS)[number];
+// ไม่มี HOUR_OPTIONS/MINUTE_OPTIONS/select ให้เลือกเวลาเองแล้ว — เวลาถูก
+// ล็อกให้คำนวณอัตโนมัติล้วนๆ เท่านั้น (ดูคอมเมนต์ที่ startHour/startMinute/
+// endHour/endMinute ด้านล่าง) เหลือไว้แค่ชนิดข้อมูล MinuteOption เพราะ
+// autoTimeParts ยังใช้เป็นชนิดข้อมูลของค่าที่คำนวณออกมาอยู่
+type MinuteOption = "00" | "30";
 
 function combineDateTime(date: string, hour: string, minute: string): string {
   return date ? `${date}T${hour}:${minute}` : "";
@@ -191,37 +193,21 @@ export default function TripOrderModal({
     () => (editing ? editing.startTime : (bookings[0]?.startTime ?? "")).slice(0, 10),
     [editing, bookings]
   );
-  const initialTimeParts = useMemo(
-    () => (editing ? autoTimeParts([{ startTime: editing.startTime, endTime: editing.endTime }]) : autoTimeParts(bookings)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- ตั้งใจให้เป็นค่าเริ่มต้นครั้งแรกเท่านั้น การปรับเวลาอัตโนมัติต่อจากนี้เทียบกับ extraBookingIds แทนแล้ว (ดูโค้ดด้านล่าง) ไม่ใช่ผูกกับ bookings/editing เพื่อไม่ให้ re-render ของ parent (เช่น NotificationBell poll ทุก 15 วินาที) มารีเซ็ตเวลาที่กำลังคำนวณอยู่โดยไม่มีการเปลี่ยนรายการที่เลือกจริง
-    []
+  // เวลารวมของใบสั่งงาน — คำนวณอัตโนมัติล้วนๆ ตามที่ขอเพิ่มภายหลัง (ล็อกไม่
+  // ให้ฝ่ายบริหารแก้ไขเวลาเองได้อีกเลย ไม่ใช่แค่ "auto-suggest แต่ยังแก้ได้"
+  // แบบก่อนหน้านี้) จึงไม่มี state/select ให้กรอกอีกต่อไป เหลือแค่ค่าที่คำนวณ
+  // มาแสดงผลอย่างเดียว (เหมือนวันเดินทางด้านล่างที่ล็อกไว้อยู่แล้วเช่นกัน) —
+  // โหมดสร้างใหม่: จากเวลาเริ่มเร็วที่สุด/สิ้นสุดช้าที่สุดของคำขอที่เลือกไว้
+  // ทั้งหมด (autoTimeParts ด้านบน) คำนวณใหม่ทุกครั้งที่ includedBookings
+  // เปลี่ยน (ติ๊กเพิ่ม/ถอนคำขออื่น) โหมดแก้ไข: ใช้เวลาที่บันทึกไว้ในใบสั่งงาน
+  // เดิมเสมอ (ไม่มีการติ๊กเพิ่มคำขอในโหมดนี้อยู่แล้ว)
+  const { startHour, startMinute, endHour, endMinute } = useMemo(
+    () =>
+      editing
+        ? autoTimeParts([{ startTime: editing.startTime, endTime: editing.endTime }])
+        : autoTimeParts(includedBookings),
+    [editing, includedBookings]
   );
-  const [startHour, setStartHour] = useState(initialTimeParts.startHour);
-  const [startMinute, setStartMinute] = useState<MinuteOption>(initialTimeParts.startMinute);
-  const [endHour, setEndHour] = useState(initialTimeParts.endHour);
-  const [endMinute, setEndMinute] = useState<MinuteOption>(initialTimeParts.endMinute);
-  // ปรับเวลารวมอัตโนมัติใหม่ทุกครั้งที่รายการที่เลือกเปลี่ยน (ติ๊กเพิ่ม/ถอน
-  // คำขออื่นในกล่อง "เพิ่มคำขออื่น") — เทียบ extraBookingIds ของ render นี้
-  // กับของ render ก่อนหน้า (เก็บไว้ใน prevExtraBookingIds) แล้วปรับ state
-  // เวลาไปพร้อมกันระหว่าง render เลย (รูปแบบที่ React แนะนำสำหรับ "derived
-  // state ที่ต้องรีเซ็ตเมื่อค่าที่อ้างอิงเปลี่ยน" — ดู
-  // https://react.dev/learn/you-might-not-need-an-effect — ไม่ใช้ useEffect
-  // เพราะจะโดน react-hooks/set-state-in-effect และเกิด render พิเศษเพิ่มอีก
-  // รอบโดยไม่จำเป็น) เทียบกับ extraBookingIds เท่านั้น (ไม่ใช่
-  // includedBookings ทั้งก้อน) เพราะ extraBookingIds เปลี่ยนเฉพาะตอนผู้ใช้ติ๊ก
-  // เองจริงๆ ส่วน includedBookings/bookings อาจเป็น array ใหม่ทุก re-render
-  // ของ parent (เช่น NotificationBell poll ทุก 15 วินาที) โดยเนื้อหาไม่ได้
-  // เปลี่ยนเลย ถ้าเทียบกับตัวนั้นจะรีเซ็ตเวลาที่ฝ่ายบริหารเพิ่งดูอยู่โดยไม่มี
-  // เหตุผล ข้ามในโหมดแก้ไขเสมอ (ไม่มีการติ๊กเพิ่มคำขอในโหมดนั้น).
-  const [prevExtraBookingIds, setPrevExtraBookingIds] = useState(extraBookingIds);
-  if (!editing && extraBookingIds !== prevExtraBookingIds) {
-    setPrevExtraBookingIds(extraBookingIds);
-    const parts = autoTimeParts(includedBookings);
-    setStartHour(parts.startHour);
-    setStartMinute(parts.startMinute);
-    setEndHour(parts.endHour);
-    setEndMinute(parts.endMinute);
-  }
   const startTime = combineDateTime(tripDateKey, startHour, startMinute);
   const endTime = combineDateTime(tripDateKey, endHour, endMinute);
 
@@ -388,7 +374,7 @@ export default function TripOrderModal({
             className="flex items-center gap-2 text-base font-semibold text-zinc-800 dark:text-zinc-100"
           >
             <Truck size={18} strokeWidth={2} className="shrink-0 text-[var(--brand-strong)]" aria-hidden="true" />
-            {editing ? "แก้ไขใบสั่งงานเดินทาง" : "ออกใบสั่งงานเดินทาง"}
+            {editing ? "แก้ไขใบสั่งงานเดินทาง" : "สั่งงานเดินทาง"}
           </h2>
           <button
             type="button"
@@ -401,6 +387,53 @@ export default function TripOrderModal({
         </div>
         <div className="overflow-y-auto px-5 py-4">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            {/* เส้นเวลาการเดินทาง — ย้ายมาไว้ใต้หัวข้อบนสุดตามที่ขอ (เดิมอยู่
+                ถัดจากช่องเวลา ตอนนี้เวลาก็ล็อกไว้ไม่ให้แก้ไขแล้วด้วย จึงให้
+                เห็นภาพรวมเวลาเดินทางก่อนเป็นอย่างแรกเลย) — แสดงให้เห็นว่า
+                แต่ละคำขอที่รวมอยู่ในใบสั่งงานนี้เดินทางช่วงไหนบ้างเทียบกับ
+                เวลารวมทั้งหมดของรถคันนี้ (แถบสีคือแต่ละคำขอ ตำแหน่ง/ความกว้าง
+                คำนวณจาก timelineRows ด้านบน) ใช้ชุดสีเดียวกับที่ใช้ทั่วทั้งแอป
+                (buildActionColorMap จาก lib/actionColors.ts ซึ่งผ่านการ
+                ตรวจสอบ colorblind-safe แล้ว) ไม่สร้างชุดสีใหม่ ตามที่ขอ
+                ("สวยๆ") */}
+            {timelineRows.length > 0 && (
+              <div className="flex flex-col gap-2.5 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
+                <div className="flex items-center justify-between text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                  <span>เส้นเวลาการเดินทาง</span>
+                  <span className="tabular-nums">
+                    {startHour}:{startMinute} – {endHour}:{endMinute}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {timelineRows.map((row) => {
+                    const color = timelineColorMap.get(row.bookingId);
+                    return (
+                      <div key={row.bookingId} className="flex items-center gap-2">
+                        <span
+                          className="w-20 shrink-0 truncate text-xs text-zinc-600 dark:text-zinc-300"
+                          title={row.label}
+                        >
+                          {row.label}
+                        </span>
+                        <div className="relative h-5 flex-1 rounded-full bg-zinc-200 dark:bg-zinc-700">
+                          {color && (
+                            <div
+                              className="absolute inset-y-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                              style={{ left: `${row.leftPct}%`, width: `${row.widthPct}%`, ...actionColorVars(color) }}
+                              title={`${row.label}: ${row.timeLabel}`}
+                            />
+                          )}
+                        </div>
+                        <span className="w-24 shrink-0 text-right text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
+                          {row.timeLabel}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {error && (
               <div role="alert" className="flex flex-col gap-1.5">
                 <p className="flex items-start gap-2 text-sm text-red-700 dark:text-red-300">
@@ -558,124 +591,24 @@ export default function TripOrderModal({
                   : "—"}
               </p>
             </div>
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+            <div className="flex gap-3">
+              <div className="flex flex-1 flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
                 เวลาเริ่มต้น (รวม)
-                {/* ปรับอัตโนมัติจากเวลาเริ่มเร็วที่สุด/สิ้นสุดช้าที่สุดของคำขอ
-                    ที่เลือกไว้ (ดู autoTimeParts ด้านบน) — ยังกดเลือกเองผ่าน
-                    select ได้อยู่ แต่จะถูกคำนวณใหม่ทับทุกครั้งที่ติ๊กเพิ่ม/
-                    ถอนคำขออื่น ตามที่ขอ */}
-                <div className="flex gap-2">
-                  <select
-                    value={startHour}
-                    onChange={(e) => setStartHour(e.target.value)}
-                    disabled={saving}
-                    aria-label="ชั่วโมงเริ่มต้น"
-                    className={`${INPUT_CLASS} w-[4.5rem] shrink-0`}
-                  >
-                    {HOUR_OPTIONS.map((h) => (
-                      <option key={h} value={h}>
-                        {h}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="flex items-center text-zinc-400" aria-hidden="true">
-                    :
-                  </span>
-                  <select
-                    value={startMinute}
-                    onChange={(e) => setStartMinute(e.target.value as MinuteOption)}
-                    disabled={saving}
-                    aria-label="นาทีเริ่มต้น"
-                    className={`${INPUT_CLASS} w-[4.5rem] shrink-0`}
-                  >
-                    {MINUTE_OPTIONS.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* ล็อกไว้ ไม่มีช่องให้แก้ไขเองแล้ว (ตามที่ขอเพิ่มภายหลัง) —
+                    ปรับอัตโนมัติล้วนๆ จากเวลาเริ่มเร็วที่สุด/สิ้นสุดช้าที่สุด
+                    ของคำขอที่เลือกไว้เท่านั้น (ดู autoTimeParts ด้านบน)
+                    เหมือนวันเดินทางด้านบนที่ล็อกไว้อยู่แล้วเช่นกัน */}
+                <p className={`${INPUT_CLASS} flex items-center bg-zinc-50 text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400`}>
+                  {startHour}:{startMinute} น.
+                </p>
               </div>
-              <div className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+              <div className="flex flex-1 flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
                 เวลาสิ้นสุด (รวม)
-                <div className="flex gap-2">
-                  <select
-                    value={endHour}
-                    onChange={(e) => setEndHour(e.target.value)}
-                    disabled={saving}
-                    aria-label="ชั่วโมงสิ้นสุด"
-                    className={`${INPUT_CLASS} w-[4.5rem] shrink-0`}
-                  >
-                    {HOUR_OPTIONS.map((h) => (
-                      <option key={h} value={h}>
-                        {h}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="flex items-center text-zinc-400" aria-hidden="true">
-                    :
-                  </span>
-                  <select
-                    value={endMinute}
-                    onChange={(e) => setEndMinute(e.target.value as MinuteOption)}
-                    disabled={saving}
-                    aria-label="นาทีสิ้นสุด"
-                    className={`${INPUT_CLASS} w-[4.5rem] shrink-0`}
-                  >
-                    {MINUTE_OPTIONS.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <p className={`${INPUT_CLASS} flex items-center bg-zinc-50 text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400`}>
+                  {endHour}:{endMinute} น.
+                </p>
               </div>
             </div>
-
-            {/* เส้นเวลาการเดินทาง — แสดงให้เห็นว่าแต่ละคำขอที่รวมอยู่ในใบ
-                สั่งงานนี้เดินทางช่วงไหนบ้างเทียบกับเวลารวมทั้งหมดของรถคันนี้
-                (แถบสีคือแต่ละคำขอ ตำแหน่ง/ความกว้างคำนวณจาก timelineRows
-                ด้านบน) ใช้ชุดสีเดียวกับที่ใช้ทั่วทั้งแอป (buildActionColorMap
-                จาก lib/actionColors.ts ซึ่งผ่านการตรวจสอบ colorblind-safe
-                แล้ว) ไม่สร้างชุดสีใหม่ ตามที่ขอ ("สวยๆ") */}
-            {timelineRows.length > 0 && (
-              <div className="flex flex-col gap-2.5 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
-                <div className="flex items-center justify-between text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                  <span>เส้นเวลาการเดินทาง</span>
-                  <span className="tabular-nums">
-                    {startHour}:{startMinute} – {endHour}:{endMinute}
-                  </span>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  {timelineRows.map((row) => {
-                    const color = timelineColorMap.get(row.bookingId);
-                    return (
-                      <div key={row.bookingId} className="flex items-center gap-2">
-                        <span
-                          className="w-20 shrink-0 truncate text-xs text-zinc-600 dark:text-zinc-300"
-                          title={row.label}
-                        >
-                          {row.label}
-                        </span>
-                        <div className="relative h-5 flex-1 rounded-full bg-zinc-200 dark:bg-zinc-700">
-                          {color && (
-                            <div
-                              className="absolute inset-y-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
-                              style={{ left: `${row.leftPct}%`, width: `${row.widthPct}%`, ...actionColorVars(color) }}
-                              title={`${row.label}: ${row.timeLabel}`}
-                            />
-                          )}
-                        </div>
-                        <span className="w-24 shrink-0 text-right text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
-                          {row.timeLabel}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
             <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
               หมายเหตุ (ไม่บังคับ)
