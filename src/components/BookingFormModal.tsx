@@ -107,6 +107,33 @@ export default function BookingFormModal({
   const [endDate, setEndDate] = useState(defaultParts.endDate);
   const [endHour, setEndHour] = useState(defaultParts.endHour);
   const [endMinute, setEndMinute] = useState<MinuteOption>(defaultParts.endMinute);
+  // แจ้งเตือนเฉพาะตอนพยายามตั้งวันสิ้นสุดให้ก่อนวันเริ่มต้น — แยกจาก error
+  // หลักของฟอร์ม (ที่แสดงบนสุด/มาจากการ submit) เพราะอันนี้เป็น validation
+  // สดๆ ตอนพิมพ์/เลือกวันที่ในช่องนี้โดยเฉพาะ ไม่ใช่ตอน submit
+  const [endDateError, setEndDateError] = useState<string | null>(null);
+  /** เปลี่ยนวันเริ่มต้น — ให้วันสิ้นสุดตามไปด้วยเสมอ (มิเรอร์กับวันเริ่มต้น)
+   * ตามที่ขอ เพื่อไม่ให้เกิดค่าที่ไม่ถูกต้องแบบเดิม (เลือกวันเริ่มต้นใหม่
+   * แล้ววันสิ้นสุดค้างเป็นวันเก่าที่ย้อนหลังกว่า) ผู้จองยังปรับวันสิ้นสุดเอง
+   * ภายหลังได้อิสระผ่านช่องวันสิ้นสุดโดยตรง (เช่น จองข้ามหลายวัน) — ระบบแค่
+   * ไม่ยอมให้ปรับย้อนไปก่อนวันเริ่มต้น (ดู handleEndDateChange ด้านล่าง) */
+  function handleStartDateChange(value: string) {
+    setStartDate(value);
+    setEndDate(value);
+    setEndDateError(null);
+  }
+  /** เปลี่ยนวันสิ้นสุด — ปฏิเสธค่าที่ย้อนหลังกว่าวันเริ่มต้นตรงๆ (ไม่อัปเดต
+   * state เลย ค่าที่แสดงยังเป็นค่าที่ถูกต้องล่าสุด) พร้อมแจ้งเตือน เพราะตาม
+   * หลักการเวลาเริ่มต้นต้องมาก่อนเวลาสิ้นสุดเสมอ ตามที่ขอ — เทียบสตริง
+   * "YYYY-MM-DD" ตรงๆ ได้เลยโดยไม่ต้อง parse เป็น Date เพราะรูปแบบนี้เรียง
+   * ตามตัวอักษรตรงกับเรียงตามเวลาพอดีอยู่แล้ว */
+  function handleEndDateChange(value: string) {
+    if (value < startDate) {
+      setEndDateError("วันที่สิ้นสุดต้องไม่ก่อนวันที่เริ่มต้น");
+      return;
+    }
+    setEndDateError(null);
+    setEndDate(value);
+  }
   // ค่ารวมรูปแบบ "YYYY-MM-DDTHH:MM" เดิม — ใช้กับ validation/ส่ง API ด้านล่าง
   // เหมือนเดิมทุกจุด ไม่ต้องแตะโค้ดส่วนอื่นที่อ้างอิง startTime/endTime.
   const startTime = combineDateTime(startDate, startHour, startMinute);
@@ -349,7 +376,7 @@ export default function BookingFormModal({
                   <input
                     type="date"
                     value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
+                    onChange={(e) => handleStartDateChange(e.target.value)}
                     disabled={saving}
                     className={`${INPUT_CLASS} min-w-0 flex-1`}
                   />
@@ -390,7 +417,7 @@ export default function BookingFormModal({
                   <input
                     type="date"
                     value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
+                    onChange={(e) => handleEndDateChange(e.target.value)}
                     disabled={saving}
                     className={`${INPUT_CLASS} min-w-0 flex-1`}
                   />
@@ -424,6 +451,12 @@ export default function BookingFormModal({
                     ))}
                   </select>
                 </div>
+                {endDateError && (
+                  <p className="flex items-start gap-1.5 text-xs leading-5 text-red-700 dark:text-red-300">
+                    <AlertTriangle size={13} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+                    {endDateError}
+                  </p>
+                )}
               </div>
             </div>
             <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
