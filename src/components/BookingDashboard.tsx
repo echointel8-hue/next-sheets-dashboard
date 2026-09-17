@@ -569,7 +569,11 @@ export default function BookingDashboard({
                       รายการ
                     </button>
                   </div>
-                  {canApprove && selectedBookingIds.size > 0 && (
+                  {/* เฉพาะมุมมอง "รายการ" (ตาราง) เท่านั้น — มุมมอง "ปฏิทิน" ย้าย
+                      ปุ่มนี้ไปไว้ในหน้าต่างรายละเอียดวัน (DayDetailModal) แทน
+                      แล้ว ตามที่ขอ เพราะปุ่มตรงนี้ถูกหน้าต่างนั้นบังไว้พอดี
+                      ตอนกำลังเลือกจัดรถอยู่ ต้องปิดก่อนถึงจะกดได้ */}
+                  {canApprove && viewMode === "list" && selectedBookingIds.size > 0 && (
                     <button
                       type="button"
                       onClick={() => setTripOrderModalOpen(true)}
@@ -612,6 +616,7 @@ export default function BookingDashboard({
                   tripOrderByBookingId={tripOrderByBookingId}
                   onEditBooking={setEditBookingTarget}
                   onEditTripOrder={setEditTripOrderTarget}
+                  onOpenTripOrder={() => setTripOrderModalOpen(true)}
                 />
               ) : (
                 <div className="overflow-x-auto">

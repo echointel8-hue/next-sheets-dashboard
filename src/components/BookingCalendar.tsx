@@ -122,6 +122,7 @@ export default function BookingCalendar({
   tripOrderByBookingId,
   onEditBooking,
   onEditTripOrder,
+  onOpenTripOrder,
 }: {
   typeLabel: string;
   bookings: Booking[];
@@ -158,6 +159,11 @@ export default function BookingCalendar({
    * booking — lets management correct the assigned car/driver/time after
    * the fact, without touching which bookings it covers. */
   onEditTripOrder: (tripOrder: TripOrder) => void;
+  /** เปิด TripOrderModal โหมดสร้างใหม่ (ออกใบสั่งงาน) สำหรับรายการที่เลือกไว้
+   * ใน selectedBookingIds ทั้งหมด — ปุ่มนี้ย้ายมาอยู่ใน DayDetailModal เอง
+   * ตามที่ขอ (เดิมมีอยู่แต่ที่หัวข้อด้านบนปฏิทิน ซึ่งถูกโมดัลนี้บังไว้พอดี
+   * ตอนดูรายละเอียดวัน) — BookingDashboard เป็นเจ้าของ state ที่แท้จริง. */
+  onOpenTripOrder: () => void;
 }) {
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
@@ -329,6 +335,7 @@ export default function BookingCalendar({
           tripOrderByBookingId={tripOrderByBookingId}
           onEditBooking={onEditBooking}
           onEditTripOrder={onEditTripOrder}
+          onOpenTripOrder={onOpenTripOrder}
           onClose={() => setSelectedDateKey(null)}
         />
       )}
@@ -353,6 +360,7 @@ function DayDetailModal({
   tripOrderByBookingId,
   onEditBooking,
   onEditTripOrder,
+  onOpenTripOrder,
   onClose,
 }: {
   dateKey: string;
@@ -371,6 +379,7 @@ function DayDetailModal({
   tripOrderByBookingId: Map<string, TripOrder>;
   onEditBooking: (booking: Booking) => void;
   onEditTripOrder: (tripOrder: TripOrder) => void;
+  onOpenTripOrder: () => void;
   onClose: () => void;
 }) {
   const [y, mo, d] = dateKey.split("-");
@@ -556,6 +565,24 @@ function DayDetailModal({
             })
           )}
         </div>
+        {/* ปุ่ม "ออกใบสั่งงานเดินทาง" ย้ายมาไว้ตรงนี้ (แถบท้ายหน้าต่างรายละเอียด
+            วัน) ตามที่ขอ — เดิมอยู่เหนือปฏิทินด้านหลัง ซึ่งหน้าต่างนี้บังไว้
+            พอดีตอนกำลังเลือกจัดรถอยู่ ต้องปิดหน้าต่างนี้ก่อนถึงจะกดได้ ย้ายมา
+            ไว้ในหน้าต่างเดียวกันนี้แทน กดได้ทันทีโดยไม่ต้องปิดก่อน (ยังใช้
+            selectedBookingIds ชุดเดียวกับที่ BookingDashboard เป็นเจ้าของ จึง
+            อาจรวมรายการที่เลือกไว้จากวันอื่นก่อนหน้านี้ด้วยได้เหมือนเดิม) */}
+        {canApprove && selectedBookingIds.size > 0 && (
+          <div className="flex justify-end border-t border-zinc-100 px-5 py-3 dark:border-zinc-800">
+            <button
+              type="button"
+              onClick={onOpenTripOrder}
+              className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-br from-sky-600 to-sky-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-opacity hover:opacity-90"
+            >
+              <Truck size={14} strokeWidth={2} aria-hidden="true" />
+              ออกใบสั่งงานเดินทาง ({selectedBookingIds.size.toLocaleString("th-TH")})
+            </button>
+          </div>
+        )}
       </div>
     </div>,
     document.body
