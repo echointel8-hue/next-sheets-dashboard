@@ -2,7 +2,6 @@
 
 import { useState, type FormEvent } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Loader2, LogIn } from "lucide-react";
 
 const INPUT_CLASS =
@@ -85,7 +84,6 @@ function PasswordField({
  * must differ from the default, kicks out any session already active for
  * that account). */
 export default function LoginForm({ next }: { next: string }) {
-  const router = useRouter();
   const [mode, setMode] = useState<"login" | "reset">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -118,8 +116,21 @@ export default function LoginForm({ next }: { next: string }) {
         setLoading(false);
         return;
       }
-      router.push(next);
-      router.refresh();
+      // Full hard navigation, not router.push()/router.refresh() — this
+      // used to be the cause of a real bug: if the same account logs in
+      // from more than one place around the same time (lib/auth.ts's
+      // single-active-session rule silently supersedes the older login),
+      // the client-side router's push+refresh transition to `next` could
+      // land back on a proxy.ts redirect to /login instead — and because
+      // this function never called setLoading(false) on the success path
+      // (it relied on this component unmounting once navigation finished),
+      // getting caught in that redirect left the submit button stuck
+      // disabled with its spinner forever, with no way to retry without a
+      // manual page reload. A hard navigation sidesteps this entirely: the
+      // whole page unloads either way, so there's no lingering component
+      // state left to get stuck — landing back on /login now just means a
+      // completely fresh, immediately-usable login form, not a dead one.
+      window.location.href = next;
     } catch {
       setError("เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่");
       setLoading(false);

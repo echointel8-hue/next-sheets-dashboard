@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   Car,
   ClipboardList,
@@ -92,15 +92,20 @@ export default function AppShell({
   children,
 }: AppShellProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   async function logout() {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
     } finally {
-      router.push("/login");
-      router.refresh();
+      // Hard navigation, not router.push()/router.refresh() — same fix and
+      // same reasoning as LoginForm's handleLoginSubmit: a full page
+      // unload can never get stuck in a half-finished client-router
+      // transition the way push+refresh occasionally could. Deliberately
+      // ignoring the lint rule's router.push() suggestion — that's the
+      // exact pattern being fixed here.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- intentional hard navigation, see comment above
+      window.location.href = "/login";
     }
   }
 
