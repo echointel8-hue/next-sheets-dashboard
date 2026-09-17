@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, Check, Loader2, X as XIcon } from "lucide-react";
-import { formatBookingDateTime, isBookingCancelled, type Booking } from "@/lib/booking";
+import { Bell, Loader2, Truck, X as XIcon } from "lucide-react";
+import { formatBookingDateTime, isBookingCancelled, type Booking, type BookingResource, type TripOrder } from "@/lib/booking";
+import TripOrderModal from "@/components/TripOrderModal";
 
 // No websocket/push available — the backend is Google Sheets, read on
 // every request — so "live" here means polling. True real-time would need
@@ -29,9 +30,13 @@ interface Toast {
  *
  * Reuses the existing GET /api/booking/bookings list (already used by
  * BookingDashboard) rather than a dedicated endpoint — filtered
- * client-side to car + pending + not cancelled — and the existing PATCH
- * /api/booking/bookings/[bookingId] for the approve/reject buttons in the
- * panel, so no new server-side surface was needed for this feature.
+ * client-side to car + pending + not cancelled. "ไม่อนุมัติ" still calls
+ * the existing PATCH /api/booking/bookings/[bookingId] directly (reject is
+ * a single-click decision, unchanged). "จัดรถ" no longer flips a status
+ * here — it opens the same TripOrderModal the booking dashboard uses, so
+ * dispatching straight from this popup still goes through the one
+ * required path (car + driver + time -> POST /api/booking/trip-orders)
+ * instead of the old direct-approve call, which the server now refuses.
  *
  * Per explicit scope choices: no persisted notification history — "seen"
  * bookingIds live only in this tab's memory for this session, and the
@@ -44,6 +49,11 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [actingId, setActingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // รถที่เปิดใช้งานอยู่ — ดึงมาให้ TripOrderModal เลือกใช้ตอนกด "จัดรถ" จาก
+  // ป็อปอัปนี้ (ปกติแล้วหน้าจองรถเองมีรายการนี้อยู่แล้ว แต่ป็อปอัปนี้ลอยอยู่
+  // เหนือทุกหน้า จึงต้องดึงเองแยกต่างหาก)
+  const [carResources, setCarResources] = useState<BookingResource[]>([]);
+  const [dispatchBooking, setDispatchBooking] = useState<Booking | null>(null);
   // null = no poll has completed yet, so the very first result is treated
   // as "what's already waiting" (one summary toast) rather than diffed
   // against an empty set (which would also work, but this reads clearer).
@@ -98,14 +108,17 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
     return () => clearInterval(interval);
   }, [enabled, poll]);
 
-  async function decide(bookingId: string, approvalStatus: "approved" | "rejected") {
+  /** Rejects a pending car booking outright — the only decision left that's
+   * a direct status flip. See the top doc comment for why "approve" is
+   * handled by openDispatch/TripOrderModal instead. */
+  async function reject(bookingId: string) {
     setActingId(bookingId);
     setActionError(null);
     try {
       const res = await fetch(`/api/booking/bookings/${bookingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approvalStatus }),
+        body: JSON.stringify({ approvalStatus: "rejected" }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -119,6 +132,33 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
     } finally {
       setActingId(null);
     }
+  }
+
+  /** Opens TripOrderModal for exactly this one booking — fetches the
+   * active car resource list on demand (best-effort; the modal itself
+   * still shows a clear "ไม่มีรถที่เปิดใช้งาน" state if this comes back
+   * empty, same as BookingFormModal). */
+  async function openDispatch(booking: Booking) {
+    setActionError(null);
+    if (carResources.length === 0) {
+      try {
+        const res = await fetch("/api/booking/resources", { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(data.resources)) {
+          setCarResources((data.resources as BookingResource[]).filter((r) => r.type === "car" && r.active));
+        }
+      } catch {
+        // best-effort — TripOrderModal still opens and shows "ไม่มีรถที่เปิดใช้งาน"
+      }
+    }
+    setDispatchBooking(booking);
+    setOpen(false);
+  }
+
+  function handleTripOrderCreated({ tripOrder }: { tripOrder: TripOrder; bookings: Booking[] }) {
+    setPending((prev) => prev.filter((b) => !tripOrder.bookingIds.includes(b.bookingId)));
+    for (const bookingId of tripOrder.bookingIds) seenIds.current?.delete(bookingId);
+    setDispatchBooking(null);
   }
 
   if (!enabled) return null;
@@ -175,24 +215,24 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
                         <div className="mt-2 flex gap-1.5">
                           <button
                             type="button"
-                            onClick={() => decide(b.bookingId, "approved")}
+                            onClick={() => openDispatch(b)}
                             disabled={actingId === b.bookingId}
-                            className="inline-flex items-center gap-1 rounded-full border border-emerald-200 px-2 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-50 disabled:opacity-60 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+                            className="inline-flex items-center gap-1 rounded-full border border-sky-200 px-2 py-1 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-50 disabled:opacity-60 dark:border-sky-900/50 dark:text-sky-300 dark:hover:bg-sky-950/30"
+                          >
+                            <Truck size={12} strokeWidth={2} aria-hidden="true" />
+                            จัดรถ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => reject(b.bookingId)}
+                            disabled={actingId === b.bookingId}
+                            className="inline-flex items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-60 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
                           >
                             {actingId === b.bookingId ? (
                               <Loader2 size={12} strokeWidth={2} className="animate-spin" aria-hidden="true" />
                             ) : (
-                              <Check size={12} strokeWidth={2} aria-hidden="true" />
+                              <XIcon size={12} strokeWidth={2} aria-hidden="true" />
                             )}
-                            อนุมัติ
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => decide(b.bookingId, "rejected")}
-                            disabled={actingId === b.bookingId}
-                            className="inline-flex items-center gap-1 rounded-full border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-60 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
-                          >
-                            <XIcon size={12} strokeWidth={2} aria-hidden="true" />
                             ไม่อนุมัติ
                           </button>
                         </div>
@@ -230,6 +270,15 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
           </button>
         ))}
       </div>
+
+      {dispatchBooking && (
+        <TripOrderModal
+          bookings={[dispatchBooking]}
+          resources={carResources}
+          onClose={() => setDispatchBooking(null)}
+          onCreated={handleTripOrderCreated}
+        />
+      )}
     </>
   );
 }
