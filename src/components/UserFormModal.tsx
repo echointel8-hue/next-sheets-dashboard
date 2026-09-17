@@ -298,11 +298,6 @@ export default function UserFormModal({
 
             <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
               <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">สิทธิ์เฉพาะบัญชี</p>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                เริ่มต้นตามสิทธิ์ &quot;{role}&quot; ด้านบน — ติ๊กเพิ่มเพื่อให้สิทธิ์พิเศษ หรือปลดติ๊กเพื่อ
-                ตัดสิทธิ์ที่สิทธิ์นี้ปกติจะได้ (เปลี่ยนสิทธิ์หลักด้านบนจะรีเซ็ตรายการนี้กลับเป็นค่าเริ่มต้น) —
-                รายการที่ให้เพิ่มไม่ได้ (สงวนไว้เฉพาะบัญชีผู้ดูแลระบบหลัก) จะไม่แสดงในนี้
-              </p>
               <div className="flex flex-col gap-1.5">
                 {PERMISSION_KEYS.filter(
                   // Hide a bootstrap-reserved key entirely unless this
