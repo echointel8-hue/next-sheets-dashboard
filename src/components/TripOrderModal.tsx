@@ -387,9 +387,39 @@ export default function TripOrderModal({
         </div>
         <div className="overflow-y-auto px-5 py-4">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {/* เส้นเวลาการเดินทาง — ย้ายมาไว้ใต้หัวข้อบนสุดตามที่ขอ (เดิมอยู่
+            {/* รายการคำขอจองที่ถูกเลือกไว้ — ย้ายมาไว้บนสุดตามที่ขอ (เดิมอยู่
+                ถัดจาก error) แสดงเป็นการยืนยันเท่านั้น ข้อมูลของแต่ละคำขอจะ
+                ไม่ถูกแก้ไข ใบสั่งงานนี้เป็นระเบียนแยกต่างหากที่อ้างอิงคำขอ
+                เหล่านี้เท่านั้น ตามที่โรงพยาบาลขอ */}
+            <div className="flex flex-col gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
+              <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                {editing
+                  ? `คำขอจองที่ใบสั่งงานนี้ครอบคลุม (${includedBookings.length.toLocaleString("th-TH")} รายการ) — แก้ไขตรงนี้ไม่ได้`
+                  : `คำขอจองที่จะรวมในใบสั่งงานนี้ (${includedBookings.length.toLocaleString("th-TH")} รายการ)`}
+              </p>
+              <ul className="flex flex-col gap-1.5">
+                {includedBookings.map((b) => (
+                  <li key={b.bookingId} className="text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                    <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                      {formatBookingDateTime(b.startTime)} – {formatBookingDateTime(b.endTime)}
+                    </span>{" "}
+                    {b.department || b.bookedByDisplayName || b.bookedByUsername} — {b.purpose}
+                    {b.destination && <> (ปลายทาง: {b.destination})</>}
+                    {extraBookingIds.has(b.bookingId) && (
+                      <span className="ml-1 text-emerald-700 dark:text-emerald-400">(เพิ่มเข้ามา)</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                รวมผู้โดยสารตามคำขอ {totalParticipants.toLocaleString("th-TH")} คน
+              </p>
+            </div>
+
+            {/* เส้นเวลาการเดินทาง — ถัดจากรายการคำขอด้านบนตามที่ขอ (เดิมอยู่
                 ถัดจากช่องเวลา ตอนนี้เวลาก็ล็อกไว้ไม่ให้แก้ไขแล้วด้วย จึงให้
-                เห็นภาพรวมเวลาเดินทางก่อนเป็นอย่างแรกเลย) — แสดงให้เห็นว่า
+                เห็นภาพรวมเวลาเดินทางก่อนเป็นอย่างแรกๆ) — แสดงให้เห็นว่า
                 แต่ละคำขอที่รวมอยู่ในใบสั่งงานนี้เดินทางช่วงไหนบ้างเทียบกับ
                 เวลารวมทั้งหมดของรถคันนี้ (แถบสีคือแต่ละคำขอ ตำแหน่ง/ความกว้าง
                 คำนวณจาก timelineRows ด้านบน) ใช้ชุดสีเดียวกับที่ใช้ทั่วทั้งแอป
@@ -454,35 +484,6 @@ export default function TripOrderModal({
                 )}
               </div>
             )}
-
-            {/* รายการคำขอจองที่ถูกเลือกไว้ — แสดงเป็นการยืนยันเท่านั้น
-                ข้อมูลของแต่ละคำขอจะไม่ถูกแก้ไข ใบสั่งงานนี้เป็นระเบียนแยก
-                ต่างหากที่อ้างอิงคำขอเหล่านี้เท่านั้น ตามที่โรงพยาบาลขอ */}
-            <div className="flex flex-col gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
-              <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                {editing
-                  ? `คำขอจองที่ใบสั่งงานนี้ครอบคลุม (${includedBookings.length.toLocaleString("th-TH")} รายการ) — แก้ไขตรงนี้ไม่ได้`
-                  : `คำขอจองที่จะรวมในใบสั่งงานนี้ (${includedBookings.length.toLocaleString("th-TH")} รายการ)`}
-              </p>
-              <ul className="flex flex-col gap-1.5">
-                {includedBookings.map((b) => (
-                  <li key={b.bookingId} className="text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-                    <span className="font-medium text-zinc-800 dark:text-zinc-100">
-                      {formatBookingDateTime(b.startTime)} – {formatBookingDateTime(b.endTime)}
-                    </span>{" "}
-                    {b.department || b.bookedByDisplayName || b.bookedByUsername} — {b.purpose}
-                    {b.destination && <> (ปลายทาง: {b.destination})</>}
-                    {extraBookingIds.has(b.bookingId) && (
-                      <span className="ml-1 text-emerald-700 dark:text-emerald-400">(เพิ่มเข้ามา)</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
-                <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
-                รวมผู้โดยสารตามคำขอ {totalParticipants.toLocaleString("th-TH")} คน
-              </p>
-            </div>
 
             {/* เฉพาะโหมดสร้างใหม่: คำขอจองรถ "รออนุมัติ" อื่นในวันเดียวกันที่
                 ยังไม่ถูกเลือกไว้แต่แรก — ให้ติ๊กเพิ่มเข้าใบสั่งงานเดียวกันได้
