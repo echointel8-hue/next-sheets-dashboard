@@ -501,6 +501,12 @@ function DayDetailModal({
                       <span className="flex items-start gap-1.5">
                         <Truck size={13} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
                         <span>
+                          {/* รถจริงที่ได้รับมอบหมาย — แสดงตรงนี้แทนหัวการ์ด
+                              ด้านบน (b.resourceName) ซึ่งตอนนี้เป็นแค่ข้อความ
+                              กลางๆ "รอบริหารจัดสรร" เสมอสำหรับการจองรถ (ดู
+                              PENDING_CAR_RESOURCE_NAME ใน lib/booking.ts) —
+                              รถ/คนขับตัวจริงมาจากใบสั่งงานเดินทางเท่านั้น */}
+                          <span className="font-medium">{tripOrderByBookingId.get(b.bookingId)!.resourceName}</span> ·
                           คนขับ: {tripOrderByBookingId.get(b.bookingId)!.driverName || "—"}
                           {tripOrderByBookingId.get(b.bookingId)!.bookingIds.length > 1 && (
                             <> (ร่วมเที่ยวกับอีก {tripOrderByBookingId.get(b.bookingId)!.bookingIds.length - 1} คำขอ)</>

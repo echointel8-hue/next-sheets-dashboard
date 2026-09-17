@@ -184,7 +184,18 @@ export default function BookingDashboard({
   // silently reshuffle every other resource's color too. Built from every
   // resource of this type, active or not, so a cancelled booking against a
   // since-deactivated resource still shows a stable, decodable color.
+  //
+  // Car only ever gets an empty map now (deliberately, not just a
+  // did-nothing branch) — a car booking no longer records which real car
+  // resource it's against (see PENDING_CAR_RESOURCE_NAME in
+  // lib/booking.ts), so every car booking would share the exact same
+  // placeholder resourceName and this map's per-resource legend/coloring
+  // would be pure noise (a legend listing every car in the fleet, none of
+  // which any booking could ever actually be colored by) — better to show
+  // none at all than a misleading one. Room bookings still pick a real
+  // resource up front, so this is entirely unchanged for them.
   const resourceColorMap: Map<string, ActionColor> = useMemo(() => {
+    if (type === "car") return new Map();
     const byCreatedAt = resources
       .filter((r) => r.type === type)
       .slice()
@@ -586,7 +597,11 @@ export default function BookingDashboard({
                   <button
                     type="button"
                     onClick={() => setBookingModalOpen(true)}
-                    disabled={activeTypeResources.length === 0}
+                    // ห้องประชุมยังต้องมีอย่างน้อย 1 ห้องที่เปิดใช้งานอยู่
+                    // จึงจะจองได้ (เลือกทรัพยากรเจาะจงเหมือนเดิม) — รถไม่ต้อง
+                    // มีให้เลือกล่วงหน้าอีกต่อไปแล้ว จึงจองได้เสมอไม่ว่าจะมี
+                    // รถในระบบหรือไม่ (ดูคอมเมนต์ใน BookingFormModal.tsx)
+                    disabled={type === "room" && activeTypeResources.length === 0}
                     className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] px-3 py-1.5 text-xs font-medium text-[var(--brand-contrast)] shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
                   >
                     <CalendarPlus size={14} strokeWidth={2} aria-hidden="true" />
@@ -730,6 +745,9 @@ export default function BookingDashboard({
                                 {!cancelled && tripOrderByBookingId.get(booking.bookingId) && (
                                   <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 px-2 py-1 text-xs font-medium text-sky-700 dark:border-sky-900/50 dark:text-sky-300">
                                     <Truck size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                                    {/* รถจริงที่ได้รับมอบหมาย + คนขับ — ดูคอมเมนต์เดียวกันใน
+                                        BookingCalendar.tsx สำหรับเหตุผลที่ต้องแสดงตรงนี้แทน */}
+                                    {tripOrderByBookingId.get(booking.bookingId)!.resourceName} ·{" "}
                                     {tripOrderByBookingId.get(booking.bookingId)!.driverName || "—"}
                                     {canApprove && (
                                       <button

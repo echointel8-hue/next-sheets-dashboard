@@ -110,14 +110,33 @@ export type BookingApprovalStatus = "pending" | "approved" | "rejected";
  * TripOrder/carpool review step below: management sees every overlapping
  * request and decides which car, which driver, and whether to combine them
  * into one trip. */
+/** Placeholder resourceName (paired with resourceId "") recorded on every
+ * *car* booking now that the requester no longer picks a specific vehicle
+ * up front — per a later, explicit hospital request: which car (and
+ * driver) is used is entirely management's call, decided only when they
+ * dispatch it via a TripOrder (see TripOrder below), so there's nothing
+ * resource-specific left to record on the original request. Room bookings
+ * are unaffected by this — a room booking still records the real
+ * resourceId/resourceName of the room the requester picked, exactly as
+ * before, since there's no equivalent "management assigns it later" step
+ * for rooms (see BookingFormModal/POST /api/booking/bookings, which is
+ * what actually branches on resourceType to decide whether a real
+ * resourceId is required from the client at all). */
+export const PENDING_CAR_RESOURCE_NAME = "รถ (รอบริหารจัดสรร)";
+
 export interface Booking {
   bookingId: string;
+  /** "" for every car booking (see PENDING_CAR_RESOURCE_NAME above) — still
+   * the real BookingResource id for a room booking, which keeps choosing a
+   * specific resource up front. */
   resourceId: string;
   resourceType: BookingResourceType;
   /** Snapshot of the resource's name at booking time, so this booking's
    * label in the UI/printouts never changes even if the resource is later
    * renamed — same rationale as MaintenanceTask's equipment snapshot
-   * fields in lib/sheets.ts. */
+   * fields in lib/sheets.ts. Always PENDING_CAR_RESOURCE_NAME for a car
+   * booking (see above) — the actual assigned car only ever appears on the
+   * TripOrder that dispatches it. */
   resourceName: string;
   /** ISO 8601 datetime strings (local wall-clock, no timezone conversion —
    * same convention as every other timestamp this app stores). */

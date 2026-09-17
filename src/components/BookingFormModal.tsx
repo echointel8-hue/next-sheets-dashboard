@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, ImageOff, Info, Loader2, Save, X } from "lucide-react";
-import { isOverSeatCapacity, type Booking, type BookingResource, type BookingResourceType } from "@/lib/booking";
+import type { Booking, BookingResource, BookingResourceType } from "@/lib/booking";
 
 const INPUT_CLASS =
   "h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:disabled:bg-zinc-800/60 dark:disabled:text-zinc-500";
@@ -66,15 +66,23 @@ function combineDateTime(date: string, hour: string, minute: string): string {
 /**
  * New-booking form, scoped to one resource type at a time (car or room —
  * kept as separate menus per the hospital's explicit request, see
- * BookingDashboard). A room booking confirms immediately on save; a car
- * booking is accepted the same way but starts out "pending" a superadmin's
- * approval (see the note shown below the resource picker when
- * resourceType is "car") — the only reason a save itself can fail either
- * way is a time conflict re-checked server-side (POST
- * /api/booking/bookings), surfaced here as a plain error message so the
- * person can pick another time/resource and try again. Also warns (but
- * doesn't block — per the hospital's explicit choice) when the entered
- * participant count exceeds the selected car's seat count.
+ * BookingDashboard). A room booking confirms immediately on save and still
+ * requires picking a specific room up front, exactly as before — the room
+ * picker + photo preview + seat/capacity warning below are all room-only
+ * now. A car booking is accepted without choosing any specific vehicle at
+ * all and starts out "pending" a superadmin's approval — per a later,
+ * explicit hospital request, which car (and driver) gets used is entirely
+ * management's decision, made only when they dispatch it via a TripOrder
+ * (see TripOrderModal), so there's nothing resource-specific for the
+ * requester to pick here anymore (see PENDING_CAR_RESOURCE_NAME in
+ * lib/booking.ts for what gets recorded on the booking row instead, and
+ * POST /api/booking/bookings for the server-side branch on resourceType
+ * that makes resourceId optional only for a car booking). The only reason
+ * a save itself can fail is a time conflict re-checked server-side — that
+ * check only ever applies to a room booking (a car may overlap another car
+ * booking by design, see hasBookingConflict's doc comment in lib/booking.ts)
+ * — surfaced here as a plain error message so the person can pick another
+ * time/room and try again.
  */
 export default function BookingFormModal({
   resourceType,
@@ -126,21 +134,18 @@ export default function BookingFormModal({
     firstInputRef.current?.focus();
   }, []);
 
-  // Live photo preview of whichever resource is currently selected, so the
+  // Live photo preview of whichever room is currently selected, so the
   // booker can look at what they're about to book before confirming — per
-  // the hospital's explicit request.
+  // the hospital's explicit request. Room only now — a car booking never
+  // has a selected resource at all (see the doc comment above), so the old
+  // seat-capacity warning that compared participants against a selected
+  // car's seatCount has nothing left to compare against and is gone too
+  // (isOverSeatCapacity is now only ever meaningful for a resource this
+  // form no longer lets a car booker pick).
   const selectedResource = useMemo(
-    () => resources.find((r) => r.resourceId === resourceId),
-    [resources, resourceId]
+    () => (resourceType === "room" ? resources.find((r) => r.resourceId === resourceId) : undefined),
+    [resourceType, resources, resourceId]
   );
-
-  // Non-blocking — per the hospital's explicit choice, exceeding the
-  // selected car's seat count only warns, it never stops the booking.
-  const participantsNum = Number(participants);
-  const overSeatCapacity =
-    !!selectedResource &&
-    Number.isFinite(participantsNum) &&
-    isOverSeatCapacity(selectedResource, participantsNum);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -154,7 +159,9 @@ export default function BookingFormModal({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!resourceId) {
+    // เฉพาะห้องประชุมเท่านั้นที่ยังต้องเลือกทรัพยากรเจาะจง — รถไม่ต้องเลือก
+    // ล่วงหน้าแล้ว (ดูคอมเมนต์บนสุดของไฟล์นี้)
+    if (resourceType === "room" && !resourceId) {
       setError(`กรุณาเลือก${typeLabel}`);
       return;
     }
@@ -187,7 +194,10 @@ export default function BookingFormModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          resourceId,
+          resourceType,
+          // "" for a car booking — the server only requires/uses resourceId
+          // for a room booking now (see POST /api/booking/bookings).
+          resourceId: resourceType === "room" ? resourceId : "",
           startTime,
           endTime,
           purpose: purpose.trim(),
@@ -267,64 +277,66 @@ export default function BookingFormModal({
                 )}
               </div>
             )}
-            {resources.length === 0 ? (
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                ยังไม่มี{typeLabel}ที่เปิดให้จอง — เพิ่ม{typeLabel}ก่อน
-              </p>
+            {resourceType === "room" ? (
+              resources.length === 0 ? (
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                  ยังไม่มี{typeLabel}ที่เปิดให้จอง — เพิ่ม{typeLabel}ก่อน
+                </p>
+              ) : (
+                <>
+                  <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+                    {typeLabel}
+                    <select
+                      ref={firstInputRef}
+                      value={resourceId}
+                      onChange={(e) => setResourceId(e.target.value)}
+                      disabled={saving}
+                      className={INPUT_CLASS}
+                    >
+                      {resources.map((r) => (
+                        <option key={r.resourceId} value={r.resourceId}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {/* พรีวิวรูปของ{typeLabel}ที่เลือกอยู่ — ให้ผู้จองได้พิจารณา
+                      ภาพก่อนตัดสินใจจอง ตามที่ขอ */}
+                  <div className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 dark:border-zinc-700 dark:bg-zinc-800/60">
+                    <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md bg-zinc-100 dark:bg-zinc-800">
+                      {selectedResource?.imageDataUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- data: URL from the sheet, not a static/remote asset next/image can optimize
+                        <img
+                          src={selectedResource.imageDataUrl}
+                          alt={selectedResource.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <ImageOff size={16} strokeWidth={1.5} className="text-zinc-300 dark:text-zinc-600" aria-hidden="true" />
+                      )}
+                    </div>
+                    <div className="min-w-0 text-xs text-zinc-500 dark:text-zinc-400">
+                      {selectedResource?.detail ? (
+                        // whitespace-pre-line: คงการขึ้นบรรทัดใหม่ตามที่พิมพ์ไว้ในช่อง
+                        // "รายละเอียดเพิ่มเติม" เช่นเดียวกับที่การ์ดรายการทรัพยากรใน
+                        // BookingDashboard ทำ — ดูคอมเมนต์ที่นั่นสำหรับรายละเอียดปัญหา
+                        <p className="whitespace-pre-line leading-5">{selectedResource.detail}</p>
+                      ) : (
+                        <p className="italic">ไม่มีรายละเอียดเพิ่มเติม</p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )
             ) : (
-              <>
-                <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
-                  {typeLabel}
-                  <select
-                    ref={firstInputRef}
-                    value={resourceId}
-                    onChange={(e) => setResourceId(e.target.value)}
-                    disabled={saving}
-                    className={INPUT_CLASS}
-                  >
-                    {resources.map((r) => (
-                      <option key={r.resourceId} value={r.resourceId}>
-                        {r.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {/* พรีวิวรูปของ{typeLabel}ที่เลือกอยู่ — ให้ผู้จองได้พิจารณา
-                    ภาพก่อนตัดสินใจจอง ตามที่ขอ */}
-                <div className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 dark:border-zinc-700 dark:bg-zinc-800/60">
-                  <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md bg-zinc-100 dark:bg-zinc-800">
-                    {selectedResource?.imageDataUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- data: URL from the sheet, not a static/remote asset next/image can optimize
-                      <img
-                        src={selectedResource.imageDataUrl}
-                        alt={selectedResource.name}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <ImageOff size={16} strokeWidth={1.5} className="text-zinc-300 dark:text-zinc-600" aria-hidden="true" />
-                    )}
-                  </div>
-                  <div className="min-w-0 text-xs text-zinc-500 dark:text-zinc-400">
-                    {selectedResource?.detail ? (
-                      // whitespace-pre-line: คงการขึ้นบรรทัดใหม่ตามที่พิมพ์ไว้ในช่อง
-                      // "รายละเอียดเพิ่มเติม" เช่นเดียวกับที่การ์ดรายการทรัพยากรใน
-                      // BookingDashboard ทำ — ดูคอมเมนต์ที่นั่นสำหรับรายละเอียดปัญหา
-                      <p className="whitespace-pre-line leading-5">{selectedResource.detail}</p>
-                    ) : (
-                      <p className="italic">ไม่มีรายละเอียดเพิ่มเติม</p>
-                    )}
-                    {resourceType === "car" && !!selectedResource?.seatCount && (
-                      <p className="mt-0.5 leading-5">{selectedResource.seatCount.toLocaleString("th-TH")} ที่นั่ง</p>
-                    )}
-                  </div>
-                </div>
-                {resourceType === "car" && (
-                  <p className="flex items-start gap-2 rounded-lg bg-sky-50 p-2.5 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
-                    <Info size={15} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
-                    การจองรถต้องได้รับการอนุมัติจากบริหาร ก่อน จึงจะถือว่ายืนยันการจอง
-                  </p>
-                )}
-              </>
+              // การจองรถ — ไม่มีการเลือกรถล่วงหน้าอีกต่อไป (ตามที่ขอ) —
+              // ฝ่ายบริหารเป็นผู้จัดสรรรถและคนขับให้ตอนอนุมัติ/ออกใบสั่งงาน
+              // เดินทางแทน (ดู TripOrderModal) — แจ้งให้ผู้จองทราบตรงนี้แทน
+              // ตัวเลือกรถเดิม
+              <p className="flex items-start gap-2 rounded-lg bg-sky-50 p-2.5 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
+                <Info size={15} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+                ไม่ต้องเลือกรถล่วงหน้า — ฝ่ายบริหารจะเป็นผู้จัดสรรรถและคนขับให้หลังจากอนุมัติคำขอนี้แล้ว
+              </p>
             )}
             {/* วันที่ + ชั่วโมง (อิสระ) + นาที (00/30 เท่านั้น) แยกเป็นคนละ
                 ช่อง — คนละแถวเสมอ (ไม่แบ่ง 2 คอลัมน์) เพราะแต่ละฝั่งมี 3
@@ -471,12 +483,6 @@ export default function BookingFormModal({
                   className={INPUT_CLASS}
                 />
               </label>
-              {overSeatCapacity && (
-                <p className="flex items-start gap-2 text-xs leading-5 text-amber-700 dark:text-amber-400 sm:col-span-2">
-                  <AlertTriangle size={14} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
-                  จำนวนผู้โดยสารมากกว่าจำนวนที่นั่งของ{selectedResource?.name} ({selectedResource?.seatCount.toLocaleString("th-TH")} ที่นั่ง) — ยังจองได้ แต่กรุณาตรวจสอบอีกครั้ง
-                </p>
-              )}
             </div>
             <div className="mt-1 flex justify-end gap-2">
               <button
@@ -489,7 +495,9 @@ export default function BookingFormModal({
               </button>
               <button
                 type="submit"
-                disabled={saving || resources.length === 0}
+                // ห้องประชุมยังต้องมีอย่างน้อย 1 ห้องให้เลือกจึงจะจองได้ —
+                // รถไม่ต้องมีให้เลือกแล้ว (ดูคอมเมนต์บนสุดของไฟล์)
+                disabled={saving || (resourceType === "room" && resources.length === 0)}
                 className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
               >
                 {saving ? (
