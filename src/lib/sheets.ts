@@ -318,7 +318,16 @@ export type EditLogAction =
   // Dispatching one or more pending car bookings at once (POST
   // /api/booking/trip-orders) — the new "approve" for a car booking; see
   // TripOrder's doc comment in lib/booking.ts.
-  | "ออกใบสั่งงานเดินทาง";
+  | "ออกใบสั่งงานเดินทาง"
+  // Editing an already-issued TripOrder's own car/driver/time/notes (PATCH
+  // /api/booking/trip-orders/[tripOrderId]) — see updateTripOrder above.
+  | "แก้ไขใบสั่งงานเดินทาง"
+  // Management/superadmin correcting a booking's own narrow field set
+  // (PATCH /api/booking/bookings/[bookingId] with an `edit` payload) — see
+  // editBookingByManagement above and canApproveCarBooking's doc comment in
+  // lib/booking.ts for why this is the one deliberate exception to "the
+  // original request is never edited".
+  | "แก้ไขข้อมูลการจองโดยฝ่ายบริหาร";
 
 /** Appends one row to the EditLog tab — header row (created ahead of time
  * by the sheet owner, not by this app; see the project setup notes) must be:
@@ -1566,6 +1575,10 @@ const BOOKINGS_HEADER_ROW = [
   // back as "no companions" / "not yet dispatched" (see rowToBooking),
   // nothing existing breaks until the sheet owner adds these two by hand.
   "Companions", "TripOrderId",
+  // Added later still, same manual-add convention — blank V/W cells read
+  // back as "never edited by management" (see rowToBooking/
+  // editBookingByManagement below).
+  "EditedByUsername", "EditedAt",
 ];
 
 function getBookingResourcesTab(): string {
@@ -1635,6 +1648,8 @@ function rowToBooking(row: string[]): Booking {
     approvedByUsername: col(18),
     companions: col(19),
     tripOrderId: col(20).trim(),
+    editedByUsername: col(21),
+    editedAt: col(22),
   };
 }
 
@@ -1644,6 +1659,7 @@ function bookingToRow(b: Booking): (string | number)[] {
     b.purpose, b.destination, b.participants, b.contactPhone, b.bookedByUsername,
     b.bookedByDisplayName, b.department, b.createdAt, b.cancelledAt, b.cancelledByUsername,
     b.approvalStatus, b.approvedAt, b.approvedByUsername, b.companions, b.tripOrderId,
+    b.editedByUsername, b.editedAt,
   ];
 }
 
@@ -1793,7 +1809,7 @@ export async function getBookings(): Promise<Booking[]> {
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:U100000`,
+      range: `${tab}!A2:W100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -1810,14 +1826,23 @@ export async function getBookings(): Promise<Booking[]> {
     .map(rowToBooking);
 }
 
-/** Creates one booking, after re-checking for a time conflict against the
- * *current* Bookings tab (never trust a conflict check the caller may have
- * done earlier against a stale list — two accounts could race to book the
- * same slot). Throws a clear Thai error on conflict, or a "create the tab
- * first" error if the Bookings tab doesn't exist yet. Room bookings confirm
- * immediately (approvalStatus "approved"); car bookings start "pending"
- * and need a superadmin's review — see setBookingApprovalStatus below. The
- * caller (POST /api/booking/bookings) derives approvalStatus from
+/** Creates one booking. Room bookings confirm immediately (approvalStatus
+ * "approved") — a room can only host one meeting at a time, so this
+ * re-checks for a time conflict against the *current* Bookings tab (never
+ * trust a conflict check the caller may have done earlier against a stale
+ * list — two accounts could race to book the same slot) and throws a clear
+ * Thai error on conflict.
+ *
+ * Car bookings start "pending" and skip that conflict check entirely — per
+ * the hospital's explicit request, more than one pending request against
+ * the same car/time is allowed (even expected: overlapping requests are
+ * exactly what management reviews to decide which car, which driver, and
+ * whether to combine them into one TripOrder — see createTripOrder below
+ * and canApproveCarBooking's doc comment in lib/booking.ts). A car booking
+ * needs a superadmin's review before it's "approved" either way.
+ *
+ * Throws a "create the tab first" error if the Bookings tab doesn't exist
+ * yet. The caller (POST /api/booking/bookings) derives approvalStatus from
  * resourceType, same as it already derives destination. */
 export async function createBooking(input: {
   resourceId: string;
@@ -1841,9 +1866,13 @@ export async function createBooking(input: {
   const tab = getBookingsTab();
   const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
 
-  const existing = await getBookings();
-  if (hasBookingConflict(existing, input.resourceId, input.startTime, input.endTime)) {
-    throw new Error("ช่วงเวลาที่เลือกถูกจองไปแล้ว กรุณาเลือกช่วงเวลาอื่น");
+  // ห้องประชุมเท่านั้นที่ยังเช็คช่วงเวลาซ้ำ — รถอนุญาตให้จองเวลาซ้ำกันได้
+  // โดยตั้งใจ ดูคอมเมนต์ด้านบนฟังก์ชันนี้
+  if (input.resourceType === "room") {
+    const existing = await getBookings();
+    if (hasBookingConflict(existing, input.resourceId, input.startTime, input.endTime)) {
+      throw new Error("ช่วงเวลาที่เลือกถูกจองไปแล้ว กรุณาเลือกช่วงเวลาอื่น");
+    }
   }
 
   const booking: Booking = {
@@ -1868,6 +1897,8 @@ export async function createBooking(input: {
     approvedByUsername: "",
     companions: input.companions,
     tripOrderId: "",
+    editedByUsername: "",
+    editedAt: "",
   };
 
   try {
@@ -1918,7 +1949,7 @@ export async function cancelBooking(bookingId: string, cancelledByUsername: stri
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:U100000`,
+      range: `${tab}!A2:W100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -1941,7 +1972,7 @@ export async function cancelBooking(bookingId: string, cancelledByUsername: stri
   try {
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${tab}!A${sheetRow}:U${sheetRow}`,
+      range: `${tab}!A${sheetRow}:W${sheetRow}`,
       // RAW — see the note on createBooking's append() above.
       valueInputOption: "RAW",
       requestBody: { values: [bookingToRow(merged)] },
@@ -1979,7 +2010,7 @@ export async function rejectCarBooking(bookingId: string, rejectedByUsername: st
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tab}!A2:U100000`,
+      range: `${tab}!A2:W100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -2010,7 +2041,7 @@ export async function rejectCarBooking(bookingId: string, rejectedByUsername: st
   try {
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${tab}!A${sheetRow}:U${sheetRow}`,
+      range: `${tab}!A${sheetRow}:W${sheetRow}`,
       // RAW — see the note on createBooking's append() above.
       valueInputOption: "RAW",
       requestBody: { values: [bookingToRow(merged)] },
@@ -2018,6 +2049,95 @@ export async function rejectCarBooking(bookingId: string, rejectedByUsername: st
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`บันทึกผลการไม่อนุมัติไม่สำเร็จ: ${message}`);
+  }
+
+  return merged;
+}
+
+/** Lets management/superadmin correct a narrow, fixed set of fields on an
+ * *existing* booking — purpose/destination/participants/contactPhone/
+ * companions only. This is the one deliberate exception to "the original
+ * request is never edited" (see canApproveCarBooking's doc comment in
+ * lib/booking.ts): the hospital explicitly asked for it, so every edit here
+ * always stamps editedByUsername/editedAt, which the UI shows as "แก้ไขโดย
+ * ฝ่ายบริหาร" on the booking — it's a correction, never a silent rewrite.
+ *
+ * Deliberately does NOT accept bookedByUsername/department/resourceId/
+ * resourceType/resourceName/startTime/endTime/approvalStatus — who asked,
+ * for which resource, and when, stay exactly as submitted; reassigning the
+ * actual car/driver/time is TripOrder's job (createTripOrder/
+ * updateTripOrder below), not this function's. Allowed on a booking in any
+ * approvalStatus (a typo might need fixing after approval too) except a
+ * cancelled one — find-by-id scan, same reasoning as cancelBooking. The
+ * permission check itself (canApproveCarBooking) is the API route's job,
+ * not this function's, same split as cancelBooking/canCancelBooking. */
+export async function editBookingByManagement(
+  bookingId: string,
+  edits: {
+    purpose?: string;
+    destination?: string;
+    participants?: number;
+    contactPhone?: string;
+    companions?: string;
+  },
+  editedByUsername: string
+): Promise<Booking> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getBookingsTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:W100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`อ่านรายการจองไม่สำเร็จ: ${message}`);
+  }
+
+  const rows = values ?? [];
+  const idx = rows.findIndex((row) => (row[0] ?? "").toString().trim() === bookingId);
+  if (idx === -1) {
+    throw new Error("ไม่พบรายการจองนี้ — อาจถูกยกเลิกไปแล้ว");
+  }
+  const current = rowToBooking(rows[idx]);
+  // Scoped to car bookings only — this whole capability exists for the car
+  // review/dispatch workflow (gated by canApproveCarBooking, same as
+  // rejectCarBooking/createTripOrder); a room booking has no review step
+  // and was never part of this request.
+  if (current.resourceType !== "car") {
+    throw new Error("แก้ไขข้อมูลตรงนี้ได้เฉพาะการจองรถเท่านั้น");
+  }
+  if (isBookingCancelled(current)) {
+    throw new Error("รายการจองนี้ถูกยกเลิกไปแล้ว แก้ไขไม่ได้");
+  }
+
+  const merged: Booking = {
+    ...current,
+    purpose: edits.purpose ?? current.purpose,
+    destination: edits.destination ?? current.destination,
+    participants: edits.participants ?? current.participants,
+    contactPhone: edits.contactPhone ?? current.contactPhone,
+    companions: edits.companions ?? current.companions,
+    editedByUsername,
+    editedAt: new Date().toISOString(),
+  };
+  const sheetRow = idx + 2;
+
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${tab}!A${sheetRow}:W${sheetRow}`,
+      // RAW — see the note on createBooking's append() above.
+      valueInputOption: "RAW",
+      requestBody: { values: [bookingToRow(merged)] },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`บันทึกการแก้ไขไม่สำเร็จ: ${message}`);
   }
 
   return merged;
@@ -2142,7 +2262,7 @@ export async function createTripOrder(input: {
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${bookingsTab}!A2:U100000`,
+      range: `${bookingsTab}!A2:W100000`,
     });
     values = res.data.values as string[][] | undefined;
   } catch (err: unknown) {
@@ -2218,7 +2338,7 @@ export async function createTripOrder(input: {
       requestBody: {
         valueInputOption: "RAW",
         data: targets.map(({ rowIndex }, i) => ({
-          range: `${bookingsTab}!A${rowIndex + 2}:U${rowIndex + 2}`,
+          range: `${bookingsTab}!A${rowIndex + 2}:W${rowIndex + 2}`,
           values: [bookingToRow(updatedBookings[i])],
         })),
       },
@@ -2234,4 +2354,75 @@ export async function createTripOrder(input: {
   }
 
   return { tripOrder, bookings: updatedBookings };
+}
+
+/** Edits an already-issued TripOrder's own car/driver/time/notes — "แก้ไข
+ * ข้อมูลเท่าที่จำเป็น" for management, per the hospital's explicit later
+ * request (e.g. the assigned driver calls in sick and someone else takes
+ * the trip, or the pickup time slips by half an hour). Deliberately does
+ * NOT accept bookingIds — which requests this TripOrder covers is fixed at
+ * creation; combining/splitting requests means issuing a new TripOrder
+ * (reject the old dispatch's effect is out of scope here — this is a
+ * correction to the dispatch details, not a re-triage). Never touches the
+ * Bookings rows it covers: they already point at this tripOrderId and stay
+ * "approved" throughout, exactly as before the edit. Find-by-id scan, same
+ * reasoning as every other single-row lookup in this file. */
+export async function updateTripOrder(
+  tripOrderId: string,
+  updates: {
+    resourceId?: string;
+    resourceName?: string;
+    driverName?: string;
+    startTime?: string;
+    endTime?: string;
+    notes?: string;
+  }
+): Promise<TripOrder> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tripOrdersTab = getTripOrdersTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tripOrdersTab}!A2:J100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`อ่านรายการใบสั่งงานไม่สำเร็จ: ${message}`);
+  }
+
+  const rows = values ?? [];
+  const idx = rows.findIndex((row) => (row[0] ?? "").toString().trim() === tripOrderId);
+  if (idx === -1) {
+    throw new Error("ไม่พบใบสั่งงานนี้");
+  }
+  const current = rowToTripOrder(rows[idx]);
+  const merged: TripOrder = {
+    ...current,
+    resourceId: updates.resourceId ?? current.resourceId,
+    resourceName: updates.resourceName ?? current.resourceName,
+    driverName: updates.driverName ?? current.driverName,
+    startTime: updates.startTime ?? current.startTime,
+    endTime: updates.endTime ?? current.endTime,
+    notes: updates.notes ?? current.notes,
+  };
+  const sheetRow = idx + 2;
+
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${tripOrdersTab}!A${sheetRow}:J${sheetRow}`,
+      // RAW — see the note on createBooking's append() above.
+      valueInputOption: "RAW",
+      requestBody: { values: [tripOrderToRow(merged)] },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`บันทึกการแก้ไขใบสั่งงานไม่สำเร็จ: ${message}`);
+  }
+
+  return merged;
 }

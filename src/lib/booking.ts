@@ -99,8 +99,17 @@ export type BookingApprovalStatus = "pending" | "approved" | "rejected";
  * once cancelled — see isBookingCancelled) — a booking can be cancelled
  * regardless of its approvalStatus. Cancelled bookings are kept (never
  * deleted) as an audit trail and so the same time slot's history is
- * visible, but are always excluded from the conflict check along with
- * rejected car bookings — see hasBookingConflict. */
+ * visible.
+ *
+ * hasBookingConflict below is still what a *room* booking is checked
+ * against (a room can only host one meeting at a time), but createBooking
+ * in lib/sheets.ts deliberately skips this check for a *car* booking, per
+ * the hospital's explicit request — several people may need the same car
+ * around the same time before management has decided how to route them,
+ * and blocking the second request would defeat the whole point of the
+ * TripOrder/carpool review step below: management sees every overlapping
+ * request and decides which car, which driver, and whether to combine them
+ * into one trip. */
 export interface Booking {
   bookingId: string;
   resourceId: string;
@@ -141,9 +150,9 @@ export interface Booking {
   cancelledByUsername: string;
   /** ผู้ร่วมเดินทาง — free text, optional, car only (same "only meaningful
    * for a car" shape as destination above; always "" for a room booking).
-   * Filled in by the requester at booking time, never touched by
-   * management — distinct from TripOrder below, which is management's own
-   * car/driver/time decision and never edits the original request. */
+   * Filled in by the requester at booking time — editable by management
+   * afterwards, same as purpose/destination/participants/contactPhone, see
+   * editedByUsername below. */
   companions: string;
   /** Blank until a superadmin/management account dispatches this car
    * booking by creating a TripOrder covering it (see createTripOrder in
@@ -153,6 +162,19 @@ export interface Booking {
    * TripOrder.bookingIds below. Always "" for a room booking (rooms never
    * go through review) and for a rejected car booking. */
   tripOrderId: string;
+  /** Blank until a superadmin/management account edits this booking's own
+   * details (see editBookingByManagement in lib/sheets.ts and PATCH
+   * /api/booking/bookings/[bookingId]'s `edit` payload) — set to that
+   * account's username so the UI can show "แก้ไขโดยฝ่ายบริหาร" on the
+   * booking, per the hospital's explicit request. Only a fixed, narrow set
+   * of fields is ever editable this way (purpose/destination/participants/
+   * contactPhone/companions) — never bookedByUsername/department/resourceId/
+   * startTime/endTime/approvalStatus, which stay exactly as the requester
+   * submitted them (or are handled separately, e.g. via TripOrder for the
+   * actual car/driver/time — see the doc comment on TripOrder below). */
+  editedByUsername: string;
+  /** Blank alongside editedByUsername; set to the same edit's timestamp. */
+  editedAt: string;
 }
 
 /**
@@ -334,13 +356,23 @@ export function canCancelBooking(
  * to review. Backed by hasPermission()'s "approveCarBooking" key — same
  * unchanged default (any superadmin), now also grantable per account.
  *
- * Gates two distinct actions now, both still "reviewing a pending car
- * booking": rejecting one outright (unchanged — PATCH
- * /api/booking/bookings/[bookingId]), or *approving* one by dispatching it —
- * creating a TripOrder that assigns a real car/driver/time to it, alone or
- * combined with other pending requests (POST /api/booking/trip-orders). See
- * TripOrder's doc comment above for why approval moved from a plain toggle
- * to issuing a dispatch record. */
+ * Gates several distinct actions now, all still "management handling a car
+ * booking": rejecting a pending one outright (PATCH
+ * /api/booking/bookings/[bookingId] with approvalStatus), *approving* one
+ * by dispatching it — creating a TripOrder that assigns a real
+ * car/driver/time to it, alone or combined with other pending requests
+ * (POST /api/booking/trip-orders) — editing an already-issued TripOrder's
+ * own car/driver/time/notes afterwards (PATCH
+ * /api/booking/trip-orders/[tripOrderId]), and editing a *booking's* own
+ * narrow set of fields (purpose/destination/participants/contactPhone/
+ * companions — PATCH .../[bookingId] with an `edit` payload instead of
+ * approvalStatus — see editBookingByManagement in lib/sheets.ts). This last
+ * one is the one deliberate exception to "the original request is never
+ * edited": the hospital explicitly asked for it, gated to the same
+ * management/superadmin reach as everything else here, and always visibly
+ * marked via Booking.editedByUsername/editedAt so it's never silent. See
+ * TripOrder's doc comment above for why *approving* is a dispatch record
+ * rather than a plain status toggle. */
 export function canApproveCarBooking(session: PermissionSession): boolean {
   return hasPermission(session, "approveCarBooking");
 }

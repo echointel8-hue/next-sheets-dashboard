@@ -46,6 +46,7 @@ import BookingResourceFormModal from "@/components/BookingResourceFormModal";
 import BookingFormModal from "@/components/BookingFormModal";
 import BookingCalendar from "@/components/BookingCalendar";
 import TripOrderModal from "@/components/TripOrderModal";
+import ManagementEditBookingModal from "@/components/ManagementEditBookingModal";
 
 export interface BookingDashboardData {
   resources: BookingResource[];
@@ -123,6 +124,12 @@ export default function BookingDashboard({
   // ขั้นตอนรวมแยกต่างหาก ดู TripOrderModal ที่ถูกเปิดจาก tripOrderModalOpen
   const [selectedBookingIds, setSelectedBookingIds] = useState<Set<string>>(new Set());
   const [tripOrderModalOpen, setTripOrderModalOpen] = useState(false);
+  // "แก้ไขข้อมูลเท่าที่จำเป็น" โดยฝ่ายบริหาร — ข้อยกเว้นเดียวจาก "ข้อมูลคำขอ
+  // เดิมไม่ถูกแก้ไข" ตามที่โรงพยาบาลขอเพิ่มภายหลัง ดู ManagementEditBookingModal
+  const [editBookingTarget, setEditBookingTarget] = useState<Booking | null>(null);
+  // แก้ไขใบสั่งงานเดินทางที่ออกไปแล้ว (รถ/คนขับ/เวลา/หมายเหตุ) — ใช้
+  // TripOrderModal ตัวเดียวกับตอนสร้างใหม่ แต่ในโหมดแก้ไข (ส่ง editing prop)
+  const [editTripOrderTarget, setEditTripOrderTarget] = useState<TripOrder | null>(null);
   // เฉพาะการจองรถต้องมีขั้นตอนอนุมัติ — ห้องประชุมไม่มี (ยืนยันทันทีเหมือนเดิม)
   const canApprove = type === "car" && canApproveCarBooking(session);
 
@@ -319,6 +326,26 @@ export default function BookingDashboard({
     });
     setSelectedBookingIds(new Set());
     setTripOrderModalOpen(false);
+  }
+
+  /** ผลจากการแก้ไขใบสั่งงานที่ออกไปแล้ว — แทนที่ TripOrder เดิมใน state ด้วย
+   * ตัวที่แก้ไขแล้ว (ไม่ใช่ append ใหม่เหมือน handleTripOrderCreated) และไม่
+   * ต้องแตะ bookings เลย เพราะการแก้ไขใบสั่งงานไม่เปลี่ยนแถวการจองที่ครอบคลุม
+   * อยู่ (ดู updateTripOrder ใน lib/sheets.ts). */
+  function handleTripOrderUpdated(updated: TripOrder) {
+    setData((prev) =>
+      isError(prev)
+        ? prev
+        : { ...prev, tripOrders: prev.tripOrders.map((t) => (t.tripOrderId === updated.tripOrderId ? updated : t)) }
+    );
+    setEditTripOrderTarget(null);
+  }
+
+  function handleManagementEditSaved(updated: Booking) {
+    setData((prev) =>
+      isError(prev) ? prev : { ...prev, bookings: prev.bookings.map((b) => (b.bookingId === updated.bookingId ? updated : b)) }
+    );
+    setEditBookingTarget(null);
   }
 
   const typeLabel = type === "car" ? "รถ" : "ห้องประชุม";
@@ -583,6 +610,8 @@ export default function BookingDashboard({
                   selectedBookingIds={selectedBookingIds}
                   onToggleSelect={toggleBookingSelection}
                   tripOrderByBookingId={tripOrderByBookingId}
+                  onEditBooking={setEditBookingTarget}
+                  onEditTripOrder={setEditTripOrderTarget}
                 />
               ) : (
                 <div className="overflow-x-auto">
@@ -625,7 +654,17 @@ export default function BookingDashboard({
                               {formatBookingDateTime(booking.startTime)}
                               <br />– {formatBookingDateTime(booking.endTime)}
                             </td>
-                            <td className="px-2 py-2.5 text-zinc-600 dark:text-zinc-300">{booking.purpose}</td>
+                            <td className="px-2 py-2.5 text-zinc-600 dark:text-zinc-300">
+                              {booking.purpose}
+                              {booking.editedByUsername && (
+                                <span
+                                  className="ml-1 inline-flex items-center gap-0.5 text-xs text-amber-700 dark:text-amber-400"
+                                  title={`แก้ไขโดยฝ่ายบริหาร (${booking.editedByUsername})`}
+                                >
+                                  <Pencil size={11} strokeWidth={2} aria-hidden="true" />
+                                </span>
+                              )}
+                            </td>
                             {type === "car" && (
                               <td className="px-2 py-2.5 text-zinc-600 dark:text-zinc-300">
                                 {booking.destination && (
@@ -686,7 +725,27 @@ export default function BookingDashboard({
                                   <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 px-2 py-1 text-xs font-medium text-sky-700 dark:border-sky-900/50 dark:text-sky-300">
                                     <Truck size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
                                     {tripOrderByBookingId.get(booking.bookingId)!.driverName || "—"}
+                                    {canApprove && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditTripOrderTarget(tripOrderByBookingId.get(booking.bookingId)!)}
+                                        className="rounded-full p-0.5 text-sky-700 transition-colors hover:bg-sky-100 dark:text-sky-300 dark:hover:bg-sky-900/40"
+                                        aria-label="แก้ไขใบสั่งงานเดินทาง"
+                                      >
+                                        <Pencil size={11} strokeWidth={2} aria-hidden="true" />
+                                      </button>
+                                    )}
                                   </span>
+                                )}
+                                {!cancelled && canApprove && type === "car" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditBookingTarget(booking)}
+                                    className={`${ACTION_BUTTON} border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800`}
+                                  >
+                                    <Pencil size={12} strokeWidth={2} aria-hidden="true" />
+                                    แก้ไขข้อมูล
+                                  </button>
                                 )}
                                 {!cancelled && canCancelBooking(booking, session) && (
                                   <button
@@ -740,6 +799,22 @@ export default function BookingDashboard({
           resources={activeTypeResources}
           onClose={() => setTripOrderModalOpen(false)}
           onCreated={handleTripOrderCreated}
+        />
+      )}
+      {editTripOrderTarget && (
+        <TripOrderModal
+          editing={editTripOrderTarget}
+          bookings={typeBookings.filter((b) => b.tripOrderId === editTripOrderTarget.tripOrderId)}
+          resources={activeTypeResources}
+          onClose={() => setEditTripOrderTarget(null)}
+          onUpdated={handleTripOrderUpdated}
+        />
+      )}
+      {editBookingTarget && (
+        <ManagementEditBookingModal
+          booking={editBookingTarget}
+          onClose={() => setEditBookingTarget(null)}
+          onSaved={handleManagementEditSaved}
         />
       )}
     </main>

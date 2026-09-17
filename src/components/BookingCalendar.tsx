@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Ban, Building2, ChevronLeft, ChevronRight, Loader2, MapPin, Phone, Truck, Users, X } from "lucide-react";
+import { Ban, Building2, ChevronLeft, ChevronRight, Loader2, MapPin, Pencil, Phone, Truck, Users, X } from "lucide-react";
 import type { Role } from "@/lib/auth";
 import { actionColorVars, type ActionColor } from "@/lib/actionColors";
 import type { PermissionKey } from "@/lib/permissions";
@@ -120,6 +120,8 @@ export default function BookingCalendar({
   selectedBookingIds,
   onToggleSelect,
   tripOrderByBookingId,
+  onEditBooking,
+  onEditTripOrder,
 }: {
   typeLabel: string;
   bookings: Booking[];
@@ -147,6 +149,15 @@ export default function BookingCalendar({
    * this way) — lets a booking card show which car/driver it ended up with,
    * without ever having edited the booking row itself. */
   tripOrderByBookingId: Map<string, TripOrder>;
+  /** Opens ManagementEditBookingModal for this booking — "แก้ไขข้อมูลเท่าที่
+   * จำเป็น" per the hospital's later request, only ever the narrow field set
+   * editBookingByManagement allows (see its doc comment in lib/sheets.ts).
+   * Same canApprove gate as everything else here. */
+  onEditBooking: (booking: Booking) => void;
+  /** Opens TripOrderModal in edit mode for the TripOrder covering this
+   * booking — lets management correct the assigned car/driver/time after
+   * the fact, without touching which bookings it covers. */
+  onEditTripOrder: (tripOrder: TripOrder) => void;
 }) {
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
@@ -316,6 +327,8 @@ export default function BookingCalendar({
           selectedBookingIds={selectedBookingIds}
           onToggleSelect={onToggleSelect}
           tripOrderByBookingId={tripOrderByBookingId}
+          onEditBooking={onEditBooking}
+          onEditTripOrder={onEditTripOrder}
           onClose={() => setSelectedDateKey(null)}
         />
       )}
@@ -338,6 +351,8 @@ function DayDetailModal({
   selectedBookingIds,
   onToggleSelect,
   tripOrderByBookingId,
+  onEditBooking,
+  onEditTripOrder,
   onClose,
 }: {
   dateKey: string;
@@ -354,6 +369,8 @@ function DayDetailModal({
   selectedBookingIds: Set<string>;
   onToggleSelect: (booking: Booking) => void;
   tripOrderByBookingId: Map<string, TripOrder>;
+  onEditBooking: (booking: Booking) => void;
+  onEditTripOrder: (tripOrder: TripOrder) => void;
   onClose: () => void;
 }) {
   const [y, mo, d] = dateKey.split("-");
@@ -432,18 +449,36 @@ function DayDetailModal({
                   {showDestination && b.companions && (
                     <span className="inline-flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
                       <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
-                      ผู้ร่วมเดินทาง: {b.companions}
+                      ผู้เดินทาง: {b.companions}
+                    </span>
+                  )}
+                  {showDestination && b.editedByUsername && (
+                    <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                      <Pencil size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                      แก้ไขโดยฝ่ายบริหาร ({b.editedByUsername})
                     </span>
                   )}
                   {showDestination && tripOrderByBookingId.get(b.bookingId) && (
-                    <span className="flex items-start gap-1.5 rounded-lg bg-sky-50 p-2 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
-                      <Truck size={13} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
-                      <span>
-                        คนขับ: {tripOrderByBookingId.get(b.bookingId)!.driverName || "—"}
-                        {tripOrderByBookingId.get(b.bookingId)!.bookingIds.length > 1 && (
-                          <> (ร่วมเที่ยวกับอีก {tripOrderByBookingId.get(b.bookingId)!.bookingIds.length - 1} คำขอ)</>
-                        )}
+                    <span className="flex items-start justify-between gap-1.5 rounded-lg bg-sky-50 p-2 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
+                      <span className="flex items-start gap-1.5">
+                        <Truck size={13} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+                        <span>
+                          คนขับ: {tripOrderByBookingId.get(b.bookingId)!.driverName || "—"}
+                          {tripOrderByBookingId.get(b.bookingId)!.bookingIds.length > 1 && (
+                            <> (ร่วมเที่ยวกับอีก {tripOrderByBookingId.get(b.bookingId)!.bookingIds.length - 1} คำขอ)</>
+                          )}
+                        </span>
                       </span>
+                      {canApprove && (
+                        <button
+                          type="button"
+                          onClick={() => onEditTripOrder(tripOrderByBookingId.get(b.bookingId)!)}
+                          className="shrink-0 rounded-full p-1 text-sky-700 transition-colors hover:bg-sky-100 dark:text-sky-300 dark:hover:bg-sky-900/40"
+                          aria-label="แก้ไขใบสั่งงานเดินทาง"
+                        >
+                          <Pencil size={12} strokeWidth={2} aria-hidden="true" />
+                        </button>
+                      )}
                     </span>
                   )}
                   {b.department && (
@@ -489,6 +524,16 @@ function DayDetailModal({
                           ไม่อนุมัติ
                         </button>
                       </>
+                    )}
+                    {!cancelled && canApprove && showDestination && (
+                      <button
+                        type="button"
+                        onClick={() => onEditBooking(b)}
+                        className="inline-flex w-fit items-center gap-1 rounded-full border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                      >
+                        <Pencil size={12} strokeWidth={2} aria-hidden="true" />
+                        แก้ไขข้อมูล
+                      </button>
                     )}
                     {!cancelled && canCancelBooking(b, session) && (
                       <button

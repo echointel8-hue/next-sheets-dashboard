@@ -32,7 +32,7 @@ function combineDateTime(date: string, hour: string, minute: string): string {
  * ปัดลงถึงครึ่งชั่วโมงก่อนหน้า (ไม่ตัดเวลาที่เร็วที่สุดออก) และสิ้นสุดปัดขึ้น
  * ถึงครึ่งชั่วโมงถัดไป (ไม่ตัดเวลาที่ช้าที่สุดออก) ฝ่ายบริหารยังปรับเปลี่ยน
  * ได้อิสระทั้งหมด นี่แค่ค่าเริ่มต้นที่สมเหตุสมผล. */
-function defaultTripOrderParts(bookings: Booking[]): {
+function defaultTripOrderParts(bookings: { startTime: string; endTime: string }[]): {
   startDate: string;
   startHour: string;
   startMinute: MinuteOption;
@@ -75,23 +75,65 @@ function defaultTripOrderParts(bookings: Booking[]): {
  * คาร์พูล" ในตัว ไม่มีขั้นตอนรวมแยกต่างหาก) — ข้อมูลคำขอจองเดิมของผู้ขอ
  * (วัตถุประสงค์ ปลายทาง ผู้ร่วมเดินทาง ฯลฯ) จะไม่ถูกแก้ไขเลย ตามที่โรงพยาบาล
  * ขอไว้อย่างชัดเจน — ดู createTripOrder ใน lib/sheets.ts
+ *
+ * ใช้ได้สองโหมดจากคอมโพเนนต์เดียวกัน: สร้างใหม่ (ไม่ส่ง `editing`, เรียก
+ * `onCreated` — POST /api/booking/trip-orders) หรือแก้ไขใบสั่งงานที่ออกไป
+ * แล้ว (ส่ง `editing`, เรียก `onUpdated` แทน — PATCH
+ * /api/booking/trip-orders/[tripOrderId]) — แก้ได้เฉพาะรถ/คนขับ/เวลา/
+ * หมายเหตุ ("เท่าที่จำเป็น" ตามที่โรงพยาบาลขอ) รายการคำขอจองที่ครอบคลุมจะ
+ * ไม่เปลี่ยนแปลงในโหมดแก้ไข (แสดงไว้ให้ดูอย่างเดียว เหมือนโหมดสร้างใหม่).
  */
 export default function TripOrderModal({
   bookings,
   resources,
+  editing,
   onClose,
   onCreated,
+  onUpdated,
 }: {
-  /** คำขอจองรถที่ยังรออนุมัติ ที่ถูกเลือกไว้ (อย่างน้อย 1 รายการ) — ทุก
-   * รายการต้องเป็นรถและสถานะ pending อยู่แล้ว (คัดกรองมาจากผู้เรียกใช้). */
+  /** โหมดสร้างใหม่: คำขอจองรถที่ยังรออนุมัติที่ถูกเลือกไว้ (อย่างน้อย 1
+   * รายการ) — ทุกรายการต้องเป็นรถและสถานะ pending อยู่แล้ว. โหมดแก้ไข:
+   * รายการคำขอที่ใบสั่งงานนี้ครอบคลุมอยู่แล้ว (แสดงผลอย่างเดียว ไม่เปลี่ยน
+   * ได้ตรงนี้) — คัดกรองมาจากผู้เรียกใช้ทั้งสองกรณี. */
   bookings: Booking[];
-  /** รถที่เปิดใช้งานอยู่เท่านั้น (ประเภท car) */
+  /** รถที่เปิดใช้งานอยู่ (ประเภท car) — ในโหมดแก้ไข ถ้ารถที่ถูกมอบหมายไว้เดิม
+   * ไม่อยู่ในรายการนี้แล้ว (เช่น ถูกปิดใช้งานไปหลังออกใบสั่งงาน) คอมโพเนนต์นี้
+   * จะเติมให้เองเพื่อให้ตัวเลือกเดิมยังแสดงถูกต้อง. */
   resources: BookingResource[];
+  /** ใส่ค่านี้เพื่อเปิดในโหมดแก้ไขใบสั่งงานที่มีอยู่แล้ว — ไม่ใส่ = โหมดสร้างใหม่. */
+  editing?: TripOrder;
   onClose: () => void;
-  onCreated: (result: { tripOrder: TripOrder; bookings: Booking[] }) => void;
+  /** โหมดสร้างใหม่เท่านั้น */
+  onCreated?: (result: { tripOrder: TripOrder; bookings: Booking[] }) => void;
+  /** โหมดแก้ไขเท่านั้น */
+  onUpdated?: (tripOrder: TripOrder) => void;
 }) {
-  const [resourceId, setResourceId] = useState(resources[0]?.resourceId ?? "");
-  const defaultParts = useMemo(() => defaultTripOrderParts(bookings), [bookings]);
+  const effectiveResources = useMemo(() => {
+    if (editing && !resources.some((r) => r.resourceId === editing.resourceId)) {
+      const placeholder: BookingResource = {
+        resourceId: editing.resourceId,
+        type: "car",
+        name: `${editing.resourceName} (ปิดใช้งานแล้ว)`,
+        detail: "",
+        active: false,
+        createdAt: "",
+        createdByUsername: "",
+        imageDataUrl: "",
+        seatCount: 0,
+      };
+      return [placeholder, ...resources];
+    }
+    return resources;
+  }, [resources, editing]);
+
+  const [resourceId, setResourceId] = useState(editing?.resourceId ?? resources[0]?.resourceId ?? "");
+  const defaultParts = useMemo(
+    () =>
+      editing
+        ? defaultTripOrderParts([{ startTime: editing.startTime, endTime: editing.endTime }])
+        : defaultTripOrderParts(bookings),
+    [bookings, editing]
+  );
   const [startDate, setStartDate] = useState(defaultParts.startDate);
   const [startHour, setStartHour] = useState(defaultParts.startHour);
   const [startMinute, setStartMinute] = useState<MinuteOption>(defaultParts.startMinute);
@@ -100,8 +142,8 @@ export default function TripOrderModal({
   const [endMinute, setEndMinute] = useState<MinuteOption>(defaultParts.endMinute);
   const startTime = combineDateTime(startDate, startHour, startMinute);
   const endTime = combineDateTime(endDate, endHour, endMinute);
-  const [driverName, setDriverName] = useState("");
-  const [notes, setNotes] = useState("");
+  const [driverName, setDriverName] = useState(editing?.driverName ?? "");
+  const [notes, setNotes] = useState(editing?.notes ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const firstInputRef = useRef<HTMLSelectElement | null>(null);
@@ -142,6 +184,28 @@ export default function TripOrderModal({
     setSaving(true);
     setError(null);
     try {
+      if (editing) {
+        const res = await fetch(`/api/booking/trip-orders/${editing.tripOrderId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            resourceId,
+            driverName: driverName.trim(),
+            startTime,
+            endTime,
+            notes: notes.trim(),
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(json.error || "บันทึกการแก้ไขไม่สำเร็จ");
+          setSaving(false);
+          return;
+        }
+        onUpdated?.(json.tripOrder as TripOrder);
+        return;
+      }
+
       const res = await fetch("/api/booking/trip-orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -160,9 +224,9 @@ export default function TripOrderModal({
         setSaving(false);
         return;
       }
-      onCreated(json as { tripOrder: TripOrder; bookings: Booking[] });
+      onCreated?.(json as { tripOrder: TripOrder; bookings: Booking[] });
     } catch {
-      setError("ออกใบสั่งงานไม่สำเร็จ กรุณาลองใหม่");
+      setError(editing ? "บันทึกการแก้ไขไม่สำเร็จ กรุณาลองใหม่" : "ออกใบสั่งงานไม่สำเร็จ กรุณาลองใหม่");
       setSaving(false);
     }
   }
@@ -186,7 +250,7 @@ export default function TripOrderModal({
             className="flex items-center gap-2 text-base font-semibold text-zinc-800 dark:text-zinc-100"
           >
             <Truck size={18} strokeWidth={2} className="shrink-0 text-[var(--brand-strong)]" aria-hidden="true" />
-            ออกใบสั่งงานเดินทาง
+            {editing ? "แก้ไขใบสั่งงานเดินทาง" : "ออกใบสั่งงานเดินทาง"}
           </h2>
           <button
             type="button"
@@ -211,7 +275,9 @@ export default function TripOrderModal({
                 ต่างหากที่อ้างอิงคำขอเหล่านี้เท่านั้น ตามที่โรงพยาบาลขอ */}
             <div className="flex flex-col gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
               <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                คำขอจองที่จะรวมในใบสั่งงานนี้ ({bookings.length.toLocaleString("th-TH")} รายการ)
+                {editing
+                  ? `คำขอจองที่ใบสั่งงานนี้ครอบคลุม (${bookings.length.toLocaleString("th-TH")} รายการ) — แก้ไขตรงนี้ไม่ได้`
+                  : `คำขอจองที่จะรวมในใบสั่งงานนี้ (${bookings.length.toLocaleString("th-TH")} รายการ)`}
               </p>
               <ul className="flex flex-col gap-1.5">
                 {bookings.map((b) => (
@@ -236,11 +302,11 @@ export default function TripOrderModal({
                 ref={firstInputRef}
                 value={resourceId}
                 onChange={(e) => setResourceId(e.target.value)}
-                disabled={saving || resources.length === 0}
+                disabled={saving || effectiveResources.length === 0}
                 className={INPUT_CLASS}
               >
-                {resources.length === 0 && <option value="">ไม่มีรถที่เปิดใช้งาน</option>}
-                {resources.map((r) => (
+                {effectiveResources.length === 0 && <option value="">ไม่มีรถที่เปิดใช้งาน</option>}
+                {effectiveResources.map((r) => (
                   <option key={r.resourceId} value={r.resourceId}>
                     {r.name}
                   </option>
@@ -366,7 +432,7 @@ export default function TripOrderModal({
               </button>
               <button
                 type="submit"
-                disabled={saving || resources.length === 0}
+                disabled={saving || effectiveResources.length === 0}
                 className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] px-4 py-2 text-sm font-medium text-[var(--brand-contrast)] shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
               >
                 {saving ? (
@@ -374,7 +440,7 @@ export default function TripOrderModal({
                 ) : (
                   <Save size={16} strokeWidth={2} aria-hidden="true" />
                 )}
-                ออกใบสั่งงาน
+                {editing ? "บันทึกการแก้ไข" : "ออกใบสั่งงาน"}
               </button>
             </div>
           </form>

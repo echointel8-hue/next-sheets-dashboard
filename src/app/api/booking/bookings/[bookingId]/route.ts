@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { canApproveCarBooking, canCancelBooking } from "@/lib/booking";
-import { appendEditLog, cancelBooking, getBookings, rejectCarBooking } from "@/lib/sheets";
+import { appendEditLog, cancelBooking, editBookingByManagement, getBookings, rejectCarBooking } from "@/lib/sheets";
 
 export const dynamic = "force-dynamic";
 
@@ -59,29 +59,78 @@ function readApprovalPayload(body: unknown): "approved" | "rejected" | null {
   return v === "approved" || v === "rejected" ? v : null;
 }
 
-/** Rejects a pending car booking. Reachable only by an account with the
- * superadmin role — see canApproveCarBooking in lib/booking.ts, which
+interface BookingEditPayload {
+  purpose?: string;
+  destination?: string;
+  participants?: number;
+  contactPhone?: string;
+  companions?: string;
+}
+
+/** Reads the `edit` payload shape — every field is optional (only the ones
+ * present get changed, see editBookingByManagement in lib/sheets.ts), but a
+ * field that *is* present must still be well-formed, and at least one field
+ * must be present at all (an empty `edit: {}` is rejected rather than
+ * silently doing nothing). */
+function readEditPayload(body: unknown): BookingEditPayload | null {
+  if (!body || typeof body !== "object") return null;
+  const edit = (body as Record<string, unknown>).edit;
+  if (!edit || typeof edit !== "object") return null;
+  const e = edit as Record<string, unknown>;
+  const result: BookingEditPayload = {};
+
+  if ("purpose" in e) {
+    if (typeof e.purpose !== "string" || !e.purpose.trim()) return null;
+    result.purpose = e.purpose.trim();
+  }
+  if ("destination" in e) {
+    if (typeof e.destination !== "string") return null;
+    result.destination = e.destination.trim();
+  }
+  if ("participants" in e) {
+    if (typeof e.participants !== "number" || !Number.isFinite(e.participants) || e.participants < 0) return null;
+    result.participants = e.participants;
+  }
+  if ("contactPhone" in e) {
+    if (typeof e.contactPhone !== "string" || !e.contactPhone.trim()) return null;
+    result.contactPhone = e.contactPhone.trim();
+  }
+  if ("companions" in e) {
+    if (typeof e.companions !== "string") return null;
+    result.companions = e.companions.trim();
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+/** Two distinct things a superadmin/management account can PATCH a booking
+ * for now — both gated by canApproveCarBooking in lib/booking.ts, which
  * (unlike canManageBookingResources) is not narrowed to the bootstrap
- * account only, per the hospital's explicit choice.
+ * account only, per the hospital's explicit choice:
  *
- * This is now reject-only — "approving" a car booking is no longer a
- * status flip here. Per the hospital's explicit later request, the
- * original booking request must never be edited by management at all;
- * a car booking instead becomes approved by being dispatched via a
- * separate TripOrder (car + driver + unified time, possibly covering
- * several bookings at once — see POST /api/booking/trip-orders and
- * createTripOrder in lib/sheets.ts). Sending approvalStatus: "approved"
- * here is rejected with a message pointing at that endpoint, rather than
- * silently accepted — see rejectCarBooking's doc comment in lib/sheets.ts
- * for why "approved" was removed from that function entirely. Room
- * bookings never have anything to approve — rejectCarBooking itself
- * rejects those, and any booking that's already been reviewed. */
+ * 1. `{ approvalStatus: "rejected" }` — rejects a pending car booking
+ *    outright. "Approving" is no longer a status flip here at all —
+ *    approving means dispatching via a separate TripOrder (car + driver +
+ *    unified time, possibly covering several bookings at once — see POST
+ *    /api/booking/trip-orders and createTripOrder in lib/sheets.ts).
+ *    Sending approvalStatus: "approved" here is rejected with a message
+ *    pointing at that endpoint, rather than silently accepted.
+ *
+ * 2. `{ edit: { purpose?, destination?, participants?, contactPhone?,
+ *    companions? } }` — corrects one or more of that fixed, narrow set of
+ *    fields on the booking itself. This is the one deliberate, later-added
+ *    exception to "the original request is never edited": the hospital
+ *    explicitly asked for it, so every edit is stamped and shown as
+ *    "แก้ไขโดยฝ่ายบริหาร" (see editBookingByManagement's doc comment) — it's
+ *    a visible correction, never a silent rewrite. Who asked, which
+ *    resource, and when are never editable this way; reassigning the
+ *    actual car/driver/time is still TripOrder's job, not this one's. */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ bookingId: string }> }) {
   const { session, response } = requireSession(request);
   if (!session) return response;
   if (!canApproveCarBooking(session)) {
     return NextResponse.json(
-      { error: "ไม่อนุมัติการจองรถได้เฉพาะสิทธิ์ Superadmin เท่านั้น" },
+      { error: "แก้ไข/ไม่อนุมัติการจองรถได้เฉพาะสิทธิ์ Superadmin เท่านั้น" },
       { status: 403 }
     );
   }
@@ -93,6 +142,36 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   } catch {
     return NextResponse.json({ error: "คำขอไม่ถูกต้อง" }, { status: 400 });
   }
+
+  const isEditRequest = !!body && typeof body === "object" && "edit" in (body as Record<string, unknown>);
+
+  if (isEditRequest) {
+    const edits = readEditPayload(body);
+    if (!edits) {
+      return NextResponse.json(
+        { error: "ข้อมูลที่ส่งมาไม่ถูกต้อง — กรุณากรอกข้อมูลที่ต้องการแก้ไขให้ถูกต้องอย่างน้อย 1 รายการ" },
+        { status: 400 }
+      );
+    }
+    try {
+      const updated = await editBookingByManagement(bookingId, edits, session.username);
+      await appendEditLog({
+        timestamp: new Date().toISOString(),
+        action: "แก้ไขข้อมูลการจองโดยฝ่ายบริหาร",
+        actor: session.username,
+        department: session.department,
+        oldValue: "",
+        newValue: `${updated.resourceName}: ${updated.startTime} - ${updated.endTime} — แก้ไข: ${Object.keys(
+          edits
+        ).join(", ")} ${requestAuditTag(request)}`,
+      });
+      return NextResponse.json({ booking: updated });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+  }
+
   const approvalStatus = readApprovalPayload(body);
   if (!approvalStatus) {
     return NextResponse.json({ error: "ข้อมูลที่ส่งมาไม่ถูกต้อง" }, { status: 400 });
