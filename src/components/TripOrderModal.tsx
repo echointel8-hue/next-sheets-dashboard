@@ -146,6 +146,9 @@ export default function TripOrderModal({
   const [notes, setNotes] = useState(editing?.notes ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // true เฉพาะตอนบันทึกไม่สำเร็จเพราะเซสชันหลุด (401) — ดูคอมเมนต์อธิบาย
+  // เต็มๆ ที่ BookingFormModal.tsx ซึ่งเจอปัญหาเดียวกันนี้ก่อน
+  const [sessionExpired, setSessionExpired] = useState(false);
   const firstInputRef = useRef<HTMLSelectElement | null>(null);
 
   useEffect(() => {
@@ -198,7 +201,12 @@ export default function TripOrderModal({
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
-          setError(json.error || "บันทึกการแก้ไขไม่สำเร็จ");
+          if (res.status === 401) {
+            setSessionExpired(true);
+            setError("เซสชันหมดอายุ หรือมีการเข้าสู่ระบบบัญชีนี้จากที่อื่น กรุณาเข้าสู่ระบบใหม่อีกครั้ง (ข้อมูลที่แก้ไขไว้จะหายไป)");
+          } else {
+            setError(json.error || "บันทึกการแก้ไขไม่สำเร็จ");
+          }
           setSaving(false);
           return;
         }
@@ -220,7 +228,12 @@ export default function TripOrderModal({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json.error || "ออกใบสั่งงานไม่สำเร็จ");
+        if (res.status === 401) {
+          setSessionExpired(true);
+          setError("เซสชันหมดอายุ หรือมีการเข้าสู่ระบบบัญชีนี้จากที่อื่น กรุณาเข้าสู่ระบบใหม่อีกครั้ง (ข้อมูลที่กรอกไว้จะหายไป)");
+        } else {
+          setError(json.error || "ออกใบสั่งงานไม่สำเร็จ");
+        }
         setSaving(false);
         return;
       }
@@ -264,10 +277,24 @@ export default function TripOrderModal({
         <div className="overflow-y-auto px-5 py-4">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             {error && (
-              <p role="alert" className="flex items-start gap-2 text-sm text-red-700 dark:text-red-300">
-                <AlertTriangle size={16} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
-                {error}
-              </p>
+              <div role="alert" className="flex flex-col gap-1.5">
+                <p className="flex items-start gap-2 text-sm text-red-700 dark:text-red-300">
+                  <AlertTriangle size={16} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  {error}
+                </p>
+                {sessionExpired && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- intentional hard navigation, same reasoning as BookingFormModal
+                      window.location.href = "/login";
+                    }}
+                    className="ml-6 self-start text-sm font-medium text-red-700 underline underline-offset-2 hover:text-red-800 dark:text-red-300 dark:hover:text-red-200"
+                  >
+                    เข้าสู่ระบบใหม่
+                  </button>
+                )}
+              </div>
             )}
 
             {/* รายการคำขอจองที่ถูกเลือกไว้ — แสดงเป็นการยืนยันเท่านั้น

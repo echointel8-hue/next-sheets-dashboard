@@ -110,6 +110,15 @@ export default function BookingFormModal({
   const [contactPhone, setContactPhone] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // true เฉพาะตอนที่การจองไม่สำเร็จเพราะเซสชันหลุด (401 จาก proxy.ts) — ไม่ใช่
+  // ทุกข้อผิดพลาด แยกไว้เพื่อแสดงปุ่ม "เข้าสู่ระบบใหม่" เพิ่มเติมใต้ข้อความ
+  // เท่านั้นในกรณีนี้ กรณีอื่น (เช่น กรอกข้อมูลไม่ครบ) ไม่เกี่ยวกับการเข้าสู่
+  // ระบบเลย ไม่ควรมีปุ่มนี้. สาเหตุที่พบได้บ่อย: กรอกฟอร์มนี้นานเกิน 5 นาที
+  // (เซสชันหมดอายุแบบ idle — ดู SESSION_TTL_MS ใน lib/auth.ts) เพราะการพิมพ์
+  // ในฟอร์มไม่ได้ยิง request ไปเซิร์ฟเวอร์เลยจนกว่าจะกดยืนยัน หรือมีการ
+  // เข้าสู่ระบบบัญชีเดียวกันจากที่อื่นระหว่างนั้น (เตะเซสชันเดิมออกทันที
+  // ตามกติกา 1 บัญชีต่อ 1 เซสชัน).
+  const [sessionExpired, setSessionExpired] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstInputRef = useRef<HTMLSelectElement | null>(null);
 
@@ -190,7 +199,12 @@ export default function BookingFormModal({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json.error || "จองไม่สำเร็จ กรุณาลองใหม่");
+        if (res.status === 401) {
+          setSessionExpired(true);
+          setError("เซสชันหมดอายุ หรือมีการเข้าสู่ระบบบัญชีนี้จากที่อื่น กรุณาเข้าสู่ระบบใหม่อีกครั้ง (ข้อมูลที่กรอกไว้ในฟอร์มนี้จะหายไป)");
+        } else {
+          setError(json.error || "จองไม่สำเร็จ กรุณาลองใหม่");
+        }
         setSaving(false);
         return;
       }
@@ -231,10 +245,27 @@ export default function BookingFormModal({
         <div className="overflow-y-auto px-5 py-4">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             {error && (
-              <p role="alert" className="flex items-start gap-2 text-sm text-red-700 dark:text-red-300">
-                <AlertTriangle size={16} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
-                {error}
-              </p>
+              <div role="alert" className="flex flex-col gap-1.5">
+                <p className="flex items-start gap-2 text-sm text-red-700 dark:text-red-300">
+                  <AlertTriangle size={16} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  {error}
+                </p>
+                {sessionExpired && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Hard navigation, ไม่ใช้ router.push() — เหตุผลเดียวกับ
+                      // LoginForm/AppShell: ปิดหน้าต่างนี้ค้างกลางทางไม่ได้เลย
+                      // เพราะเซสชันหลุดไปแล้วจริงๆ
+                      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- intentional hard navigation, see comment above
+                      window.location.href = "/login";
+                    }}
+                    className="ml-6 self-start text-sm font-medium text-red-700 underline underline-offset-2 hover:text-red-800 dark:text-red-300 dark:hover:text-red-200"
+                  >
+                    เข้าสู่ระบบใหม่
+                  </button>
+                )}
+              </div>
             )}
             {resources.length === 0 ? (
               <p className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -407,13 +438,13 @@ export default function BookingFormModal({
             )}
             {resourceType === "car" && (
               <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
-                ผู้ร่วมเดินทาง (ไม่บังคับ)
+                ผู้เดินทาง (ไม่บังคับ)
                 <input
                   type="text"
                   value={companions}
                   onChange={(e) => setCompanions(e.target.value)}
                   disabled={saving}
-                  placeholder="เช่น ชื่อเพื่อนร่วมเดินทาง คั่นด้วยจุลภาค"
+                  placeholder="เช่น ชื่อผู้เดินทาง คั่นด้วยจุลภาค"
                   className={INPUT_CLASS}
                 />
               </label>
