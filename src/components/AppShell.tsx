@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import NotificationBell from "@/components/NotificationBell";
+import SessionWatcher from "@/components/SessionWatcher";
 
 /**
  * Persistent left-sidebar app shell for every authenticated screen (/menu,
@@ -222,6 +223,11 @@ export default function AppShell({
           duplicated inside both the desktop sidebar and the mobile topbar
           markup below — see NotificationBell's own doc comment. */}
       <NotificationBell enabled={canApproveBookings} username={username} />
+      {/* Renders nothing — polls in the background and force-navigates to
+          /login the moment this session is no longer valid (see its own
+          doc comment). Mounted once here for the same reason as
+          NotificationBell above. */}
+      <SessionWatcher />
 
       {/* Desktop sidebar — persistent, always visible at lg+. A light
           surface with a soft top-to-bottom white→emerald-50 wash rather
