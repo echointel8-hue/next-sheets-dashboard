@@ -123,6 +123,7 @@ export default function BookingCalendar({
   onEditBooking,
   onEditTripOrder,
   onOpenTripOrder,
+  onClearSelection,
 }: {
   typeLabel: string;
   bookings: Booking[];
@@ -164,6 +165,12 @@ export default function BookingCalendar({
    * ตามที่ขอ (เดิมมีอยู่แต่ที่หัวข้อด้านบนปฏิทิน ซึ่งถูกโมดัลนี้บังไว้พอดี
    * ตอนดูรายละเอียดวัน) — BookingDashboard เป็นเจ้าของ state ที่แท้จริง. */
   onOpenTripOrder: () => void;
+  /** ล้าง selectedBookingIds ทั้งหมด (ทุกวัน ไม่ใช่แค่วันที่กำลังปิด) —
+   * เรียกตอนปิดหน้าต่างรายละเอียดวัน (ปุ่ม X, คลิกฉากหลัง) เพื่อไม่ให้รายการ
+   * ที่เคยติ๊กไว้จากวันอื่นก่อนหน้านี้ค้างรวมอยู่ในตัวเลขที่ปุ่ม "ออกใบสั่งงาน
+   * เดินทาง" ของวันถัดไปโดยไม่รู้ตัว ("ต้องรีเซ็ตเป็นแต่ละวัน" ตามที่ขอ) —
+   * เปิดวันใหม่ต้องเริ่มเลือกใหม่เสมอ. */
+  onClearSelection: () => void;
 }) {
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
@@ -336,7 +343,12 @@ export default function BookingCalendar({
           onEditBooking={onEditBooking}
           onEditTripOrder={onEditTripOrder}
           onOpenTripOrder={onOpenTripOrder}
-          onClose={() => setSelectedDateKey(null)}
+          onClose={() => {
+            // ปิดหน้าต่างวันนี้ + ล้างรายการที่เลือกไว้ทั้งหมด — ดูคอมเมนต์ที่
+            // onClearSelection prop ด้านบนสำหรับเหตุผล
+            onClearSelection();
+            setSelectedDateKey(null);
+          }}
         />
       )}
     </div>

@@ -617,6 +617,7 @@ export default function BookingDashboard({
                   onEditBooking={setEditBookingTarget}
                   onEditTripOrder={setEditTripOrderTarget}
                   onOpenTripOrder={() => setTripOrderModalOpen(true)}
+                  onClearSelection={() => setSelectedBookingIds(new Set())}
                 />
               ) : (
                 <div className="overflow-x-auto">
