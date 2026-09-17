@@ -27,6 +27,19 @@ const STATUS_BADGE_CLASSES: Record<ReturnType<typeof bookingStatusLabel>["tone"]
   approved: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
   rejected: "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300",
 };
+// ไม่ใช้สีระบุตัวตนรถ/เที่ยว (resourceColorMap) กับการจองรถอีกต่อไป ตามที่ขอ
+// ("ไม่ต้องมีสีกำกับรถแล้วครับ") — สีของชิพ/จุดสำหรับรถตอนนี้บอก "สถานะการ
+// จอง" แทน: เหลือง = กลุ่มงานจอง (รออนุมัติ — ใช้สไตล์ pending เดิมที่มีอยู่
+// แล้วด้านล่าง), เขียว = บริหารอนุมัติแล้ว, แดง = ไม่อนุมัติ (ตามโทนเดียวกับ
+// STATUS_BADGE_CLASSES ด้านบน) ส่วนที่ยกเลิกแล้วยังคงใช้สไตล์เทา/ขีดฆ่าเดิม
+// ห้องประชุมไม่ได้รับผลกระทบ — ยังใช้ resourceColorMap (สีระบุตัวตนทรัพยากร)
+// เหมือนเดิมทุกประการ เพราะห้องประชุมยืนยันทันที ไม่มีสถานะรออนุมัติที่ต้อง
+// แยกสีให้เห็น
+const CAR_STATUS_DOT_CLASSES: Partial<Record<ReturnType<typeof bookingStatusLabel>["tone"], string>> = {
+  pending: "bg-amber-500 dark:bg-amber-400",
+  approved: "bg-emerald-600 dark:bg-emerald-500",
+  rejected: "bg-red-600 dark:bg-red-500",
+};
 // ลำดับการแสดงผลตามสถานะ — "รออนุมัติ" ต้องเห็นก่อนเสมอ (ยังต้องตัดสินใจ)
 // ตามด้วย "อนุญาต" (เสร็จแล้ว ไม่ต้องทำอะไรต่อ) ส่วนไม่อนุมัติ/ยกเลิกแล้ว
 // ไม่ใช่รายการที่ต้องรีบดู เลยไว้ท้ายสุด — ใช้กับทั้งช่องวันในปฏิทิน (3
@@ -320,12 +333,15 @@ export default function BookingCalendar({
                 {visible.map((b) => {
                   const cancelled = isBookingCancelled(b);
                   const pending = !cancelled && b.approvalStatus === "pending";
-                  // Fallback ไปสีกลางๆ (ACTION_OTHER_COLOR) เมื่อไม่พบสีจริง
-                  // (เช่น การจองรถที่ถูกไม่อนุมัติ ไม่เคยมี tripOrderId เลย —
-                  // ดู bookingColorMapKey ใน lib/booking.ts) กันไม่ให้ชิพ
+                  const isCar = b.resourceType === "car";
+                  // รถ: ไม่ใช้สีระบุตัวตนรถ/เที่ยวแล้ว — ดูคอมเมนต์ที่
+                  // CAR_STATUS_DOT_CLASSES ด้านบน ห้องประชุมยังคง Fallback ไป
+                  // สีกลางๆ (ACTION_OTHER_COLOR) เมื่อไม่พบสีจริง กันไม่ให้ชิพ
                   // กลายเป็นสีขาวล่องหน (bg-[var(--seg-c)] ไม่มีค่าให้ใช้) ซึ่ง
                   // เป็นสาเหตุที่รายงานว่า "รายการหายไปจากปฏิทิน" ตอนก่อนหน้านี้
-                  const color = resourceColorMap.get(bookingColorMapKey(b)) ?? ACTION_OTHER_COLOR;
+                  const color = isCar ? undefined : (resourceColorMap.get(bookingColorMapKey(b)) ?? ACTION_OTHER_COLOR);
+                  const carStatusClass =
+                    isCar && !cancelled && !pending ? CAR_STATUS_DOT_CLASSES[bookingStatusLabel(b).tone] : undefined;
                   const startTimeOfDay = splitBookingDateTime(b.startTime)?.time ?? "";
                   const endTimeOfDay = splitBookingDateTime(b.endTime)?.time ?? "";
                   const label =
@@ -336,7 +352,7 @@ export default function BookingCalendar({
                   return (
                     <span
                       key={b.bookingId}
-                      style={!cancelled && !pending ? actionColorVars(color) : undefined}
+                      style={!isCar && !cancelled && !pending ? actionColorVars(color!) : undefined}
                       // จองรถที่ "รออนุมัติ" ใช้เส้นขอบประสีเหลือง แทนสีทรัพยากร
                       // ปกติ — ให้ superadmin กวาดตาเห็นได้ทันทีว่ายังต้องรีวิว
                       className={`truncate rounded px-1 py-0.5 text-[10px] leading-tight ${
@@ -344,7 +360,9 @@ export default function BookingCalendar({
                           ? "bg-zinc-200 text-zinc-500 line-through dark:bg-zinc-800 dark:text-zinc-500"
                           : pending
                             ? "border border-dashed border-amber-500 bg-amber-50 text-amber-800 dark:border-amber-400 dark:bg-amber-950/40 dark:text-amber-200"
-                            : "bg-[var(--seg-c)] text-white dark:bg-[var(--seg-c-dark)]"
+                            : isCar
+                              ? `${carStatusClass ?? "bg-zinc-500 dark:bg-zinc-600"} text-white`
+                              : "bg-[var(--seg-c)] text-white dark:bg-[var(--seg-c-dark)]"
                       }`}
                     >
                       {startTimeOfDay}
@@ -497,30 +515,47 @@ function DayDetailModal({
               const first = items[0];
               const travelingTogether = items.length > 1;
               const allCancelled = items.every(isBookingCancelled);
-              const color = resourceColorMap.get(bookingColorMapKey(first));
+              const isCar = first.resourceType === "car";
+              // รถ: ไม่ใช้สีระบุตัวตนรถ/เที่ยวแล้ว — จุดสี/กรอบตอนนี้บอกสถานะ
+              // แทน (ดูคอมเมนต์ที่ CAR_STATUS_DOT_CLASSES ด้านบน) กลุ่มที่
+              // เดินทางร่วมกัน (>1 คำขอ) ล้วนมีใบสั่งงานคุมอยู่แล้วจึงถือว่า
+              // "อนุมัติแล้ว" เสมอ (เขียว) ส่วนกลุ่มเดี่ยวใช้สถานะของคำขอนั้นเอง
+              // — ห้องประชุมยังคงใช้สีระบุตัวตนทรัพยากร (resourceColorMap)
+              // เหมือนเดิมทุกประการ
+              const color = !isCar ? resourceColorMap.get(bookingColorMapKey(first)) : undefined;
+              const carTone = travelingTogether ? "approved" : bookingStatusLabel(first).tone;
+              const carDotClass = isCar && !allCancelled ? CAR_STATUS_DOT_CLASSES[carTone] : undefined;
               const displayResourceName =
                 first.resourceType === "car" ? carBookingDisplayName(first, trip) : first.resourceName;
               return (
                 <div
                   key={key}
-                  style={!allCancelled && travelingTogether && color ? actionColorVars(color) : undefined}
+                  style={!isCar && !allCancelled && travelingTogether && color ? actionColorVars(color) : undefined}
                   className={`flex flex-col gap-1.5 rounded-xl border p-3 ${
                     allCancelled
                       ? "border-zinc-200 opacity-70 dark:border-zinc-800"
-                      : travelingTogether && color
-                        ? "border-2 border-[var(--seg-c)] dark:border-[var(--seg-c-dark)]"
-                        : "border-zinc-200 dark:border-zinc-700"
+                      : isCar
+                        ? travelingTogether
+                          ? "border-2 border-emerald-500 dark:border-emerald-400"
+                          : "border-zinc-200 dark:border-zinc-700"
+                        : travelingTogether && color
+                          ? "border-2 border-[var(--seg-c)] dark:border-[var(--seg-c-dark)]"
+                          : "border-zinc-200 dark:border-zinc-700"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-1.5">
-                      {color && (
-                        <span
-                          className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
-                          style={actionColorVars(color)}
-                          aria-hidden="true"
-                        />
-                      )}
+                      {isCar
+                        ? carDotClass && (
+                            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${carDotClass}`} aria-hidden="true" />
+                          )
+                        : color && (
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                              style={actionColorVars(color)}
+                              aria-hidden="true"
+                            />
+                          )}
                       <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
                         {displayResourceName}
                       </span>

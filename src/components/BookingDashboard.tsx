@@ -77,6 +77,14 @@ const STATUS_BADGE_CLASSES: Record<ReturnType<typeof bookingStatusLabel>["tone"]
   approved: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
   rejected: "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300",
 };
+// จุดสีในตารางรายการ (คอลัมน์แรก) สำหรับรถ — บอกสถานะแทนตัวตนรถ/เที่ยว
+// เหมือนกับในปฏิทิน ดูคอมเมนต์เต็มที่ CAR_STATUS_DOT_CLASSES ใน
+// BookingCalendar.tsx (คัดลอกมาตามธรรมเนียมเดิมของไฟล์นี้)
+const CAR_STATUS_DOT_CLASSES: Partial<Record<ReturnType<typeof bookingStatusLabel>["tone"], string>> = {
+  pending: "bg-amber-500 dark:bg-amber-400",
+  approved: "bg-emerald-600 dark:bg-emerald-500",
+  rejected: "bg-red-600 dark:bg-red-500",
+};
 
 /**
  * Top-level page for one half of the vehicle / meeting-room booking
@@ -227,33 +235,20 @@ export default function BookingDashboard({
   // resource of this type, active or not, so a cancelled booking against a
   // since-deactivated resource still shows a stable, decodable color.
   //
-  // Car is keyed differently — by TripOrder.tripOrderId instead of resource
-  // name (see bookingColorMapKey in lib/booking.ts and every
-  // resourceColorMap.get(...) call site below/in BookingCalendar.tsx, which
-  // all go through that helper now instead of reading .resourceName
-  // directly). A car booking no longer records which real car resource it's
-  // against up front (see PENDING_CAR_RESOURCE_NAME in lib/booking.ts), so
-  // keying by resourceName the way rooms do would either color every car
-  // booking identically (meaningless) or key on a name nothing else
-  // references. Keying by tripOrderId instead means every booking a single
-  // TripOrder covers/dispatches together shares one color — exactly what
-  // "these travel together" should look like (per the hospital's later,
-  // explicit request) — and restores a real per-booking color for car
-  // bookings again (a booking not yet dispatched has no tripOrderId, so it
-  // just has no entry here — fine, since it always renders via the fixed
-  // "pending"/cancelled/rejected styles instead of this color at every call
-  // site that reads it, see BookingCalendar.tsx). Ordered by
-  // TripOrder.createdAt for the same "stable, append-only" reasoning as the
-  // room resource list below. Never surfaced as a legend for car (the keys
-  // are opaque IDs, not readable names) — see showResourceLegend passed to
-  // BookingCalendar below.
+  // Car no longer uses this at all — per the hospital's later, explicit
+  // request ("ไม่ต้องมีสีกำกับรถแล้วครับ"), a car booking's color now
+  // represents its *status* (pending/approved/rejected/cancelled) instead of
+  // which car/trip it's against — see CAR_STATUS_DOT_CLASSES in
+  // BookingCalendar.tsx (and its mirror below) which derive that directly
+  // from bookingStatusLabel(booking).tone, no map lookup needed. Returns an
+  // empty map for car so every resourceColorMap.get(...) call site simply
+  // misses (harmless — those sites already branch on type/resourceType
+  // before ever reading it for a car booking). Room bookings are unaffected
+  // — still keyed by resource name, ordered by BookingResource.createdAt,
+  // exactly as before.
   const resourceColorMap: Map<string, ActionColor> = useMemo(() => {
     if (type === "car") {
-      const byCreatedAt = tripOrders
-        .slice()
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-        .map((t) => t.tripOrderId);
-      return buildActionColorMap(byCreatedAt);
+      return new Map();
     }
     const byCreatedAt = resources
       .filter((r) => r.type === type)
@@ -261,9 +256,9 @@ export default function BookingDashboard({
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .map((r) => r.name);
     return buildActionColorMap(byCreatedAt);
-    // `resources`/`tripOrders` are freshly re-derived from `data` every
-    // render (see the comment above typeResources); `data`/`type` are the
-    // real, stable dependencies.
+    // `resources` is freshly re-derived from `data` every render (see the
+    // comment above typeResources); `data`/`type` are the real, stable
+    // dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, type]);
 
@@ -692,8 +687,13 @@ export default function BookingDashboard({
                     <tbody>
                       {typeBookings.map((booking) => {
                         const cancelled = isBookingCancelled(booking);
-                        const color = resourceColorMap.get(bookingColorMapKey(booking));
                         const status = bookingStatusLabel(booking);
+                        // รถ: จุดสีบอกสถานะ (เหมือนในปฏิทิน) แทนตัวตนรถ/เที่ยว
+                        // เดิม — ห้องประชุมยังคงใช้สีระบุตัวตนทรัพยากรเดิม ดู
+                        // คอมเมนต์เต็มที่ CAR_STATUS_DOT_CLASSES/
+                        // resourceColorMap ด้านบน
+                        const color = type === "car" ? undefined : resourceColorMap.get(bookingColorMapKey(booking));
+                        const carDotClass = type === "car" && !cancelled ? CAR_STATUS_DOT_CLASSES[status.tone] : undefined;
                         // รถที่จัดสรรจริง (จากใบสั่งงาน) แทนข้อความ "รอ
                         // บริหารจัดสรร" เมื่อมีการออกใบสั่งงานแล้ว — ดู
                         // carBookingDisplayName ใน lib/booking.ts
@@ -708,13 +708,17 @@ export default function BookingDashboard({
                           >
                             <td className="px-2 py-2.5 font-medium text-zinc-800 dark:text-zinc-100">
                               <span className="inline-flex items-center gap-1.5">
-                                {color && (
-                                  <span
-                                    className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
-                                    style={actionColorVars(color)}
-                                    aria-hidden="true"
-                                  />
-                                )}
+                                {type === "car"
+                                  ? carDotClass && (
+                                      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${carDotClass}`} aria-hidden="true" />
+                                    )
+                                  : color && (
+                                      <span
+                                        className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
+                                        style={actionColorVars(color)}
+                                        aria-hidden="true"
+                                      />
+                                    )}
                                 {displayResourceName}
                               </span>
                             </td>
