@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "crypto";
 import type { NextRequest } from "next/server";
 import { hasPermission, type PermissionKey } from "@/lib/permissions";
+import { clearActiveSessionId, isSessionStoreConfigured, isSessionSuperseded, setActiveSessionId } from "@/lib/sessionStore";
 
 // Login/session auth for the /manage area. Three roles:
 // - superadmin: every department, can add/edit/dispose equipment
@@ -191,7 +192,12 @@ export function createSessionToken(payload: Omit<SessionPayload, "exp">): string
  * ข้อความ "ถูกเตะออกเพราะมีคนล็อกอินซ้ำ" ให้ตรงสาเหตุจริง — ดู
  * verifySessionTokenWithReason ด้านล่าง) จุดอื่นที่แค่ต้องรู้ "ผ่าน/ไม่ผ่าน"
  * เฉยๆ ไม่ต้องสนใจ type นี้เลย ใช้ verifySessionToken ตัวเดิมได้เหมือนเดิม
- * ทุกที่. */
+ * ทุกที่.
+ *
+ * "superseded" ไม่ได้ถูกกำหนดจากฟังก์ชันนี้อีกต่อไป (ดูคอมเมนต์ที่
+ * checkSessionSuperseded ด้านล่างว่าทำไม) — ยังอยู่ใน union นี้เพราะ proxy.ts
+ * เป็นผู้กำหนดค่านี้เองแทน หลังเรียก verifySessionTokenWithReason แล้วเช็ค
+ * checkSessionSuperseded ต่อ. */
 export type SessionInvalidReason =
   | "missing" // ไม่มีคุกกี้เลย (ยังไม่เคยล็อกอิน หรือหมดอายุไปนานแล้วจนคุกกี้หาย)
   | "invalid" // รูปแบบ/ลายเซ็นไม่ถูกต้อง (เสียหาย/ถูกแก้ไข)
@@ -200,7 +206,17 @@ export type SessionInvalidReason =
 
 /** เหมือน verifySessionToken ทุกประการ แต่ส่งสาเหตุกลับมาด้วยเมื่อไม่ผ่าน —
  * verifySessionToken ด้านล่างเป็นแค่ wrapper บางๆ ของฟังก์ชันนี้ (คืนแค่
- * .session) เพื่อให้ทุกจุดเรียกเดิมไม่ต้องแก้อะไรเลย. */
+ * .session) เพื่อให้ทุกจุดเรียกเดิมไม่ต้องแก้อะไรเลย.
+ *
+ * ตรวจเฉพาะลายเซ็น/รูปแบบ/วันหมดอายุเท่านั้น (ล้วนเช็คได้จากตัวคุกกี้เอง ไม่
+ * ต้องพึ่งพาที่เก็บภายนอกใดๆ) — เจตนาให้ฟังก์ชันนี้ยังคงเป็น synchronous
+ * เหมือนเดิมทุกจุดที่เรียกอยู่แล้ว (ทุก API route ผ่าน requireSession ของ
+ * ตัวเอง, ทุกหน้า page.tsx ฝั่งเซิร์ฟเวอร์) ไม่ต้องแก้เป็น async ทั้งหมด การ
+ * เช็ค "เซสชันนี้ถูกเซสชันอื่นแทนที่หรือยัง" (ซึ่งจำเป็นต้องเป็น async เพราะ
+ * ต้องอ่านที่เก็บกลาง — ดู checkSessionSuperseded ด้านล่าง) ทำแยกต่างหากใน
+ * proxy.ts เพียงจุดเดียว ก่อนปล่อยคำขอผ่านไปหน้า/API จริง — proxy.ts คุม
+ * ทุก route อยู่แล้ว (ดู config.matcher ในไฟล์นั้น) จึงครอบคลุมเท่ากับเช็คใน
+ * ฟังก์ชันนี้ทุกประการ โดยไม่ต้องทำให้ทั้งแอปเป็น async ไปหมด. */
 export function verifySessionTokenWithReason(
   token: string | undefined | null
 ): { session: SessionPayload; reason?: undefined } | { session: null; reason: SessionInvalidReason } {
@@ -259,32 +275,6 @@ export function verifySessionTokenWithReason(
   if (typeof payload.sessionId !== "string") payload.sessionId = "";
   if (Date.now() > payload.exp) return { session: null, reason: "expired" };
 
-  // Single active session per account (see the section below this
-  // function): a non-empty sessionId participates in the check; an empty
-  // one (legacy cookie, or the rare case a login somehow didn't mint one)
-  // is waved through untracked, same "never worse than before this
-  // feature existed" reasoning as the displayName/extraPermissions
-  // fallbacks above.
-  if (payload.sessionId) {
-    const current = activeSessions.get(payload.username);
-    if (current === undefined) {
-      // Nothing recorded yet for this account — either the server just
-      // restarted (the in-memory map is cleared, see the comment below) or
-      // this is the very first request since a login minted this session.
-      // Adopt it as the active one rather than rejecting it outright: a
-      // mass logout on every deploy/restart would be worse than briefly
-      // not enforcing exclusivity until the next real login re-establishes
-      // it properly.
-      activeSessions.set(payload.username, payload.sessionId);
-    } else if (current !== payload.sessionId) {
-      // A different login for this account is now the active one —
-      // "logging in elsewhere kicks the old session out immediately," per
-      // the hospital's explicit choice. proxy.ts uses this specific reason
-      // to show the kicked-out person a clear notice on /login instead of
-      // just silently landing them there with no explanation.
-      return { session: null, reason: "superseded" };
-    }
-  }
   return { session: payload };
 }
 
@@ -296,36 +286,70 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
   return verifySessionTokenWithReason(token).session;
 }
 
-// --- Single active session per account (in-memory, per Node process) ---
-// Same in-memory-map tradeoff as the login rate limiter below (see that
-// section's own comment) — resets on process restart, an accepted tradeoff
-// for this deployment shape. Maps username -> the sessionId of whichever
-// login is currently considered "the" active one for that account.
-// registerNewSession is called exactly once per successful login (see the
-// login route), overwriting whatever was there before — the previous
-// session's cookie still carries the old sessionId, so its next request
-// fails the check above and gets bounced to /login. A session just being
-// refreshed (proxy.ts's sliding-exp re-mint) reuses its own existing
-// sessionId rather than calling this again, so ordinary browsing never
-// touches this map — only an actual new login (or an explicit logout, via
-// clearActiveSession) does.
+/** true เมื่อบัญชีนี้มีการ login จากที่อื่นทับ sessionId นี้ไปแล้ว — ต้องเป็น
+ * async เพราะต้องอ่านที่เก็บกลางที่ทุก instance เห็นตรงกัน (ดูคอมเมนต์ยาวใน
+ * lib/sessionStore.ts สำหรับสาเหตุเต็มๆ: แอปนี้รันบน Vercel ซึ่งอาจมีหลาย
+ * instance พร้อมกัน Map ในหน่วยความจำของ process เดียวจึงไม่พอ) เรียกจาก
+ * proxy.ts เพียงจุดเดียว (ทุก route ผ่าน proxy.ts อยู่แล้ว — ดู
+ * config.matcher ที่นั่น) หลัง verifySessionTokenWithReason ผ่านแล้วเท่านั้น
+ * (ไม่มีประโยชน์เช็คเซสชันที่ลายเซ็น/วันหมดอายุไม่ผ่านตั้งแต่แรก) sessionId
+ * ว่างเปล่า (คุกกี้เก่าก่อนมีฟีเจอร์นี้) ไม่ถูกติดตามเลย เหมือนเดิมทุกประการ. */
+export async function checkSessionSuperseded(session: Pick<SessionPayload, "username" | "sessionId">): Promise<boolean> {
+  if (!session.sessionId) return false;
+  // ถ้าตั้งค่า SESSION_STORE_REDIS_URL/TOKEN ไว้แล้ว ใช้ที่เก็บกลางนั้นเป็น
+  // แหล่งข้อมูลจริง (ทุก instance เห็นตรงกัน — ดู lib/sessionStore.ts) ถ้า
+  // ยังไม่ได้ตั้งค่า ถอยไปใช้ activeSessions Map ในหน่วยความจำแบบเดิมแทน (ดู
+  // คอมเมนต์ที่ Map นั้นด้านล่าง) — ครอบคลุมแค่ instance เดียวเหมือนเดิมทุก
+  // ประการ ไม่แย่ไปกว่าพฤติกรรมก่อนแก้ไขบั๊กนี้เลย แค่ยังไม่ได้แก้จริงจนกว่า
+  // จะตั้งค่าที่เก็บกลาง.
+  if (isSessionStoreConfigured()) {
+    return isSessionSuperseded(session.username, session.sessionId);
+  }
+  const current = activeSessions.get(session.username);
+  if (current === undefined) {
+    activeSessions.set(session.username, session.sessionId);
+    return false;
+  }
+  return current !== session.sessionId;
+}
+
+// --- Single active session per account ---
+// แหล่งข้อมูลจริงตอนนี้คือ lib/sessionStore.ts (ที่เก็บกลางผ่าน Redis/Upstash
+// REST API — ดูคอมเมนต์ยาวที่นั่นสำหรับสาเหตุที่ต้องมี) เมื่อตั้งค่า
+// SESSION_STORE_REDIS_URL/TOKEN ไว้แล้ว — Map ด้านล่างนี้เหลือไว้เป็นแค่ทาง
+// สำรอง (ครอบคลุมแค่ instance เดียว, รีเซ็ตตอน process restart) สำหรับตอนที่
+// ยังไม่ได้ตั้งค่าที่เก็บกลางเลย (เช่น dev เครื่องตัวเอง) ให้พฤติกรรมยังคง
+// เหมือนก่อนแก้บั๊กนี้ทุกประการ ไม่แย่ลงกว่าเดิม — ดู checkSessionSuperseded
+// ด้านบนสำหรับตรรกะเลือกใช้ตัวไหน. Maps username -> the sessionId of
+// whichever login is currently considered "the" active one for that account
+// on THIS instance's memory. registerNewSession เขียนทั้งคู่ (Map นี้ +
+// setActiveSessionId ในที่เก็บกลาง) ทุกครั้งที่ login สำเร็จ.
 const activeSessions = new Map<string, string>();
 
 /** Mints a new sessionId for `username` and registers it as the sole
  * active session for that account, silently superseding whatever session
- * (if any) was active before. Call once per successful login. */
-export function registerNewSession(username: string): string {
+ * (if any) was active before — both in the local same-instance Map
+ * (fallback) and the shared external store (source of truth once
+ * configured — see lib/sessionStore.ts). Call once per successful login;
+ * now async because writing to the external store is a network call, same
+ * "best effort, never blocks the actual login" tradeoff as every other
+ * write there. */
+export async function registerNewSession(username: string): Promise<string> {
   const sessionId = randomUUID();
   activeSessions.set(username, sessionId);
+  await setActiveSessionId(username, sessionId);
   return sessionId;
 }
 
 /** Releases `username`'s active-session slot — called on explicit logout
- * so nothing stale lingers. Not required for the kick-out-on-login
- * mechanism itself (a fresh login always overwrites regardless of what's
- * here), just tidiness. */
-export function clearActiveSession(username: string): void {
+ * (or a password reset, which should also invalidate any session already
+ * active elsewhere) so nothing stale lingers. Not required for the
+ * kick-out-on-login mechanism itself (a fresh login always overwrites
+ * regardless of what's here), just tidiness — clears both the local Map
+ * and the shared external store. */
+export async function clearActiveSession(username: string): Promise<void> {
   activeSessions.delete(username);
+  await clearActiveSessionId(username);
 }
 
 // --- Login rate limiting (in-memory, per Node process) ---

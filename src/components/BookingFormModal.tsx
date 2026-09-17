@@ -26,6 +26,17 @@ function dateStr(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+/** วันเวลาปัจจุบันในรูปแบบเดียวกับ startTime/endTime ("YYYY-MM-DDTHH:MM") —
+ * ใช้เทียบสตริงตรงๆ กับ startTime ตอน submit เพื่อปฏิเสธการจองที่ย้อนหลัง
+ * วันเวลาปัจจุบัน (เทียบสตริงได้ตรงๆ เพราะรูปแบบนี้เรียงตามตัวอักษรตรงกับ
+ * เรียงตามเวลาพอดีอยู่แล้ว เหมือน handleEndDateChange ด้านบน) ไม่ปัดเศษ
+ * นาทีเหมือน defaultBookingParts — ใช้ค่าปัจจุบันตรงๆ เพื่อความแม่นยำสูงสุด
+ * ตอนตรวจสอบ. */
+function nowDateTimeStr(): string {
+  const now = new Date();
+  return `${dateStr(now)}T${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+}
+
 /** ค่าเริ่มต้นของฟอร์มจองใหม่ — วันเวลาปัจจุบัน ปัดนาทีขึ้นเป็นครึ่งชั่วโมง
  * ถัดไป (ไม่ปัดย้อนไปเป็นอดีต) และสิ้นสุดห่างจากเริ่มต้น 1 ชั่วโมง —
  * ผู้จองยังปรับเปลี่ยนได้ตามต้องการทั้งหมด นี่แค่ลดการต้องเลือกวันที่/เวลา
@@ -198,6 +209,14 @@ export default function BookingFormModal({
     }
     if (startTime >= endTime) {
       setError("เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่มต้น");
+      return;
+    }
+    // ห้ามจองย้อนหลังวันเวลาปัจจุบัน — เทียบสตริงตรงๆ กับ nowDateTimeStr()
+    // ตามที่ขอ (server-side เช็คซ้ำอีกชั้นใน readBookingPayload ของ
+    // /api/booking/bookings/route.ts กันกรณีเปิดฟอร์มค้างไว้นานจนเวลาที่
+    // เคยเลือกไว้กลายเป็นอดีตไปแล้วตอนกด submit จริง)
+    if (startTime < nowDateTimeStr()) {
+      setError("ไม่สามารถจองย้อนหลังวันเวลาปัจจุบันได้ กรุณาเลือกวันเวลาเริ่มต้นใหม่");
       return;
     }
     if (!purpose.trim()) {
@@ -378,6 +397,9 @@ export default function BookingFormModal({
                     value={startDate}
                     onChange={(e) => handleStartDateChange(e.target.value)}
                     disabled={saving}
+                    // กันเลือกวันที่ย้อนหลังตั้งแต่ตัว picker เอง (นอกเหนือจาก
+                    // การเช็คตอน submit ด้านบน) — ตามที่ขอ "จองย้อนหลังไม่ได้"
+                    min={dateStr(new Date())}
                     className={`${INPUT_CLASS} min-w-0 flex-1`}
                   />
                   <select

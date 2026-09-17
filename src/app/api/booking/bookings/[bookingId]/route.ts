@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
-import { canApproveCarBooking, canCancelBooking } from "@/lib/booking";
+import { canApproveCarBooking, canCancelBooking, canEditBookingByManagement } from "@/lib/booking";
 import { appendEditLog, cancelBooking, editBookingByManagement, getBookings, rejectCarBooking } from "@/lib/sheets";
 
 export const dynamic = "force-dynamic";
@@ -104,36 +104,33 @@ function readEditPayload(body: unknown): BookingEditPayload | null {
 }
 
 /** Two distinct things a superadmin/management account can PATCH a booking
- * for now — both gated by canApproveCarBooking in lib/booking.ts, which
- * (unlike canManageBookingResources) is not narrowed to the bootstrap
- * account only, per the hospital's explicit choice:
+ * for now — each gated by its own permission key in lib/permissions.ts
+ * (split apart per a later, explicit hospital request — see
+ * canEditBookingByManagement's doc comment in lib/booking.ts for why),
+ * neither narrowed to the bootstrap account only:
  *
  * 1. `{ approvalStatus: "rejected" }` — rejects a pending car booking
- *    outright. "Approving" is no longer a status flip here at all —
- *    approving means dispatching via a separate TripOrder (car + driver +
- *    unified time, possibly covering several bookings at once — see POST
- *    /api/booking/trip-orders and createTripOrder in lib/sheets.ts).
- *    Sending approvalStatus: "approved" here is rejected with a message
- *    pointing at that endpoint, rather than silently accepted.
+ *    outright, gated by canApproveCarBooking. "Approving" is no longer a
+ *    status flip here at all — approving means dispatching via a separate
+ *    TripOrder (car + driver + unified time, possibly covering several
+ *    bookings at once — see POST /api/booking/trip-orders and
+ *    createTripOrder in lib/sheets.ts). Sending approvalStatus: "approved"
+ *    here is rejected with a message pointing at that endpoint, rather than
+ *    silently accepted.
  *
  * 2. `{ edit: { purpose?, destination?, participants?, contactPhone?,
  *    companions? } }` — corrects one or more of that fixed, narrow set of
- *    fields on the booking itself. This is the one deliberate, later-added
- *    exception to "the original request is never edited": the hospital
- *    explicitly asked for it, so every edit is stamped and shown as
- *    "แก้ไขโดยฝ่ายบริหาร" (see editBookingByManagement's doc comment) — it's
- *    a visible correction, never a silent rewrite. Who asked, which
- *    resource, and when are never editable this way; reassigning the
- *    actual car/driver/time is still TripOrder's job, not this one's. */
+ *    fields on the booking itself, gated by canEditBookingByManagement.
+ *    This is the one deliberate, later-added exception to "the original
+ *    request is never edited": the hospital explicitly asked for it, so
+ *    every edit is stamped and shown as "แก้ไขโดยฝ่ายบริหาร" (see
+ *    editBookingByManagement's doc comment) — it's a visible correction,
+ *    never a silent rewrite. Who asked, which resource, and when are never
+ *    editable this way; reassigning the actual car/driver/time is still
+ *    TripOrder's job, not this one's. */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ bookingId: string }> }) {
   const { session, response } = requireSession(request);
   if (!session) return response;
-  if (!canApproveCarBooking(session)) {
-    return NextResponse.json(
-      { error: "แก้ไข/ไม่อนุมัติการจองรถได้เฉพาะสิทธิ์ Superadmin เท่านั้น" },
-      { status: 403 }
-    );
-  }
   const { bookingId } = await params;
 
   let body: unknown;
@@ -146,6 +143,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const isEditRequest = !!body && typeof body === "object" && "edit" in (body as Record<string, unknown>);
 
   if (isEditRequest) {
+    if (!canEditBookingByManagement(session)) {
+      return NextResponse.json(
+        { error: "แก้ไขข้อมูลการจองได้เฉพาะผู้มีสิทธิ์นี้เท่านั้น" },
+        { status: 403 }
+      );
+    }
     const edits = readEditPayload(body);
     if (!edits) {
       return NextResponse.json(
@@ -172,6 +175,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
   }
 
+  if (!canApproveCarBooking(session)) {
+    return NextResponse.json(
+      { error: "แก้ไข/ไม่อนุมัติการจองรถได้เฉพาะสิทธิ์ Superadmin เท่านั้น" },
+      { status: 403 }
+    );
+  }
   const approvalStatus = readApprovalPayload(body);
   if (!approvalStatus) {
     return NextResponse.json({ error: "ข้อมูลที่ส่งมาไม่ถูกต้อง" }, { status: 400 });

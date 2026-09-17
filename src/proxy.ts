@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
+  checkSessionSuperseded,
   createSessionToken,
-  verifySessionToken,
+  verifySessionTokenWithReason,
   type SessionPayload,
 } from "@/lib/auth";
 
@@ -33,8 +34,21 @@ import {
  * Next.js 16 renamed the "middleware" file convention to "proxy", and
  * defaults it to the Node.js runtime (not Edge) — which is what makes it
  * safe for this file to import src/lib/auth.ts's use of Node's `crypto`.
+ *
+ * Now async — checkSessionSuperseded (see lib/auth.ts) needs to read a
+ * shared external store to know whether this session's been superseded by
+ * a later login elsewhere (lib/sessionStore.ts's whole reason for existing:
+ * an in-memory-only check can't see logins handled by a different
+ * serverless instance). This is the one and only place that check runs —
+ * every /manage, /api/manage, /booking, /api/booking, /menu request passes
+ * through here first (see config.matcher below), so gating it here is
+ * exactly as complete as gating it inside verifySessionTokenWithReason
+ * itself used to be, without needing every other call site in the app
+ * (every API route's own requireSession, every page.tsx) to become async
+ * too. Next.js's proxy/middleware supports an async function returning a
+ * Promise<NextResponse> natively — no special wiring needed for this.
  */
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const basicAuthFailure = checkBasicAuth(request);
   if (basicAuthFailure) return basicAuthFailure;
 
@@ -47,7 +61,16 @@ export function proxy(request: NextRequest) {
   // routes of its own, it just links out to /manage and /booking.
   const isMenuPage = pathname === "/menu" || pathname.startsWith("/menu/");
 
-  const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
+  let { session, reason } = verifySessionTokenWithReason(request.cookies.get(SESSION_COOKIE)?.value);
+  // ผ่านการตรวจลายเซ็น/วันหมดอายุมาแล้วเท่านั้นถึงจะเช็คนี้ต่อ — ไม่มี
+  // ประโยชน์เสียเวลาเรียกที่เก็บกลางให้เซสชันที่ผิดอยู่แล้วตั้งแต่แรก
+  if (session) {
+    const superseded = await checkSessionSuperseded(session);
+    if (superseded) {
+      session = null;
+      reason = "superseded";
+    }
+  }
 
   if ((isManagePage || isManageApi || isBookingPage || isBookingApi || isMenuPage) && !session) {
     if (isManageApi || isBookingApi) {
@@ -57,7 +80,15 @@ export function proxy(request: NextRequest) {
     // sends a freshly logged-in account to /menu regardless of which
     // protected URL it originally tried to reach, per the hospital's
     // explicit request. See src/app/login/page.tsx's own comment.
-    return NextResponse.redirect(new URL("/login", request.url));
+    const loginUrl = new URL("/login", request.url);
+    // เฉพาะกรณีถูกเตะออกเพราะมีคนล็อกอินบัญชีเดียวกันทับ (ไม่ใช่แค่หมดอายุ
+    // เฉยๆ) — ติดพารามิเตอร์ไว้ให้ LoginForm.tsx โชว์ข้อความแจ้งเตือนที่ตรง
+    // สาเหตุจริง แทนที่จะเงียบๆ พาไปหน้า /login เฉยๆ โดยไม่บอกอะไรเลย ตามที่
+    // โรงพยาบาลขอ ("ถ้ามีการ login ชนกันให้มีการแจ้งเตือนด้วย")
+    if (reason === "superseded") {
+      loginUrl.searchParams.set("reason", "elsewhere");
+    }
+    return NextResponse.redirect(loginUrl);
   }
 
   const response = NextResponse.next();

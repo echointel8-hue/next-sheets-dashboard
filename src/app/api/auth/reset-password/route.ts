@@ -125,11 +125,12 @@ export async function POST(request: NextRequest) {
 
     await updateUser(username, { passwordHash: hashPassword(newPassword) });
     // Any session already active for this account (lib/auth.ts's
-    // activeSessions map) was established under the old password — release
-    // it so it can't keep riding on a since-changed credential. The
-    // account's own next login (with the new password) registers a fresh
-    // one as normal, same as any other login.
-    clearActiveSession(username);
+    // registerNewSession/clearActiveSession, backed by lib/sessionStore.ts)
+    // was established under the old password — release it so it can't keep
+    // riding on a since-changed credential. The account's own next login
+    // (with the new password) registers a fresh one as normal, same as any
+    // other login.
+    await clearActiveSession(username);
 
     after(() => logResetAttempt(auditTag, "สำเร็จ", username));
     return NextResponse.json({ ok: true });

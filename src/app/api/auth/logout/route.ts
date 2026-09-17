@@ -12,11 +12,11 @@ export async function POST(request: NextRequest) {
 
   if (session) {
     // Releases this account's active-session slot (lib/auth.ts's
-    // activeSessions map) — not required for the kick-out-on-login
-    // mechanism itself (a fresh login always overwrites regardless), just
-    // tidiness so nothing stale lingers between this logout and whenever
-    // the account next logs in.
-    clearActiveSession(session.username);
+    // registerNewSession/clearActiveSession, backed by lib/sessionStore.ts)
+    // — not required for the kick-out-on-login mechanism itself (a fresh
+    // login always overwrites regardless), just tidiness so nothing stale
+    // lingers between this logout and whenever the account next logs in.
+    await clearActiveSession(session.username);
     // Deferred via after() (see login/route.ts's longer comment on the same
     // pattern) — logging out should never sit around waiting on a Google
     // Sheets write, so this now runs after the response has already gone

@@ -32,11 +32,11 @@ import type { Role } from "@/lib/auth";
 //      NON_GRANTABLE_KEYS below.
 //   2. On top of that, a role can have its own narrower allow-list for the
 //      remaining "superadmin ทั่วไป" tier keys (approveCarBooking,
-//      cancelAnyBooking, manageEquipmentAllDept, addEquipment,
-//      disposeRestoreEquipment) — currently just "admin", narrowed to
-//      addEquipment alone, since even that whole tier was still enough to
-//      make an admin account indistinguishable from a superadmin. See
-//      GRANTABLE_EXTRA_KEYS_BY_ROLE below.
+//      editBookingData, cancelAnyBooking, manageEquipmentAllDept,
+//      addEquipment, disposeRestoreEquipment) — currently just "admin",
+//      narrowed to addEquipment alone, since even that whole tier was still
+//      enough to make an admin account indistinguishable from a superadmin.
+//      See GRANTABLE_EXTRA_KEYS_BY_ROLE below.
 // isGrantablePermission(key, role) is the one function that combines both
 // layers — always use that, never NON_GRANTABLE_KEYS or
 // GRANTABLE_EXTRA_KEYS_BY_ROLE directly.
@@ -55,6 +55,7 @@ import type { Role } from "@/lib/auth";
 
 export type PermissionKey =
   | "approveCarBooking"
+  | "editBookingData"
   | "manageBookingResources"
   | "cancelAnyBooking"
   | "manageEquipmentAllDept"
@@ -68,6 +69,7 @@ export type PermissionKey =
 
 export const PERMISSION_KEYS: PermissionKey[] = [
   "approveCarBooking",
+  "editBookingData",
   "manageBookingResources",
   "cancelAnyBooking",
   "manageEquipmentAllDept",
@@ -83,7 +85,8 @@ export const PERMISSION_KEYS: PermissionKey[] = [
 /** Thai labels for the checkbox list in UserFormModal — kept here, next to
  * the keys themselves, so the two can never drift out of sync. */
 export const PERMISSION_LABELS: Record<PermissionKey, string> = {
-  approveCarBooking: "อนุมัติ/ไม่อนุมัติการจองรถ",
+  approveCarBooking: "อนุมัติ/ไม่อนุมัติ/ออกใบสั่งงานการจองรถ",
+  editBookingData: "แก้ไขข้อมูลรายละเอียดการจอง (วัตถุประสงค์/ปลายทาง/ผู้ร่วมเดินทาง ฯลฯ)",
   manageBookingResources: "จัดการรถ/ห้องประชุม (เพิ่ม/แก้ไข/ปิดใช้งาน)",
   cancelAnyBooking: "ยกเลิกการจองของผู้อื่นได้ (ทุกแผนก)",
   manageEquipmentAllDept: "แก้ไขรายการครุภัณฑ์ได้ทุกแผนก (ไม่จำกัดเฉพาะแผนกตัวเอง)",
@@ -123,12 +126,12 @@ export const NON_GRANTABLE_KEYS: PermissionKey[] = [
 ];
 
 /** A second, per-role ceiling on top of NON_GRANTABLE_KEYS — added when the
- * hospital pointed out that even the "superadmin ทั่วไป" tier (the five
- * keys NOT in NON_GRANTABLE_KEYS: approveCarBooking, cancelAnyBooking,
- * manageEquipmentAllDept, addEquipment, disposeRestoreEquipment) was too
- * much to let an "admin" account reach in full — ticking every one of those
- * five still made an admin account functionally identical to a plain
- * superadmin, the exact problem this whole cap exists to prevent, just one
+ * hospital pointed out that even the "superadmin ทั่วไป" tier (the keys NOT
+ * in NON_GRANTABLE_KEYS: approveCarBooking, editBookingData,
+ * cancelAnyBooking, manageEquipmentAllDept, addEquipment,
+ * disposeRestoreEquipment) was too much to let an "admin" account reach in
+ * full — ticking every one of those still made an admin account functionally
+ * identical to a plain superadmin, the exact problem this whole cap exists to prevent, just one
  * tier down. Only a role listed here has its grantable additions narrowed
  * further; a role with no entry keeps the plain NON_GRANTABLE_KEYS ceiling
  * (currently just "admin", narrowed to addEquipment alone, per the
@@ -181,10 +184,12 @@ export function defaultPermissionsForRole(role: Role, isBootstrap: boolean): Set
   if (role === "superadmin") {
     // Any superadmin — bootstrap or one created through /manage/users —
     // reaches equipment/booking oversight the same way today (see
-    // canApproveCarBooking/canCancelBooking in lib/booking.ts and the
-    // records API routes); only the IT-only surfaces stay bootstrap-only.
+    // canApproveCarBooking/canEditBookingByManagement/canCancelBooking in
+    // lib/booking.ts and the records API routes); only the IT-only surfaces
+    // stay bootstrap-only.
     return new Set<PermissionKey>([
       "approveCarBooking",
+      "editBookingData",
       "cancelAnyBooking",
       "manageEquipmentAllDept",
       "addEquipment",

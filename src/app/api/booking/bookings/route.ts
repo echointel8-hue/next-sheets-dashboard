@@ -71,6 +71,11 @@ function readBookingPayload(body: unknown): BookingPayload | null {
   const start = new Date(b.startTime).getTime();
   const end = new Date(b.endTime).getTime();
   if (Number.isNaN(start) || Number.isNaN(end) || start >= end) return null;
+  // ห้ามจองย้อนหลังวันเวลาปัจจุบัน — เช็คซ้ำฝั่งเซิร์ฟเวอร์ (นอกเหนือจากที่
+  // BookingFormModal.tsx เช็คไว้แล้วฝั่ง client) กันกรณีเปิดฟอร์มค้างไว้นาน
+  // จนเวลาที่เคยเลือกไว้กลายเป็นอดีตไปแล้วตอนกด submit จริง หรือมีการเรียก
+  // API ตรงๆ โดยข้าม client
+  if (start < Date.now()) return null;
 
   return {
     resourceType: b.resourceType,

@@ -8,6 +8,7 @@ import {
   CalendarDays,
   CalendarPlus,
   Car,
+  CheckCircle2,
   DoorOpen,
   List,
   Loader2,
@@ -22,9 +23,12 @@ import {
 import type { Role } from "@/lib/auth";
 import { buildActionColorMap, actionColorVars, type ActionColor } from "@/lib/actionColors";
 import {
+  bookingColorMapKey,
   bookingStatusLabel,
   canApproveCarBooking,
   canCancelBooking,
+  canEditBookingByManagement,
+  carBookingDisplayName,
   formatBookingDateTime,
   isBookingCancelled,
   type Booking,
@@ -121,6 +125,10 @@ export default function BookingDashboard({
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
   const [rejectingBookingId, setRejectingBookingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // ข้อความยืนยันสำเร็จหลังออกใบสั่งงานเดินทาง — เดิมไม่มีเลย ปิดหน้าต่าง
+  // TripOrderModal เงียบๆ อย่างเดียว ผู้ใช้จึงไม่แน่ใจว่าสั่งงานสำเร็จหรือไม่
+  // ตามที่รายงาน ("ไม่แสดงข้อความหลังจากการสั่งงาน")
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
   // รายการจองรถที่ "รออนุมัติ" ที่ถูกเลือกไว้เพื่อรวมออกใบสั่งงานเดียวกัน —
   // เลือกได้มากกว่า 1 รายการ นั่นคือฟีเจอร์ "รวมเที่ยว/คาร์พูล" ในตัว ไม่มี
@@ -135,6 +143,13 @@ export default function BookingDashboard({
   const [editTripOrderTarget, setEditTripOrderTarget] = useState<TripOrder | null>(null);
   // เฉพาะการจองรถต้องมีขั้นตอนอนุมัติ — ห้องประชุมไม่มี (ยืนยันทันทีเหมือนเดิม)
   const canApprove = type === "car" && canApproveCarBooking(session);
+  // สิทธิ์ "แก้ไขข้อมูลการจอง" แยกออกมาจาก canApprove แล้ว (permission key
+  // "editBookingData" — ดู canEditBookingByManagement ใน lib/booking.ts) ตาม
+  // ที่ขอเพิ่มภายหลัง เพื่อให้เปิด/ปิดสิทธิ์นี้แยกจากสิทธิ์อนุมัติ/ไม่อนุมัติ/
+  // ออกใบสั่งงานได้ต่อบัญชี — ปุ่ม "แก้ไขข้อมูล" (ManagementEditBookingModal)
+  // ใช้ตัวนี้แทน canApprove โดยเฉพาะ ส่วนปุ่มอื่นๆ ทั้งหมด (เลือกจัดรถ/
+  // ไม่อนุมัติ/ออกใบสั่งงาน/แก้ไขใบสั่งงาน) ยังใช้ canApprove เหมือนเดิม
+  const canEditBooking = type === "car" && canEditBookingByManagement(session);
 
   const resources = isError(data) ? [] : data.resources;
   const bookings = isError(data) ? [] : data.bookings;
@@ -188,26 +203,43 @@ export default function BookingDashboard({
   // resource of this type, active or not, so a cancelled booking against a
   // since-deactivated resource still shows a stable, decodable color.
   //
-  // Car only ever gets an empty map now (deliberately, not just a
-  // did-nothing branch) — a car booking no longer records which real car
-  // resource it's against (see PENDING_CAR_RESOURCE_NAME in
-  // lib/booking.ts), so every car booking would share the exact same
-  // placeholder resourceName and this map's per-resource legend/coloring
-  // would be pure noise (a legend listing every car in the fleet, none of
-  // which any booking could ever actually be colored by) — better to show
-  // none at all than a misleading one. Room bookings still pick a real
-  // resource up front, so this is entirely unchanged for them.
+  // Car is keyed differently — by TripOrder.tripOrderId instead of resource
+  // name (see bookingColorMapKey in lib/booking.ts and every
+  // resourceColorMap.get(...) call site below/in BookingCalendar.tsx, which
+  // all go through that helper now instead of reading .resourceName
+  // directly). A car booking no longer records which real car resource it's
+  // against up front (see PENDING_CAR_RESOURCE_NAME in lib/booking.ts), so
+  // keying by resourceName the way rooms do would either color every car
+  // booking identically (meaningless) or key on a name nothing else
+  // references. Keying by tripOrderId instead means every booking a single
+  // TripOrder covers/dispatches together shares one color — exactly what
+  // "these travel together" should look like (per the hospital's later,
+  // explicit request) — and restores a real per-booking color for car
+  // bookings again (a booking not yet dispatched has no tripOrderId, so it
+  // just has no entry here — fine, since it always renders via the fixed
+  // "pending"/cancelled/rejected styles instead of this color at every call
+  // site that reads it, see BookingCalendar.tsx). Ordered by
+  // TripOrder.createdAt for the same "stable, append-only" reasoning as the
+  // room resource list below. Never surfaced as a legend for car (the keys
+  // are opaque IDs, not readable names) — see showResourceLegend passed to
+  // BookingCalendar below.
   const resourceColorMap: Map<string, ActionColor> = useMemo(() => {
-    if (type === "car") return new Map();
+    if (type === "car") {
+      const byCreatedAt = tripOrders
+        .slice()
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+        .map((t) => t.tripOrderId);
+      return buildActionColorMap(byCreatedAt);
+    }
     const byCreatedAt = resources
       .filter((r) => r.type === type)
       .slice()
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .map((r) => r.name);
     return buildActionColorMap(byCreatedAt);
-    // `resources` is freshly re-derived from `data` every render (see the
-    // comment above typeResources); `data`/`type` are the real,
-    // stable dependencies.
+    // `resources`/`tripOrders` are freshly re-derived from `data` every
+    // render (see the comment above typeResources); `data`/`type` are the
+    // real, stable dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, type]);
 
@@ -340,6 +372,9 @@ export default function BookingDashboard({
     });
     setSelectedBookingIds(new Set());
     setTripOrderModalOpen(false);
+    setSuccessMessage(
+      `ออกใบสั่งงานเดินทางสำเร็จ (${tripOrder.resourceName} · คนขับ: ${tripOrder.driverName || "—"}) — รายการจองที่เกี่ยวข้อง ${updatedBookings.length.toLocaleString("th-TH")} รายการปรับสถานะเป็น "ยืนยันแล้ว" ในปฏิทินแล้ว`
+    );
   }
 
   /** ผลจากการแก้ไขใบสั่งงานที่ออกไปแล้ว — แทนที่ TripOrder เดิมใน state ด้วย
@@ -426,6 +461,23 @@ export default function BookingDashboard({
               type="button"
               onClick={() => setActionError(null)}
               className="text-xs font-medium text-red-700 hover:underline dark:text-red-300"
+            >
+              ปิด
+            </button>
+          </div>
+        )}
+
+        {successMessage && (
+          <div
+            role="status"
+            className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200"
+          >
+            <CheckCircle2 size={20} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <p className="flex-1 text-sm leading-6">{successMessage}</p>
+            <button
+              type="button"
+              onClick={() => setSuccessMessage(null)}
+              className="text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-300"
             >
               ปิด
             </button>
@@ -534,11 +586,17 @@ export default function BookingDashboard({
                   typeLabel={typeLabel}
                   bookings={typeBookings}
                   resourceColorMap={resourceColorMap}
+                  // Legend รายชื่อทรัพยากรมีความหมายเฉพาะห้องประชุม — รถตอนนี้
+                  // คีย์สีด้วย tripOrderId (ดูคอมเมนต์ที่ resourceColorMap
+                  // ด้านบน) ซึ่งเป็น ID ไม่มีความหมายให้คนอ่าน โชว์เป็น legend
+                  // ไม่ได้ ต้องซ่อนไว้สำหรับรถโดยเฉพาะ
+                  showResourceLegend={type === "room"}
                   session={session}
                   onCancel={handleCancelBooking}
                   cancellingBookingId={cancellingBookingId}
                   showDestination={type === "car"}
                   canApprove={canApprove}
+                  canEditBooking={canEditBooking}
                   onReject={handleReject}
                   rejectingBookingId={rejectingBookingId}
                   selectedBookingIds={selectedBookingIds}
@@ -567,8 +625,15 @@ export default function BookingDashboard({
                     <tbody>
                       {typeBookings.map((booking) => {
                         const cancelled = isBookingCancelled(booking);
-                        const color = resourceColorMap.get(booking.resourceName);
+                        const color = resourceColorMap.get(bookingColorMapKey(booking));
                         const status = bookingStatusLabel(booking);
+                        // รถที่จัดสรรจริง (จากใบสั่งงาน) แทนข้อความ "รอ
+                        // บริหารจัดสรร" เมื่อมีการออกใบสั่งงานแล้ว — ดู
+                        // carBookingDisplayName ใน lib/booking.ts
+                        const displayResourceName =
+                          type === "car"
+                            ? carBookingDisplayName(booking, tripOrderByBookingId.get(booking.bookingId))
+                            : booking.resourceName;
                         return (
                           <tr
                             key={booking.bookingId}
@@ -583,7 +648,7 @@ export default function BookingDashboard({
                                     aria-hidden="true"
                                   />
                                 )}
-                                {booking.resourceName}
+                                {displayResourceName}
                               </span>
                             </td>
                             <td className="px-2 py-2.5 whitespace-nowrap text-zinc-600 dark:text-zinc-300">
@@ -660,10 +725,11 @@ export default function BookingDashboard({
                                 {!cancelled && tripOrderByBookingId.get(booking.bookingId) && (
                                   <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 px-2 py-1 text-xs font-medium text-sky-700 dark:border-sky-900/50 dark:text-sky-300">
                                     <Truck size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
-                                    {/* รถจริงที่ได้รับมอบหมาย + คนขับ — ดูคอมเมนต์เดียวกันใน
-                                        BookingCalendar.tsx สำหรับเหตุผลที่ต้องแสดงตรงนี้แทน */}
-                                    {tripOrderByBookingId.get(booking.bookingId)!.resourceName} ·{" "}
-                                    {tripOrderByBookingId.get(booking.bookingId)!.driverName || "—"}
+                                    {/* ตัดชื่อรถออก — ตอนนี้แสดงอยู่แล้วที่ช่อง
+                                        {typeLabel} ด้านซ้าย (displayResourceName
+                                        ด้านบน) เหลือแค่คนขับตรงนี้ กันข้อมูลซ้ำซ้อน
+                                        ตามที่ขอ */}
+                                    คนขับ: {tripOrderByBookingId.get(booking.bookingId)!.driverName || "—"}
                                     {canApprove && (
                                       <button
                                         type="button"
@@ -676,7 +742,7 @@ export default function BookingDashboard({
                                     )}
                                   </span>
                                 )}
-                                {!cancelled && canApprove && type === "car" && (
+                                {!cancelled && canEditBooking && (
                                   <button
                                     type="button"
                                     onClick={() => setEditBookingTarget(booking)}

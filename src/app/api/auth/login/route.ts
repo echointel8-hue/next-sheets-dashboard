@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
   // device/browser) was active before it. Per the hospital's explicit
   // choice: logging in elsewhere kicks the old session out immediately,
   // rather than blocking this new login while an old one is still active.
-  const sessionId = registerNewSession(matched.username);
+  const sessionId = await registerNewSession(matched.username);
   const token = createSessionToken({ ...matched, sessionId });
   // Deferred via after() — this is the fix for logins (bootstrap account
   // especially) hanging for a long time when the Sheets API write is slow:

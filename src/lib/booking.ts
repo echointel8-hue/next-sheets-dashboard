@@ -247,6 +247,51 @@ export function isBookingCancelled(booking: Pick<Booking, "cancelledAt">): boole
   return booking.cancelledAt.trim() !== "";
 }
 
+/** The key a booking is color-coded by in resourceColorMap (see
+ * BookingDashboard's resourceColorMap useMemo and every
+ * resourceColorMap.get(...) call site in BookingCalendar.tsx/
+ * BookingDashboard.tsx) — NOT simply booking.resourceName for a car
+ * booking, because every car booking shares the exact same placeholder
+ * name until dispatched (see PENDING_CAR_RESOURCE_NAME above), which would
+ * either color every car booking identically (meaningless) or key on a
+ * name no TripOrder-based map actually contains.
+ *
+ * Room bookings are unaffected — same resourceName key as always, matching
+ * a real BookingResource.name.
+ *
+ * A car booking is keyed by its tripOrderId once dispatched — every
+ * booking a single TripOrder covers shares that one key, so bookings
+ * combined into the same dispatch/trip render with the exact same color,
+ * which is exactly what "these travel together" should look like visually
+ * (per the hospital's later, explicit request — see resourceColorMap's own
+ * comment in BookingDashboard.tsx for how the map itself is built from
+ * tripOrders for car). A car booking with no tripOrderId yet (still
+ * pending, or rejected outright) has no meaningful key — returns "" so
+ * resourceColorMap.get(...) always misses for it; every call site that
+ * reads the result already either never uses color for that case (a
+ * pending booking always renders via a fixed status style instead — see
+ * BookingCalendar's day-cell chip) or falls back to a neutral color
+ * (ACTION_OTHER_COLOR from lib/actionColors.ts) rather than ever rendering
+ * an unstyled/invisible chip. */
+export function bookingColorMapKey(booking: Pick<Booking, "resourceType" | "resourceName" | "tripOrderId">): string {
+  if (booking.resourceType !== "car") return booking.resourceName;
+  return booking.tripOrderId;
+}
+
+/** What to show as a car booking's primary resource label once it's been
+ * dispatched — the real assigned car (from the TripOrder that covers it)
+ * once one exists, falling back to the request's own
+ * PENDING_CAR_RESOURCE_NAME placeholder while still pending or rejected.
+ * Degrades to booking.resourceName whenever there's no covering TripOrder
+ * (including for a room booking, which never has one), so it's always safe
+ * to call regardless of resourceType. */
+export function carBookingDisplayName(
+  booking: Pick<Booking, "resourceName">,
+  tripOrder: Pick<TripOrder, "resourceName"> | undefined
+): string {
+  return tripOrder?.resourceName || booking.resourceName;
+}
+
 /** Display label + tone for a booking's overall status, shared by every
  * booking list/calendar view (BookingDashboard, BookingCalendar) so the
  * wording and color never drift between them. Cancelled always wins — a
@@ -375,23 +420,43 @@ export function canCancelBooking(
  * to review. Backed by hasPermission()'s "approveCarBooking" key — same
  * unchanged default (any superadmin), now also grantable per account.
  *
- * Gates several distinct actions now, all still "management handling a car
+ * Gates three distinct actions now, all still "management handling a car
  * booking": rejecting a pending one outright (PATCH
  * /api/booking/bookings/[bookingId] with approvalStatus), *approving* one
  * by dispatching it — creating a TripOrder that assigns a real
  * car/driver/time to it, alone or combined with other pending requests
- * (POST /api/booking/trip-orders) — editing an already-issued TripOrder's
- * own car/driver/time/notes afterwards (PATCH
- * /api/booking/trip-orders/[tripOrderId]), and editing a *booking's* own
- * narrow set of fields (purpose/destination/participants/contactPhone/
- * companions — PATCH .../[bookingId] with an `edit` payload instead of
- * approvalStatus — see editBookingByManagement in lib/sheets.ts). This last
- * one is the one deliberate exception to "the original request is never
- * edited": the hospital explicitly asked for it, gated to the same
- * management/superadmin reach as everything else here, and always visibly
- * marked via Booking.editedByUsername/editedAt so it's never silent. See
- * TripOrder's doc comment above for why *approving* is a dispatch record
- * rather than a plain status toggle. */
+ * (POST /api/booking/trip-orders) — and editing an already-issued
+ * TripOrder's own car/driver/time/notes afterwards (PATCH
+ * /api/booking/trip-orders/[tripOrderId]). See TripOrder's doc comment
+ * above for why *approving* is a dispatch record rather than a plain status
+ * toggle.
+ *
+ * Editing a *booking's* own narrow set of fields (purpose/destination/
+ * participants/contactPhone/companions) used to be bundled into this same
+ * key too — split out into its own canEditBookingByManagement below (per
+ * the hospital's later, explicit request to be able to grant/revoke that
+ * specifically for one superadmin account without touching its approve/
+ * reject/dispatch rights) — see that function for the rest of this story. */
 export function canApproveCarBooking(session: PermissionSession): boolean {
   return hasPermission(session, "approveCarBooking");
+}
+
+/** Who may edit a *booking's* own narrow set of fields — purpose/
+ * destination/participants/contactPhone/companions only (PATCH
+ * /api/booking/bookings/[bookingId] with an `edit` payload instead of
+ * approvalStatus — see editBookingByManagement in lib/sheets.ts). This is
+ * the one deliberate exception to "the original request is never edited":
+ * the hospital explicitly asked for it, and every edit is always visibly
+ * marked via Booking.editedByUsername/editedAt so it's never silent.
+ *
+ * Split out from canApproveCarBooking above into its own
+ * "editBookingData" permission key — same unchanged default as before (any
+ * superadmin gets both by default, see defaultPermissionsForRole in
+ * lib/permissions.ts), but now independently grantable/revocable per
+ * account: a hospital admin can tick approveCarBooking off for one
+ * superadmin account while leaving editBookingData on, or vice versa,
+ * without the two ever being forced to move together the way they used to
+ * be when this was all one key. */
+export function canEditBookingByManagement(session: PermissionSession): boolean {
+  return hasPermission(session, "editBookingData");
 }

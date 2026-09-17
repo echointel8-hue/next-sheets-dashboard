@@ -4,11 +4,13 @@ import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Ban, Building2, ChevronLeft, ChevronRight, Loader2, MapPin, Pencil, Phone, Truck, Users, X } from "lucide-react";
 import type { Role } from "@/lib/auth";
-import { actionColorVars, type ActionColor } from "@/lib/actionColors";
+import { ACTION_OTHER_COLOR, actionColorVars, type ActionColor } from "@/lib/actionColors";
 import type { PermissionKey } from "@/lib/permissions";
 import {
+  bookingColorMapKey,
   bookingStatusLabel,
   canCancelBooking,
+  carBookingDisplayName,
   formatBookingDateTime,
   isBookingCancelled,
   splitBookingDateTime,
@@ -120,11 +122,13 @@ export default function BookingCalendar({
   typeLabel,
   bookings,
   resourceColorMap,
+  showResourceLegend,
   session,
   onCancel,
   cancellingBookingId,
   showDestination,
   canApprove,
+  canEditBooking,
   onReject,
   rejectingBookingId,
   selectedBookingIds,
@@ -138,6 +142,10 @@ export default function BookingCalendar({
   typeLabel: string;
   bookings: Booking[];
   resourceColorMap: Map<string, ActionColor>;
+  /** Legend รายชื่อทรัพยากรมีความหมายเฉพาะห้องประชุม — ดูคอมเมนต์ที่จุดเรียก
+   * ใน BookingDashboard.tsx (resourceColorMap ของรถตอนนี้คีย์ด้วย
+   * tripOrderId ซึ่งไม่มีความหมายให้คนอ่านเป็น legend ได้) */
+  showResourceLegend: boolean;
   session: { username: string; role: Role; isBootstrap: boolean; extraPermissions?: PermissionKey[]; revokedPermissions?: PermissionKey[] };
   onCancel: (booking: Booking) => void;
   cancellingBookingId: string | null;
@@ -146,6 +154,10 @@ export default function BookingCalendar({
    * in lib/booking.ts. Room calendars never pass true, since room bookings
    * have no pending state to review. */
   canApprove: boolean;
+  /** สิทธิ์ "แก้ไขข้อมูลการจอง" แยกจาก canApprove แล้ว (permission key
+   * "editBookingData") — ใช้เฉพาะปุ่ม "แก้ไขข้อมูล" ใน DayDetailModal ปุ่ม
+   * อื่นทั้งหมดยังใช้ canApprove เหมือนเดิม ดูคอมเมนต์ที่ BookingDashboard.tsx */
+  canEditBooking: boolean;
   /** Rejects a pending car booking outright — the only single-click decision
    * left here. "Approving" is no longer a status flip: it only happens by
    * dispatching a TripOrder (see selectedBookingIds/onToggleSelect below and
@@ -244,7 +256,7 @@ export default function BookingCalendar({
         </button>
       </div>
 
-      {legendNames.length > 0 && (
+      {showResourceLegend && legendNames.length > 0 && (
         <div className="flex flex-wrap gap-x-3 gap-y-1.5">
           {legendNames.map((name) => {
             const color = resourceColorMap.get(name);
@@ -308,13 +320,23 @@ export default function BookingCalendar({
                 {visible.map((b) => {
                   const cancelled = isBookingCancelled(b);
                   const pending = !cancelled && b.approvalStatus === "pending";
-                  const color = resourceColorMap.get(b.resourceName);
+                  // Fallback ไปสีกลางๆ (ACTION_OTHER_COLOR) เมื่อไม่พบสีจริง
+                  // (เช่น การจองรถที่ถูกไม่อนุมัติ ไม่เคยมี tripOrderId เลย —
+                  // ดู bookingColorMapKey ใน lib/booking.ts) กันไม่ให้ชิพ
+                  // กลายเป็นสีขาวล่องหน (bg-[var(--seg-c)] ไม่มีค่าให้ใช้) ซึ่ง
+                  // เป็นสาเหตุที่รายงานว่า "รายการหายไปจากปฏิทิน" ตอนก่อนหน้านี้
+                  const color = resourceColorMap.get(bookingColorMapKey(b)) ?? ACTION_OTHER_COLOR;
                   const startTimeOfDay = splitBookingDateTime(b.startTime)?.time ?? "";
                   const endTimeOfDay = splitBookingDateTime(b.endTime)?.time ?? "";
+                  const label =
+                    b.department ||
+                    (b.resourceType === "car"
+                      ? carBookingDisplayName(b, tripOrderByBookingId.get(b.bookingId))
+                      : b.resourceName);
                   return (
                     <span
                       key={b.bookingId}
-                      style={!cancelled && color ? actionColorVars(color) : undefined}
+                      style={!cancelled && !pending ? actionColorVars(color) : undefined}
                       // จองรถที่ "รออนุมัติ" ใช้เส้นขอบประสีเหลือง แทนสีทรัพยากร
                       // ปกติ — ให้ superadmin กวาดตาเห็นได้ทันทีว่ายังต้องรีวิว
                       className={`truncate rounded px-1 py-0.5 text-[10px] leading-tight ${
@@ -326,7 +348,7 @@ export default function BookingCalendar({
                       }`}
                     >
                       {startTimeOfDay}
-                      {endTimeOfDay ? `-${endTimeOfDay}` : ""} {b.department || b.resourceName}
+                      {endTimeOfDay ? `-${endTimeOfDay}` : ""} {label}
                     </span>
                   );
                 })}
@@ -352,6 +374,7 @@ export default function BookingCalendar({
           cancellingBookingId={cancellingBookingId}
           showDestination={showDestination}
           canApprove={canApprove}
+          canEditBooking={canEditBooking}
           onReject={onReject}
           rejectingBookingId={rejectingBookingId}
           selectedBookingIds={selectedBookingIds}
@@ -382,6 +405,7 @@ function DayDetailModal({
   cancellingBookingId,
   showDestination,
   canApprove,
+  canEditBooking,
   onReject,
   rejectingBookingId,
   selectedBookingIds,
@@ -401,6 +425,7 @@ function DayDetailModal({
   cancellingBookingId: string | null;
   showDestination: boolean;
   canApprove: boolean;
+  canEditBooking: boolean;
   onReject: (booking: Booking) => void;
   rejectingBookingId: string | null;
   selectedBookingIds: Set<string>;
@@ -446,15 +471,29 @@ function DayDetailModal({
           ) : (
             bookings.map((b) => {
               const cancelled = isBookingCancelled(b);
-              const color = resourceColorMap.get(b.resourceName);
+              const color = resourceColorMap.get(bookingColorMapKey(b));
               const status = bookingStatusLabel(b);
+              const trip = tripOrderByBookingId.get(b.bookingId);
+              // เดินทางร่วมกับรายการอื่น (TripOrder เดียวกันครอบคลุม >1 คำขอ)
+              // — ใช้กรอบสีเดียวกับจุด/ชิพสีของรายการนั้น (ชุดสีเดียวกับ
+              // ทั่วทั้งแอป ผ่านการตรวจสอบ colorblind-safe แล้ว) แทนกรอบเทา
+              // ปกติ ให้เห็นชัดเจนว่ารายการไหนไปด้วยกันบ้าง ตามที่ขอ
+              // ("ใช้กรอบสีของกล่องแจ้งสถานะเป็นสีเดียวกันหากเป็นรายการที่
+              // เดินทางร่วมกัน") — เฉพาะเที่ยวที่รวมมากกว่า 1 คำขอเท่านั้น
+              // เที่ยวเดี่ยวไม่มีอะไรให้เทียบเลยไม่ต้องเน้น
+              const travelingTogether = !!trip && trip.bookingIds.length > 1;
+              const displayResourceName =
+                b.resourceType === "car" ? carBookingDisplayName(b, trip) : b.resourceName;
               return (
                 <div
                   key={b.bookingId}
+                  style={!cancelled && travelingTogether && color ? actionColorVars(color) : undefined}
                   className={`flex flex-col gap-1.5 rounded-xl border p-3 ${
                     cancelled
                       ? "border-zinc-200 opacity-70 dark:border-zinc-800"
-                      : "border-zinc-200 dark:border-zinc-700"
+                      : travelingTogether && color
+                        ? "border-2 border-[var(--seg-c)] dark:border-[var(--seg-c-dark)]"
+                        : "border-zinc-200 dark:border-zinc-700"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -467,7 +506,7 @@ function DayDetailModal({
                         />
                       )}
                       <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-                        {b.resourceName}
+                        {displayResourceName}
                       </span>
                     </div>
                     <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[status.tone]}`}>
@@ -496,27 +535,22 @@ function DayDetailModal({
                       แก้ไขโดยฝ่ายบริหาร ({b.editedByUsername})
                     </span>
                   )}
-                  {showDestination && tripOrderByBookingId.get(b.bookingId) && (
+                  {showDestination && trip && (
                     <span className="flex items-start justify-between gap-1.5 rounded-lg bg-sky-50 p-2 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
                       <span className="flex items-start gap-1.5">
                         <Truck size={13} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
                         <span>
-                          {/* รถจริงที่ได้รับมอบหมาย — แสดงตรงนี้แทนหัวการ์ด
-                              ด้านบน (b.resourceName) ซึ่งตอนนี้เป็นแค่ข้อความ
-                              กลางๆ "รอบริหารจัดสรร" เสมอสำหรับการจองรถ (ดู
-                              PENDING_CAR_RESOURCE_NAME ใน lib/booking.ts) —
-                              รถ/คนขับตัวจริงมาจากใบสั่งงานเดินทางเท่านั้น */}
-                          <span className="font-medium">{tripOrderByBookingId.get(b.bookingId)!.resourceName}</span> ·
-                          คนขับ: {tripOrderByBookingId.get(b.bookingId)!.driverName || "—"}
-                          {tripOrderByBookingId.get(b.bookingId)!.bookingIds.length > 1 && (
-                            <> (ร่วมเที่ยวกับอีก {tripOrderByBookingId.get(b.bookingId)!.bookingIds.length - 1} คำขอ)</>
-                          )}
+                          {/* ตัดชื่อรถออก — แสดงอยู่แล้วที่หัวการ์ดด้านบน
+                              (displayResourceName) เหลือแค่คนขับ/จำนวนที่ร่วม
+                              เที่ยวตรงนี้ กันข้อมูลซ้ำซ้อน ตามที่ขอ */}
+                          คนขับ: {trip.driverName || "—"}
+                          {travelingTogether && <> (ร่วมเที่ยวกับอีก {trip.bookingIds.length - 1} คำขอ)</>}
                         </span>
                       </span>
                       {canApprove && (
                         <button
                           type="button"
-                          onClick={() => onEditTripOrder(tripOrderByBookingId.get(b.bookingId)!)}
+                          onClick={() => onEditTripOrder(trip)}
                           className="shrink-0 rounded-full p-1 text-sky-700 transition-colors hover:bg-sky-100 dark:text-sky-300 dark:hover:bg-sky-900/40"
                           aria-label="แก้ไขใบสั่งงานเดินทาง"
                         >
@@ -569,7 +603,7 @@ function DayDetailModal({
                         </button>
                       </>
                     )}
-                    {!cancelled && canApprove && showDestination && (
+                    {!cancelled && canEditBooking && showDestination && (
                       <button
                         type="button"
                         onClick={() => onEditBooking(b)}
