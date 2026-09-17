@@ -362,7 +362,7 @@ export default function BookingFormModal({
               // ตัวเลือกรถเดิม
               <p className="flex items-start gap-2 rounded-lg bg-sky-50 p-2.5 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
                 <Info size={15} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
-                ไม่ต้องเลือกรถล่วงหน้า — ฝ่ายบริหารจะเป็นผู้จัดสรรรถและคนขับให้หลังจากอนุมัติคำขอนี้แล้ว
+                ฝ่ายบริหารจะจัดสรรรถและคนขับให้หลังจากยืนยันการจอง
               </p>
             )}
             {/* วันที่ + ชั่วโมง (อิสระ) + นาที (00/30 เท่านั้น) แยกเป็นคนละ
