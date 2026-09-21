@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Ban, Building2, ChevronLeft, ChevronRight, Loader2, MapPin, Pencil, Phone, Truck, Users, X } from "lucide-react";
+import { Ban, Building2, ChevronLeft, ChevronRight, Clock, Loader2, MapPin, Pencil, Phone, Truck, Users, X } from "lucide-react";
 import type { Role } from "@/lib/auth";
 import { ACTION_OTHER_COLOR, actionColorVars, type ActionColor } from "@/lib/actionColors";
 import type { PermissionKey } from "@/lib/permissions";
@@ -705,6 +705,40 @@ function DayDetailModal({
                       )
                     )}
                   </div>
+                  {/* กล่องเวลาออกเดินทาง/คนขับ — ข้อมูลของ "เที่ยวรถ" โดยรวม
+                      แสดงครั้งเดียวต่อกลุ่ม (ไม่ว่าจะมี 1 หรือหลายคำขอ) ย้ายมา
+                      ไว้เหนือกล่องเส้นเวลาการเดินทาง ใต้ชื่อรถ/ป้ายทะเบียนใน
+                      หัวการ์ดทันที ตามที่ขอภายหลัง ("ย้ายกล่องที่วงด้านล่างไป
+                      ไว้ด้านบน... ใต้ชื่อรถ และป้ายทะเบียน") เดิมอยู่ใต้กล่อง
+                      เส้นเวลา — สลับลำดับเพื่อให้เวลาออกเดินทาง (สำคัญที่สุด)
+                      เห็นก่อนรายละเอียดอื่นเสมอ พร้อมเพิ่มตัวเลขเวลาออกเดินทาง
+                      ขนาดใหญ่เด่นชัดไว้ในกล่องเดียวกัน (ตามที่ขอ — "เวลาเริ่ม
+                      เดินทางมีความสำคัญมาก") ใช้ trip.startTime ตรงๆ (เวลารวม
+                      ของทั้งเที่ยว ไม่ใช่ของคำขอใดคำขอหนึ่ง) ปุ่ม "แก้ไขใบสั่งงาน
+                      เดินทาง" ย้ายขึ้นไปอยู่ที่หัวการ์ดแล้ว (ดูคอมเมนต์ด้านบน) */}
+                  {showDestination && trip && (
+                    <div className="flex flex-col gap-1.5 rounded-lg bg-sky-50 p-2.5 dark:bg-sky-950/30">
+                      <div className="flex items-baseline gap-2">
+                        <Clock
+                          size={20}
+                          strokeWidth={2.5}
+                          className="mb-0.5 shrink-0 self-center text-sky-700 dark:text-sky-300"
+                          aria-hidden="true"
+                        />
+                        <span className="text-2xl font-bold leading-none tabular-nums text-sky-900 dark:text-sky-100">
+                          {splitBookingDateTime(trip.startTime)?.time ?? formatBookingDateTime(trip.startTime)}
+                        </span>
+                        <span className="text-xs font-medium text-sky-700 dark:text-sky-300">เวลาออกเดินทาง</span>
+                      </div>
+                      <span className="flex items-start gap-1.5 text-xs leading-5 text-sky-800 dark:text-sky-200">
+                        <Truck size={13} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+                        <span>
+                          คนขับ: {trip.driverName || "—"}
+                          {travelingTogether && <> · รวม {items.length.toLocaleString("th-TH")} คำขอเดินทางร่วมกัน</>}
+                        </span>
+                      </span>
+                    </div>
+                  )}
                   {/* เส้นเวลาการเดินทางของ "เที่ยวรถรายการนี้" เอง — ย้ายมาจาก
                       กล่องรวมทั้งวันที่หัวหน้าต่างเดิมมาไว้ในการ์ดของแต่ละเที่ยว
                       แทน ตามที่ขอภายหลัง ("ขอให้กล่องเส้นเวลาการเดินทาง อยู่
@@ -774,20 +808,6 @@ function DayDetailModal({
                         )}
                       </div>
                     </div>
-                  )}
-                  {/* กล่องคนขับ/รถ — ข้อมูลของ "เที่ยวรถ" โดยรวม แสดงครั้งเดียว
-                      ต่อกลุ่ม (ไม่ว่าจะมี 1 หรือหลายคำขอ) ไม่ซ้ำต่อคำขอ ตามที่
-                      ขอ ("อยู่ข้างกับรถ หรืออยู่ใต้ก็ได้") — วางไว้ใต้ชื่อรถ ปุ่ม
-                      "แก้ไขใบสั่งงานเดินทาง" ย้ายขึ้นไปอยู่ที่หัวการ์ดแล้ว (ดู
-                      คอมเมนต์ด้านบน) จึงเหลือแค่ข้อความคนขับ/จำนวนคำขอตรงนี้ */}
-                  {showDestination && trip && (
-                    <span className="flex items-start gap-1.5 rounded-lg bg-sky-50 p-2 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
-                      <Truck size={13} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
-                      <span>
-                        คนขับ: {trip.driverName || "—"}
-                        {travelingTogether && <> · รวม {items.length.toLocaleString("th-TH")} คำขอเดินทางร่วมกัน</>}
-                      </span>
-                    </span>
                   )}
                   {items.map((b, index) => {
                     const cancelled = isBookingCancelled(b);
