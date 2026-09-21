@@ -10,6 +10,7 @@ import {
   formatBookingDateTime,
   hasBookingConflict,
   isBookingCancelled,
+  PENDING_CAR_RESOURCE_NAME,
   type Booking,
   type BookingApprovalStatus,
   type BookingResource,
@@ -322,6 +323,10 @@ export type EditLogAction =
   // Editing an already-issued TripOrder's own car/driver/time/notes (PATCH
   // /api/booking/trip-orders/[tripOrderId]) — see updateTripOrder above.
   | "แก้ไขใบสั่งงานเดินทาง"
+  // Splitting one already-covered booking back out of an issued TripOrder
+  // (PATCH /api/booking/trip-orders/[tripOrderId] with `removeBookingId`) —
+  // see splitBookingFromTripOrder above.
+  | "แยกรายการออกจากใบสั่งงานเดินทาง"
   // Management/superadmin correcting a booking's own narrow field set
   // (PATCH /api/booking/bookings/[bookingId] with an `edit` payload) — see
   // editBookingByManagement above and canApproveCarBooking's doc comment in
@@ -2531,4 +2536,137 @@ export async function updateTripOrder(
   }
 
   return { tripOrder: merged, addedBookings };
+}
+
+/**
+ * แยกคำขอจองรถหนึ่งรายการออกจากใบสั่งงานเดินทางที่ครอบคลุมอยู่ (ตามที่ขอเพิ่ม
+ * ภายหลัง — "อยากให้สามารถแยกรายการการเดินทางที่อนุมัติไปแล้วได้") — ตรงข้ามกับ
+ * addBookingIds ของ updateTripOrder ด้านบนซึ่งมีแต่ทางเพิ่มเข้าอย่างเดียว
+ * ฟังก์ชันนี้คือทางเดียวที่เอาออกได้ ก่อนหน้านี้ไม่มีอยู่เลย (ดูคอมเมนต์ที่
+ * updateTripOrder เดิมว่า "re-triage ไม่รองรับ")
+ *
+ * คำขอที่ถูกแยกออกจะกลับไปเป็น "รออนุมัติ" ตั้งแต่ต้น — resourceId/
+ * resourceName กลับไปเป็นค่า placeholder เดียวกับตอนสร้างใหม่ (ดู
+ * PENDING_CAR_RESOURCE_NAME) และ tripOrderId/approvedAt/approvedByUsername
+ * ถูกล้างทั้งหมด เพื่อให้ฝ่ายบริหารต้องออกใบสั่งงานแยกให้ใหม่อีกครั้ง แทนที่จะ
+ * ค้างอยู่ในสถานะ "อนุญาต" ทั้งที่ไม่มีใบสั่งงานรองรับแล้ว — ฟิลด์อื่นๆ ของคำขอ
+ * เดิม (วัตถุประสงค์ ปลายทาง ผู้ร่วมเดินทาง ผู้จอง แผนก ฯลฯ) ไม่ถูกแตะเลย ตาม
+ * หลักการเดียวกับ createTripOrder/updateTripOrder ที่ไม่แก้ข้อมูลคำขอเดิม
+ *
+ * ใบสั่งงานต้องครอบคลุมคำขอนี้อยู่จริง และต้องมีคำขออื่นเหลืออยู่อย่างน้อย 1
+ * รายการหลังแยกออก (แยกจนว่างเปล่าไม่ได้ — ยกเลิกใบสั่งงานทั้งใบแทนถ้าต้องการ
+ * เอาออกทั้งหมด ซึ่งยังไม่มีฟังก์ชันรองรับในระบบนี้เช่นกัน)
+ *
+ * เขียนใบสั่งงาน (bookingIds ที่ตัดออกแล้ว) ก่อนเสมอ แล้วค่อยเขียนแถวคำขอที่
+ * ถูกแยก — เหตุผลเดียวกับลำดับการเขียนใน createTripOrder ด้านบน (ถ้าขั้นที่สอง
+ * ล้มเหลว คำขอยังค้างอยู่ในใบสั่งงานเดิมแบบไม่ต้อง rollback อะไร แค่ retry
+ * ฟังก์ชันนี้ใหม่อีกครั้ง)
+ */
+export async function splitBookingFromTripOrder(
+  tripOrderId: string,
+  bookingId: string,
+  actorUsername: string
+): Promise<{ tripOrder: TripOrder; booking: Booking }> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tripOrdersTab = getTripOrdersTab();
+  const bookingsTab = getBookingsTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let tripValues: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tripOrdersTab}!A2:J100000`,
+    });
+    tripValues = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`อ่านรายการใบสั่งงานไม่สำเร็จ: ${message}`);
+  }
+  const tripRows = tripValues ?? [];
+  const tripIdx = tripRows.findIndex((row) => (row[0] ?? "").toString().trim() === tripOrderId);
+  if (tripIdx === -1) {
+    throw new Error("ไม่พบใบสั่งงานนี้");
+  }
+  const current = rowToTripOrder(tripRows[tripIdx]);
+  if (!current.bookingIds.includes(bookingId)) {
+    throw new Error("ใบสั่งงานนี้ไม่ได้ครอบคลุมคำขอจองนี้ — อาจถูกแยกออกไปแล้วก่อนหน้านี้");
+  }
+  if (current.bookingIds.length <= 1) {
+    throw new Error("ใบสั่งงานนี้มีคำขอจองเพียงรายการเดียว ไม่สามารถแยกออกได้");
+  }
+
+  let bookingValues: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${bookingsTab}!A2:W100000`,
+    });
+    bookingValues = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`อ่านรายการจองไม่สำเร็จ: ${message}`);
+  }
+  const bookingRows = bookingValues ?? [];
+  const bookingIdx = bookingRows.findIndex((row) => (row[0] ?? "").toString().trim() === bookingId);
+  if (bookingIdx === -1) {
+    throw new Error("ไม่พบรายการจองนี้ — อาจถูกยกเลิกไปแล้ว");
+  }
+  const booking = rowToBooking(bookingRows[bookingIdx]);
+  if (isBookingCancelled(booking)) {
+    throw new Error(`${booking.resourceName}: ถูกยกเลิกไปแล้ว ไม่ต้องแยกออกอีก`);
+  }
+
+  const updatedTripOrder: TripOrder = {
+    ...current,
+    bookingIds: current.bookingIds.filter((id) => id !== bookingId),
+  };
+  const editedAt = new Date().toISOString();
+  const updatedBooking: Booking = {
+    ...booking,
+    resourceId: "",
+    resourceName: PENDING_CAR_RESOURCE_NAME,
+    approvalStatus: "pending",
+    approvedAt: "",
+    approvedByUsername: "",
+    tripOrderId: "",
+    editedByUsername: actorUsername,
+    editedAt,
+  };
+
+  const tripSheetRow = tripIdx + 2;
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${tripOrdersTab}!A${tripSheetRow}:J${tripSheetRow}`,
+      // RAW — see the note on createBooking's append() above.
+      valueInputOption: "RAW",
+      requestBody: { values: [tripOrderToRow(updatedTripOrder)] },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`บันทึกการแยกรายการออกจากใบสั่งงานไม่สำเร็จ: ${message}`);
+  }
+
+  const bookingSheetRow = bookingIdx + 2;
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${bookingsTab}!A${bookingSheetRow}:W${bookingSheetRow}`,
+      valueInputOption: "RAW",
+      requestBody: { values: [bookingToRow(updatedBooking)] },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    // ใบสั่งงานด้านบนถูกตัดรายการนี้ออกไปเรียบร้อยแล้ว — คำขอนี้จึงไม่มีใบ
+    // สั่งงานรองรับอีกต่อไปไม่ว่าขั้นนี้จะสำเร็จหรือไม่ แค่สถานะยังค้างเป็น
+    // "อนุญาต" ผิดพลาดอยู่ ต้องลองใหม่ให้ครบ (ไม่ใช่ dangling reference แบบที่
+    // อาจเข้าใจผิดได้ — เป็นคำขอที่ "หลุด" ออกจากใบสั่งงานแล้วแต่สถานะยังไม่
+    // อัปเดตตามแค่นั้น)
+    throw new Error(
+      `แยกรายการออกจากใบสั่งงานสำเร็จ แต่ปรับสถานะคำขอที่แยกออกกลับเป็น "รออนุมัติ" ไม่สำเร็จ (${message}) — กรุณาตรวจสอบรายการจองและลองใหม่หากยังค้างอยู่`
+    );
+  }
+
+  return { tripOrder: updatedTripOrder, booking: updatedBooking };
 }

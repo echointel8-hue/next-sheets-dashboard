@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ImageOff, Loader2, Save, Truck, Users, X } from "lucide-react";
+import { AlertTriangle, ImageOff, Loader2, Save, Scissors, Truck, Users, X } from "lucide-react";
 import {
   formatBookingDateRange,
   splitBookingDateTime,
@@ -126,6 +126,15 @@ function autoTimeParts(bookings: { startTime: string; endTime: string }[]): {
  * ไม่มีการจัดกลุ่มอัตโนมัติทั้งสองโหมด — เวลารวมของใบสั่งงาน (ดู autoTimeParts
  * ด้านล่าง) จะขยายให้ครอบคลุมรายการที่เพิ่งติ๊กเพิ่มโดยอัตโนมัติถ้าจำเป็น ไม่ว่า
  * จะอยู่โหมดไหนก็ตาม.
+ *
+ * โหมดแก้ไขเท่านั้น — ตรงข้ามกับการติ๊กเพิ่มด้านบน: แต่ละรายการที่ใบสั่งงาน
+ * ครอบคลุม*อยู่เดิม*แล้ว (ไม่ใช่รายการที่เพิ่งติ๊กเพิ่มในหน้าต่างนี้ ซึ่งยังไม่ถูก
+ * บันทึกจริง) มีปุ่ม "แยกออก" ของตัวเอง ให้แยกกลับไปเป็น "รออนุมัติ" ตั้งแต่ต้น
+ * ได้ทีละรายการ (ตามที่ขอเพิ่มภายหลัง — "อยากให้สามารถแยกรายการการเดินทางที่
+ * อนุมัติไปแล้วได้") แสดงเฉพาะเมื่อใบสั่งงานนี้ยังครอบคลุมมากกว่า 1 รายการ (แยก
+ * จนว่างเปล่าไม่ได้) เรียก PATCH /api/booking/trip-orders/[tripOrderId] ด้วย
+ * `removeBookingId` — ดู splitBookingFromTripOrder ใน lib/sheets.ts สำหรับ
+ * รายละเอียดว่าคำขอที่ถูกแยกออกกลับไปอยู่ในสถานะอะไร
  */
 export default function TripOrderModal({
   bookings,
@@ -136,6 +145,7 @@ export default function TripOrderModal({
   onClose,
   onCreated,
   onUpdated,
+  onBookingSplit,
 }: {
   /** โหมดสร้างใหม่: คำขอจองรถที่ยังรออนุมัติที่ถูกเลือกไว้ (อย่างน้อย 1
    * รายการ) — ทุกรายการต้องเป็นรถและสถานะ pending อยู่แล้ว. โหมดแก้ไข:
@@ -169,6 +179,12 @@ export default function TripOrderModal({
    * ขอเพิ่มภายหลัง — ดูคอมเมนต์ที่ eligibleCandidates ด้านบน) ผู้เรียกต้อง
    * merge รายการเหล่านี้เข้า state การจองเองด้วย ไม่ใช่แค่ TripOrder. */
   onUpdated?: (result: { tripOrder: TripOrder; addedBookings: Booking[] }) => void;
+  /** โหมดแก้ไขเท่านั้น — เรียกเมื่อกด "แยกออก" สำเร็จ (ดูคอมเมนต์ที่หัว
+   * คอมโพเนนต์ด้านบน) ผู้เรียกต้องปรับ state ทั้ง TripOrder (bookingIds ที่
+   * ตัดออกแล้ว) และ Booking (กลับไปเป็นรออนุมัติ) เอง — คอมโพเนนต์นี้ไม่ปิด
+   * หน้าต่างให้อัตโนมัติหลังแยกสำเร็จ ปล่อยให้ผู้เรียกตัดสินใจเอง (เหมือนกับที่
+   * onUpdated ไม่ปิดหน้าต่างเองเช่นกัน). */
+  onBookingSplit?: (result: { tripOrder: TripOrder; booking: Booking }) => void;
 }) {
   // วันที่ (YYYY-MM-DD) ของคำขอที่เลือกไว้แต่แรกทั้งหมด — ใช้กรอง
   // candidateBookings ให้เหลือเฉพาะวันเดียวกัน (ดูคอมเมนต์ที่ prop ด้านบน)
@@ -360,6 +376,10 @@ export default function TripOrderModal({
   // true เฉพาะตอนบันทึกไม่สำเร็จเพราะเซสชันหลุด (401) — ดูคอมเมนต์อธิบาย
   // เต็มๆ ที่ BookingFormModal.tsx ซึ่งเจอปัญหาเดียวกันนี้ก่อน
   const [sessionExpired, setSessionExpired] = useState(false);
+  // bookingId ที่กำลังแยกออกอยู่ (โหมดแก้ไขเท่านั้น) — ใช้ปิดปุ่ม "แยกออก" ของ
+  // แถวนั้นระหว่างรอผลจาก API ไม่ปิดทั้งฟอร์ม (ต่างจาก `saving` ที่ใช้กับการ
+  // บันทึกฟอร์มหลักทั้งก้อน) กันกดซ้ำ/กดหลายแถวพร้อมกัน
+  const [splittingId, setSplittingId] = useState<string | null>(null);
   const firstInputRef = useRef<HTMLSelectElement | null>(null);
 
   useEffect(() => {
@@ -468,6 +488,47 @@ export default function TripOrderModal({
     }
   }
 
+  /** แยกคำขอจองหนึ่งรายการออกจากใบสั่งงานนี้ — โหมดแก้ไขเท่านั้น (ปุ่มนี้ไม่
+   * แสดงเลยนอกโหมดแก้ไข ดู render ด้านล่าง) เป็นการเปลี่ยนสถานะที่ย้อนกลับได้
+   * ยากกว่าการติ๊กเพิ่ม/ยกเลิกทั่วไป (คำขอกลับไปรออนุมัติ ต้องออกใบสั่งงานแยก
+   * ให้ใหม่) จึงยืนยันก่อนเสมอ เหมือนรูปแบบ window.confirm ที่ใช้อยู่แล้วกับ
+   * handleCancelBooking ใน BookingDashboard.tsx */
+  async function handleSplit(booking: Booking) {
+    if (!editing) return;
+    const confirmed = window.confirm(
+      `ยืนยันแยก "${booking.department || booking.bookedByDisplayName || booking.bookedByUsername}" (${formatBookingDateRange(
+        booking.startTime,
+        booking.endTime
+      )}) ออกจากใบสั่งงานนี้ใช่หรือไม่?\n\nคำขอนี้จะกลับไปเป็น "รออนุมัติ" และต้องออกใบสั่งงานแยกให้ใหม่`
+    );
+    if (!confirmed) return;
+
+    setSplittingId(booking.bookingId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/booking/trip-orders/${editing.tripOrderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ removeBookingId: booking.bookingId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 401) {
+          setSessionExpired(true);
+          setError("เซสชันหมดอายุ หรือมีการเข้าสู่ระบบบัญชีนี้จากที่อื่น กรุณาเข้าสู่ระบบใหม่อีกครั้ง");
+        } else {
+          setError(json.error || "แยกรายการออกไม่สำเร็จ");
+        }
+        return;
+      }
+      onBookingSplit?.({ tripOrder: json.tripOrder as TripOrder, booking: json.booking as Booking });
+    } catch {
+      setError("แยกรายการออกไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setSplittingId(null);
+    }
+  }
+
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -511,30 +572,58 @@ export default function TripOrderModal({
                   : `คำขอการเดินทาง (${includedBookings.length.toLocaleString("th-TH")} รายการ)`}
               </p>
               <ul className="flex flex-col gap-2">
-                {includedBookings.map((b) => (
-                  // ลำดับใหม่ตามที่ขอ ("จัดลำดับเพื่อความสวยงาม") — วันที่+
-                  // ช่วงเวลาขึ้นก่อนบรรทัดเดียว (ไม่เขียนวันที่ซ้ำสองรอบเมื่อ
-                  // เป็นวันเดียวกัน ดู formatBookingDateRange) ตามด้วยกลุ่มงาน/
-                  // วัตถุประสงค์ แล้วค่อยจำนวนผู้โดยสารของคำขอนั้นๆ (ตามที่ขอ
-                  // เพิ่มภายหลัง — ให้เห็นที่มาที่ไปของยอดรวมด้านล่าง) แล้วค่อย
-                  // ปลายทางท้ายสุด
-                  <li key={b.bookingId} className="flex flex-col gap-0.5 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-                    <span className="font-medium text-zinc-800 dark:text-zinc-100">
-                      {formatBookingDateRange(b.startTime, b.endTime)}
-                    </span>
-                    <span>
-                      <BookingWhoAndPurpose booking={b} />
-                      {extraBookingIds.has(b.bookingId) && (
-                        <span className="ml-1 text-emerald-700 dark:text-emerald-400">(เพิ่มเข้ามา)</span>
+                {includedBookings.map((b) => {
+                  // "แยกออก" แสดงเฉพาะโหมดแก้ไข + รายการที่ใบสั่งงานครอบคลุม
+                  // อยู่เดิมจริงๆ (มาจาก `bookings` prop ที่ผู้เรียกกรองมาให้ —
+                  // ไม่ใช่รายการที่เพิ่งติ๊กเพิ่มใน eligibleCandidates ซึ่งยังไม่
+                  // ถูกบันทึกเข้าใบสั่งงานจริง ยังไม่มีอะไรให้แยก) และต้องเหลือ
+                  // มากกว่า 1 รายการหลังแยก (ดูคอมเมนต์ที่หัวคอมโพเนนต์ด้านบน)
+                  const canSplit = !!editing && bookings.length > 1 && bookings.some((ob) => ob.bookingId === b.bookingId);
+                  return (
+                    // ลำดับใหม่ตามที่ขอ ("จัดลำดับเพื่อความสวยงาม") — วันที่+
+                    // ช่วงเวลาขึ้นก่อนบรรทัดเดียว (ไม่เขียนวันที่ซ้ำสองรอบเมื่อ
+                    // เป็นวันเดียวกัน ดู formatBookingDateRange) ตามด้วยกลุ่มงาน/
+                    // วัตถุประสงค์ แล้วค่อยจำนวนผู้โดยสารของคำขอนั้นๆ (ตามที่ขอ
+                    // เพิ่มภายหลัง — ให้เห็นที่มาที่ไปของยอดรวมด้านล่าง) แล้วค่อย
+                    // ปลายทางท้ายสุด
+                    <li
+                      key={b.bookingId}
+                      className="flex items-start justify-between gap-2 text-xs leading-5 text-zinc-600 dark:text-zinc-300"
+                    >
+                      <span className="flex flex-col gap-0.5">
+                        <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                          {formatBookingDateRange(b.startTime, b.endTime)}
+                        </span>
+                        <span>
+                          <BookingWhoAndPurpose booking={b} />
+                          {extraBookingIds.has(b.bookingId) && (
+                            <span className="ml-1 text-emerald-700 dark:text-emerald-400">(เพิ่มเข้ามา)</span>
+                          )}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <Users size={11} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                          {b.participants.toLocaleString("th-TH")} คน
+                        </span>
+                        {b.destination && <span>(ปลายทาง: {b.destination})</span>}
+                      </span>
+                      {canSplit && (
+                        <button
+                          type="button"
+                          onClick={() => handleSplit(b)}
+                          disabled={splittingId === b.bookingId}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-200 px-2 py-1 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-60 dark:border-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                        >
+                          {splittingId === b.bookingId ? (
+                            <Loader2 size={11} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+                          ) : (
+                            <Scissors size={11} strokeWidth={2} aria-hidden="true" />
+                          )}
+                          แยกออก
+                        </button>
                       )}
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <Users size={11} strokeWidth={2} aria-hidden="true" className="shrink-0" />
-                      {b.participants.toLocaleString("th-TH")} คน
-                    </span>
-                    {b.destination && <span>(ปลายทาง: {b.destination})</span>}
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
               <p className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
                 <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />

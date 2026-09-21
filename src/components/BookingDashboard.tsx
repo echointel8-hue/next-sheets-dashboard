@@ -477,6 +477,34 @@ export default function BookingDashboard({
     }
   }
 
+  /** ผลจากการแยกคำขอจองหนึ่งรายการออกจากใบสั่งงานที่แก้ไขอยู่ (ตามที่ขอเพิ่ม
+   * ภายหลัง — "อยากให้สามารถแยกรายการการเดินทางที่อนุมัติไปแล้วได้") — แทนที่
+   * TripOrder เดิมด้วยตัวที่ตัด bookingId ออกแล้ว (เหมือน handleTripOrderUpdated
+   * ด้านบน) และแทนที่แถวคำขอที่ถูกแยกด้วยตัวที่กลับไปเป็น "รออนุมัติ" แล้ว (ต่าง
+   * จาก handleTripOrderCreated/handleTripOrderUpdated ตรงที่นี่เป็นการ "ถอย
+   * สถานะกลับ" ไม่ใช่เดินหน้า) ปิดหน้าต่างแก้ไขเสมอหลังแยกสำเร็จ — รายการที่
+   * เหลือในใบสั่งงานนี้ (ถ้ามี) เปิดแก้ไขใหม่ได้จากปฏิทินตามปกติถ้าต้องการแยก
+   * ต่ออีก ไม่จำเป็นต้องค้างหน้าต่างเดิมไว้
+   *
+   * การแจ้งเตือนไปยังผู้จอง (ตามที่ขอ) เกิดขึ้นแยกต่างหากที่ NotificationBell.tsx
+   * เอง — ผ่านการ poll diff เห็นคำขอของบัญชีนั้นเปลี่ยนจาก "อนุญาต" กลับเป็น
+   * "รออนุมัติ" (ไม่ใช่จากอีเวนต์ตรงนี้ ซึ่งมีแค่บัญชีที่ทำการแยกเองเห็น) — ดู
+   * คอมเมนต์เต็มที่ NotificationBell.tsx ส่วนที่ 2 */
+  function handleBookingSplit({ tripOrder, booking }: { tripOrder: TripOrder; booking: Booking }) {
+    setData((prev) => {
+      if (isError(prev)) return prev;
+      return {
+        ...prev,
+        tripOrders: prev.tripOrders.map((t) => (t.tripOrderId === tripOrder.tripOrderId ? tripOrder : t)),
+        bookings: prev.bookings.map((b) => (b.bookingId === booking.bookingId ? booking : b)),
+      };
+    });
+    setEditTripOrderTarget(null);
+    notify(
+      `แยกรายการสำเร็จ (${booking.department || booking.bookedByDisplayName || booking.bookedByUsername}) — กลับเป็น "รออนุมัติ" แล้ว ออกใบสั่งงานแยกให้ใหม่ได้จากรายการรออนุมัติ`
+    );
+  }
+
   function handleManagementEditSaved(updated: Booking) {
     setData((prev) =>
       isError(prev) ? prev : { ...prev, bookings: prev.bookings.map((b) => (b.bookingId === updated.bookingId ? updated : b)) }
@@ -947,6 +975,7 @@ export default function BookingDashboard({
           existingTripOrders={activeTripOrders}
           onClose={() => setEditTripOrderTarget(null)}
           onUpdated={handleTripOrderUpdated}
+          onBookingSplit={handleBookingSplit}
         />
       )}
       {editBookingTarget && (

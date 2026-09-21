@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
-import { canApproveCarBooking } from "@/lib/booking";
-import { appendEditLog, getBookingResources, updateTripOrder } from "@/lib/sheets";
+import { canApproveCarBooking, formatBookingDateTime } from "@/lib/booking";
+import { appendEditLog, getBookingResources, splitBookingFromTripOrder, updateTripOrder } from "@/lib/sheets";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +26,29 @@ interface TripOrderEditPayload {
    * ภายหลัง (เผื่อกรณีอนุมัติไปแล้วแต่มีกลุ่มอื่นอยากเดินทางไปด้วย) ดูคอมเมนต์
    * เต็มที่ updateTripOrder ใน lib/sheets.ts */
   addBookingIds?: string[];
+}
+
+/** แยกคำขอจองรถหนึ่งรายการออกจากใบสั่งงานนี้ — ฟิลด์ตรงข้ามกับ addBookingIds
+ * ด้านบน (เพิ่ม vs เอาออก) ตั้งใจแยก payload กันคนละชนิดชัดเจน ไม่ผสมกับการ
+ * แก้รถ/คนขับ/เวลา/หมายเหตุในคำขอเดียวกัน — ดูคอมเมนต์เต็มที่ readSplitPayload
+ * ด้านล่างว่าทำไมต้องแยก */
+interface TripOrderSplitPayload {
+  removeBookingId: string;
+}
+
+/** ตรวจว่า body เป็นคำขอ "แยกรายการออก" หรือไม่ — ตั้งใจให้เป็น action แยก
+ * ต่างหากจากการแก้ไขรถ/คนขับ/เวลา/หมายเหตุ/addBookingIds ข้างบน (คนละความ
+ * หมาย คนละผลลัพธ์ต่อคำขอเดิม) ไม่ให้ client ส่งปนกันมาในคำขอเดียวเพื่อกัน
+ * ความกำกวมว่าจะประมวลผลอันไหนก่อน — ถ้ามี removeBookingId ต้องเป็นคำขอนี้
+ * เท่านั้น ห้ามมีฟิลด์อื่นปนมาด้วย */
+function readSplitPayload(body: unknown): TripOrderSplitPayload | null {
+  if (!body || typeof body !== "object") return null;
+  const b = body as Record<string, unknown>;
+  if (!("removeBookingId" in b)) return null;
+  if (typeof b.removeBookingId !== "string" || !b.removeBookingId.trim()) return null;
+  const otherKeys = Object.keys(b).filter((k) => k !== "removeBookingId");
+  if (otherKeys.length > 0) return null;
+  return { removeBookingId: b.removeBookingId.trim() };
 }
 
 function readEditPayload(body: unknown): TripOrderEditPayload | null {
@@ -67,16 +90,27 @@ function readEditPayload(body: unknown): TripOrderEditPayload | null {
   return Object.keys(result).length > 0 ? result : null;
 }
 
-/** Edits an already-issued TripOrder's own car/driver/time/notes — "แก้ไข
- * ข้อมูลเท่าที่จำเป็น" for management, per the hospital's explicit later
- * request. Same permission gate as everything else in the car-booking
- * review flow — see canApproveCarBooking in lib/booking.ts. Never edits the
- * bookings this TripOrder already covers, and never *removes* any of them
- * — the one exception is `addBookingIds`, a later explicit request letting
- * management add other still-pending car bookings into an already-approved
- * trip (e.g. another department wants to ride along after the fact) — see
- * updateTripOrder's doc comment in lib/sheets.ts for the full story and its
- * validation. */
+/** Edits an already-issued TripOrder's own car/driver/time/notes, OR splits
+ * one already-covered booking back out of it — two distinct actions on the
+ * same endpoint, told apart by body shape (see readEditPayload vs
+ * readSplitPayload above), same "one endpoint per resource, verb via body
+ * shape" convention already used for addBookingIds below. Same permission
+ * gate as everything else in the car-booking review flow — see
+ * canApproveCarBooking in lib/booking.ts.
+ *
+ * The edit path never edits the bookings this TripOrder already covers, and
+ * never *removes* any of them — the one exception there is `addBookingIds`,
+ * a later explicit request letting management add other still-pending car
+ * bookings into an already-approved trip (e.g. another department wants to
+ * ride along after the fact) — see updateTripOrder's doc comment in
+ * lib/sheets.ts for the full story and its validation.
+ *
+ * The split path (`removeBookingId`) is the one place that *does* remove a
+ * covered booking — added later per an explicit hospital request ("อยากให้
+ * สามารถแยกรายการการเดินทางที่อนุมัติไปแล้วได้") — see
+ * splitBookingFromTripOrder's doc comment in lib/sheets.ts for what happens
+ * to the split-out booking (reverts fully to "รออนุมัติ", needs a fresh
+ * TripOrder of its own). */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ tripOrderId: string }> }) {
   const { session, response } = requireSession(request);
   if (!session) return response;
@@ -94,6 +128,34 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   } catch {
     return NextResponse.json({ error: "คำขอไม่ถูกต้อง" }, { status: 400 });
   }
+
+  const splitPayload = readSplitPayload(body);
+  if (splitPayload) {
+    try {
+      const { tripOrder: updated, booking: splitBooking } = await splitBookingFromTripOrder(
+        tripOrderId,
+        splitPayload.removeBookingId,
+        session.username
+      );
+      await appendEditLog({
+        timestamp: new Date().toISOString(),
+        action: "แยกรายการออกจากใบสั่งงานเดินทาง",
+        actor: session.username,
+        department: session.department,
+        oldValue: "",
+        newValue: `${splitBooking.resourceName || splitBooking.bookedByDisplayName} (${formatBookingDateTime(
+          splitBooking.startTime
+        )} – ${formatBookingDateTime(splitBooking.endTime)}) ออกจากใบสั่งงาน ${updated.resourceName} คนขับ: ${
+          updated.driverName || "—"
+        } — กลับเป็นรออนุมัติแล้ว ${requestAuditTag(request)}`,
+      });
+      return NextResponse.json({ tripOrder: updated, booking: splitBooking });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+  }
+
   const edits = readEditPayload(body);
   if (!edits) {
     return NextResponse.json(
