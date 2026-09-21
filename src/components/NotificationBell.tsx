@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, CheckCircle2, Loader2, Truck, X as XIcon } from "lucide-react";
+import { Bell, CheckCircle2, DoorOpen, Loader2, Truck, X as XIcon } from "lucide-react";
 import {
   BOOKING_NOTICE_EVENT,
   formatBookingDateTime,
@@ -26,22 +26,30 @@ const TOAST_DURATION_MS = 6000;
 interface Toast {
   id: string;
   text: string;
-  // "pending" (ค่าเริ่มต้น เมื่อไม่ระบุ) = มีคำขอรออนุมัติใหม่ (เฉพาะ superadmin
-  // เห็น) คลิกแล้วเปิดแผงรออนุมัติ — "approved" = การจองรถของ "ตัวเอง" เพิ่ง
-  // ได้รับการอนุมัติ (ทุกคนเห็น) คลิกแล้วพาไปหน้าจองรถแทน ไอคอน/ปลายทางคลิก
-  // ต่างกันตามชนิดนี้ — ดู render ของ toast ด้านล่าง
-  kind?: "approved";
+  // "pending" (ค่าเริ่มต้น เมื่อไม่ระบุ) = มีคำขอรถรออนุมัติใหม่ (เฉพาะบัญชีที่
+  // เห็นกระดิ่งนี้) คลิกแล้วเปิดแผงกระดิ่ง — "approved" = การจองรถของ "ตัวเอง"
+  // เพิ่งได้รับการอนุมัติ (ทุกคนเห็น) คลิกแล้วพาไปหน้าจองรถแทน — "room" = มีการ
+  // จอง/ยกเลิกห้องประชุมใหม่ (ทุกแผนก เฉพาะบัญชีที่เห็นกระดิ่งนี้เหมือน
+  // "pending") คลิกแล้วพาไปหน้าจองห้องประชุมแทน — เพิ่มภายหลังตามที่ขอ ("อยากให้
+  // เป็นช่องแจ้งเตือนหลายอย่างเท่าที่ทำได้และเหมาะสม ไม่ใช่แค่การจองรถ") ไอคอน/
+  // ปลายทางคลิกต่างกันตามชนิดนี้ — ดู render ของ toast ด้านล่าง
+  kind?: "approved" | "room";
 }
 
 /**
- * ลอยอยู่เหนือทุกหน้า (mounted once ผ่าน AppShell) สามส่วนที่แยกกันชัดเจน:
+ * ลอยอยู่เหนือทุกหน้า (mounted once ผ่าน AppShell) สี่ส่วนที่แยกกันชัดเจน — เดิม
+ * ผูกอยู่กับ "การจองรถรออนุมัติ" อย่างเดียว แต่ตามที่ขอภายหลัง ("ไม่อยากให้มีไว้
+ * เพื่อแจ้งเฉพาะการจองรถ อยากให้เป็นช่องแจ้งเตือนหลายอย่างเท่าที่ทำได้และ
+ * เหมาะสม") จึงเพิ่มส่วนที่ 4 (ห้องประชุม) เข้ามาด้วย — หัวข้อ/aria-label ต่างๆ
+ * ในกระดิ่งจึงเปลี่ยนจาก "การจองรถรออนุมัติ" เป็นคำกลางๆ ("การแจ้งเตือน") แทน
+ * ให้รองรับหลายประเภทได้ในกระดิ่งเดียว:
  *
- * 1. กระดิ่งแจ้งเตือนคำขอจองรถรออนุมัติ — แสดงเฉพาะ superadmin (ดู
- *    canApproveCarBooking ใน lib/booking.ts; `enabled` คำนวณจาก
- *    session/currentUser ของแต่ละ AppShell caller เอง) ส่วนนี้เท่านั้นที่ถูก
- *    ซ่อนทั้งหมดเมื่อ `enabled` เป็น false — "ไม่อนุมัติ" ยังเรียก PATCH
- *    /api/booking/bookings/[bookingId] ตรงๆ (การตัดสินใจแบบกดครั้งเดียว
- *    เหมือนเดิม) "จัดรถ" ไม่ได้เปลี่ยนสถานะตรงนี้อีกต่อไป — เปิด
+ * 1. กระดิ่งแจ้งเตือนคำขอจองรถรออนุมัติ ("รถรออนุมัติ") — แสดงเฉพาะบัญชีที่มี
+ *    สิทธิ์อนุมัติการจองรถ (ดู canApproveCarBooking ใน lib/booking.ts;
+ *    `enabled` คำนวณจาก session/currentUser ของแต่ละ AppShell caller เอง)
+ *    ส่วนนี้เท่านั้นที่ถูกซ่อนทั้งหมดเมื่อ `enabled` เป็น false — "ไม่อนุมัติ"
+ *    ยังเรียก PATCH /api/booking/bookings/[bookingId] ตรงๆ (การตัดสินใจแบบกด
+ *    ครั้งเดียวเหมือนเดิม) "จัดรถ" ไม่ได้เปลี่ยนสถานะตรงนี้อีกต่อไป — เปิด
  *    TripOrderModal ตัวเดียวกับที่หน้าจองรถใช้แทน เพื่อให้การจัดรถจากป็อปอัป
  *    นี้ยังผ่านเส้นทางเดียวที่ถูกต้องเสมอ (รถ+คนขับ+เวลา -> POST
  *    /api/booking/trip-orders) แทนการเรียก approve ตรงๆ แบบเก่าที่เซิร์ฟเวอร์
@@ -52,25 +60,32 @@ interface Toast {
  *    (มีคนออกใบสั่งงานเดินทางให้แล้ว) จะเด้ง toast บอกรายละเอียดรถ/คนขับที่
  *    จัดให้ ตามที่โรงพยาบาลขอ — ใช้ ref แยกต่างหาก (seenBookingStatuses)
  *    ติดตามสถานะล่าสุดที่เห็นของแต่ละคำขอ ไม่เกี่ยวกับ seenIds ของส่วนที่ 1
- *    เลย ใช้ toast stack เดียวกัน (ด้านล่างสุดขวา) กับส่วนที่ 1 เพื่อไม่ให้มี
- *    กล่อง toast ลอยซ้อนกันสองกล่องตำแหน่งเดียวกันเวลาบัญชีเดียวกันเป็นทั้ง
- *    superadmin และมีคำขอจองรถของตัวเองด้วย
+ *    เลย ใช้ toast stack เดียวกัน (ด้านล่างสุดขวา) กับส่วนอื่นๆ เพื่อไม่ให้มี
+ *    กล่อง toast ลอยซ้อนกันหลายกล่องตำแหน่งเดียวกัน
  *
- * 3. "กิจกรรมล่าสุด" ในแผงกระดิ่ง — เฉพาะ superadmin (ผูกกับ `enabled`
- *    เหมือนส่วนที่ 1) รายการข้อความแจ้งผลสำเร็จของการดำเนินการต่างๆ (อนุมัติ/
- *    แก้ไขใบสั่งงาน) ทั้งที่ทำผ่านป็อปอัปนี้เอง และที่ทำผ่านหน้าจองรถ
- *    (BookingDashboard.tsx) — รับข้อความจากฝั่งนั้นผ่าน BOOKING_NOTICE_EVENT
- *    (ดูคอมเมนต์เต็มที่ประกาศ event นี้ใน lib/booking.ts) ตามที่ขอเพิ่ม
- *    ภายหลัง ("เอาการแจ้งเตือน[แถบข้อความบนหน้า]ไปใส่ในแจ้งเตือน[กระดิ่ง]
- *    ด้วย") — ต่างจากแถบข้อความบนหน้าซึ่งหายไปเองเมื่อกดปิด/ทำอย่างอื่นต่อ
- *    ส่วนนี้ "ค้างอยู่ในรายการ" จนกว่าจะกดล้างเอง ตามที่ขอเจาะจง (เก็บใน
- *    หน่วยความจำของแท็บนี้เท่านั้น ไม่ persist ข้ามเซสชัน เหมือนส่วนอื่นๆ ของ
- *    กระดิ่งนี้ — จำกัดไว้ไม่เกิน 20 รายการล่าสุดกันไม่ให้โตไม่มีที่สิ้นสุด)
+ * 3. "กิจกรรมล่าสุด" ในแผงกระดิ่ง — เฉพาะบัญชีที่เห็นกระดิ่ง (ผูกกับ `enabled`
+ *    เหมือนส่วนที่ 1) รายการข้อความแจ้งเหตุการณ์ต่างๆ ในระบบ ทั้งผลสำเร็จของ
+ *    การดำเนินการที่ทำเอง (อนุมัติ/แก้ไขใบสั่งงาน — ทั้งที่ทำผ่านป็อปอัปนี้เอง
+ *    และที่ทำผ่านหน้าจองรถ BookingDashboard.tsx ผ่าน BOOKING_NOTICE_EVENT, ดู
+ *    คอมเมนต์เต็มที่ประกาศ event นี้ใน lib/booking.ts) และตอนนี้รวมถึง
+ *    เหตุการณ์ที่คนอื่นทำด้วย (การจอง/ยกเลิกห้องประชุมใหม่ จากส่วนที่ 4 ด้านล่าง)
+ *    — ต่างจากแถบข้อความบนหน้าซึ่งหายไปเองเมื่อกดปิด/ทำอย่างอื่นต่อ ส่วนนี้
+ *    "ค้างอยู่ในรายการ" จนกว่าจะกดล้างเอง (เก็บในหน่วยความจำของแท็บนี้เท่านั้น
+ *    ไม่ persist ข้ามเซสชัน เหมือนส่วนอื่นๆ ของกระดิ่งนี้ — จำกัดไว้ไม่เกิน 20
+ *    รายการล่าสุดกันไม่ให้โตไม่มีที่สิ้นสุด)
  *
- * ส่วนที่ 1-2 แชร์ poll() เดียวกัน (ดึง GET /api/booking/bookings — และตอนนี้
+ * 4. แจ้งเตือนห้องประชุม (จอง/ยกเลิกใหม่) — เพิ่มภายหลังตามที่ขอ (ดูคอมเมนต์
+ *    หัวฟังก์ชันด้านบน) เฉพาะบัญชีที่เห็นกระดิ่ง (ผูกกับ `enabled` เหมือนส่วนที่
+ *    1/3) ห้องประชุมยืนยันทันทีอยู่แล้ว ไม่มีสถานะ "รออนุมัติ" ให้กด จึงแค่แจ้ง
+ *    ให้ทราบเฉยๆ (toast + เก็บเข้า "กิจกรรมล่าสุด" ของส่วนที่ 3 ด้วย) ต่างจาก
+ *    ส่วนที่ 2 ตรงที่ดูทุกแผนก ไม่ใช่แค่คำขอ "ของบัญชีนี้เอง" — ใช้ ref แยก
+ *    ต่างหาก (seenRoomBookings) ติดตามว่าห้องประชุมคำขอไหนเคยเห็นแล้ว/ยกเลิก
+ *    ไปหรือยัง
+ *
+ * ส่วนที่ 1-2-4 แชร์ poll() เดียวกัน (ดึง GET /api/booking/bookings — และ
  * GET /api/booking/trip-orders เพิ่มด้วยสำหรับส่วนที่ 2 — ทุก 15 วินาที) และ
  * useEffect เดียวกัน (ทำงานเสมอ ไม่ผูกกับ `enabled` อีกต่อไป เพราะส่วนที่ 2
- * ต้องทำงานสำหรับทุกบัญชี) มีแค่ตัวกระดิ่ง+แผงของส่วนที่ 1 และ 3 เท่านั้นที่
+ * ต้องทำงานสำหรับทุกบัญชี) มีแค่ตัวกระดิ่ง+แผงของส่วนที่ 1, 3 และ 4 เท่านั้นที่
  * ยังคงถูกซ่อนเมื่อ `enabled` เป็น false
  */
 export default function NotificationBell({ enabled, username }: { enabled: boolean; username: string }) {
@@ -109,6 +124,12 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
   // ส่วนที่ 3 — "กิจกรรมล่าสุด" ในแผงกระดิ่ง เก็บล่าสุดไว้บนสุด (unshift) จำกัด
   // ไม่เกิน 20 รายการ ดูคอมเมนต์เต็มที่หัวไฟล์
   const [recentNotices, setRecentNotices] = useState<{ id: string; text: string }[]>([]);
+  // สถานะล่าสุดที่เคยเห็นของ "การจองห้องประชุมทุกแผนก" แต่ละรายการ (bookingId
+  // -> ถูกยกเลิกไปแล้วหรือยัง) — เฉพาะส่วนที่ 4 (แจ้งเตือนห้องประชุม, เฉพาะบัญชี
+  // ที่เห็นกระดิ่ง) null = ยังไม่เคย poll เลย เหมือน ref อื่นๆ ด้านบน (ตั้ง
+  // baseline เงียบๆ ครั้งแรก ไม่แจ้งย้อนหลังสำหรับรายการที่จองไปนานแล้วก่อนเปิด
+  // หน้านี้)
+  const seenRoomBookings = useRef<Map<string, boolean> | null>(null);
 
   const pushToast = useCallback((text: string, kind?: Toast["kind"]) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -192,6 +213,48 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
         }
         seenIds.current = currentIds;
         setApprovalPanel({ pending: stillPending, tripOrders: activeTripOrders });
+
+        // --- ส่วนที่ 4: แจ้งเตือนห้องประชุม (จอง/ยกเลิกใหม่ ทุกแผนก) ---
+        // ห้องประชุมยืนยันทันที ไม่มีสถานะ "รออนุมัติ" ให้ตาม จึงแค่ diff รายชื่อ
+        // คำขอห้องประชุมทั้งหมดกับรอบก่อนหน้า (seenRoomBookings) หา "ใหม่ที่ยัง
+        // ไม่เคยเห็น" กับ "เคยเห็นแล้วแต่ตอนนี้ถูกยกเลิก" แยกกัน — เหมือนแนวทาง
+        // ของ stillPending/seenIds ด้านบน แต่ไม่มีปุ่มกดอนุมัติ/ไม่อนุมัติ แค่
+        // แจ้งให้ทราบ (toast + เก็บเข้า "กิจกรรมล่าสุด" ของส่วนที่ 3)
+        const roomBookings = bookings.filter((b) => b.resourceType === "room");
+        if (seenRoomBookings.current) {
+          const prevSeen = seenRoomBookings.current;
+          const newOnes = roomBookings.filter((b) => !prevSeen.has(b.bookingId) && !isBookingCancelled(b));
+          const newlyCancelled = roomBookings.filter(
+            (b) => prevSeen.has(b.bookingId) && !prevSeen.get(b.bookingId) && isBookingCancelled(b)
+          );
+          if (newOnes.length === 1) {
+            const b = newOnes[0];
+            const requester = b.bookedByDisplayName || b.bookedByUsername;
+            const text = `มีการจองห้องประชุมใหม่: ${b.resourceName} (${requester}) ${formatBookingDateTime(
+              b.startTime
+            )} – ${formatBookingDateTime(b.endTime)}`;
+            pushToast(text, "room");
+            pushRecent(text);
+          } else if (newOnes.length > 1) {
+            const text = `มีการจองห้องประชุมใหม่ ${newOnes.length.toLocaleString("th-TH")} รายการ`;
+            pushToast(text, "room");
+            pushRecent(text);
+          }
+          if (newlyCancelled.length === 1) {
+            const b = newlyCancelled[0];
+            const requester = b.bookedByDisplayName || b.bookedByUsername;
+            const text = `การจองห้องประชุม "${b.resourceName}" (${requester}) ${formatBookingDateTime(
+              b.startTime
+            )} – ${formatBookingDateTime(b.endTime)} ถูกยกเลิกแล้ว`;
+            pushToast(text, "room");
+            pushRecent(text);
+          } else if (newlyCancelled.length > 1) {
+            const text = `มีการยกเลิกการจองห้องประชุม ${newlyCancelled.length.toLocaleString("th-TH")} รายการ`;
+            pushToast(text, "room");
+            pushRecent(text);
+          }
+        }
+        seenRoomBookings.current = new Map(roomBookings.map((b) => [b.bookingId, isBookingCancelled(b)]));
       }
 
       // --- ส่วนที่ 2: toast แจ้งผลการจองรถของ "ตัวเอง" (ทุกบัญชี) ---
@@ -225,7 +288,7 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
       // Best-effort — a transient poll failure just tries again next
       // interval, same philosophy as other background refreshes here.
     }
-  }, [pushToast, enabled, username]);
+  }, [pushToast, pushRecent, enabled, username]);
 
   useEffect(() => {
     // ทำงานเสมอ ไม่ผูกกับ `enabled` อีกต่อไป — ส่วนที่ 2 (toast แจ้งผลการจอง
@@ -318,7 +381,7 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            aria-label="การแจ้งเตือนรายการรออนุมัติ"
+            aria-label="การแจ้งเตือน"
             className="relative flex h-10 w-10 items-center justify-center rounded-full border border-emerald-900/10 bg-white text-zinc-600 shadow-sm transition-colors hover:bg-emerald-50 hover:text-emerald-700 dark:border-emerald-400/10 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-emerald-950/40"
           >
             <Bell size={18} strokeWidth={2} aria-hidden="true" />
@@ -333,8 +396,16 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
             <>
               <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden="true" />
               <div className="absolute right-0 z-50 mt-2 w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-emerald-900/10 bg-white shadow-xl dark:border-emerald-400/10 dark:bg-zinc-900">
-                <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
-                  <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">การจองรถรออนุมัติ</span>
+                {/* หัวแผงรวม — ตั้งใจใช้คำกลางๆ ("การแจ้งเตือน") ไม่เจาะจงแค่การ
+                    จองรถอีกต่อไป ตามที่ขอภายหลัง เพราะตอนนี้แผงนี้ครอบคลุมหลาย
+                    หมวด (รถรออนุมัติ/กิจกรรมล่าสุด/ห้องประชุม — ดูคอมเมนต์เต็มที่
+                    หัวไฟล์) ไม่ใช่แค่รถอย่างเดียว หัวข้อย่อย "รถรออนุมัติ" ด้านล่าง
+                    ยังคงบอกจำนวนรายการที่ต้องกดจัดการอยู่เหมือนเดิม */}
+                <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
+                  <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">การแจ้งเตือน</span>
+                </div>
+                <div className="flex items-center justify-between px-4 pb-1.5 pt-2.5">
+                  <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">รถรออนุมัติ</span>
                   <span className="text-xs text-zinc-400 dark:text-zinc-500">{pending.length} รายการ</span>
                 </div>
                 {actionError && <p className="px-4 py-2 text-xs text-red-600 dark:text-red-400">{actionError}</p>}
@@ -385,11 +456,15 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
                     </ul>
                   )}
                 </div>
-                {/* ส่วนที่ 3 — "กิจกรรมล่าสุด" ตามที่ขอเพิ่มภายหลัง ("เอาการ
-                    แจ้งเตือน[แถบข้อความบนหน้าจองรถ]ไปใส่ในแจ้งเตือน[กระดิ่ง]
-                    ด้วย") ต่างจากแถบข้อความบนหน้าซึ่งหายไปเองเมื่อกดปิด ส่วนนี้
-                    ค้างอยู่ในรายการจนกว่าจะกดลบเอง (รายการเดียว/ล้างทั้งหมด)
-                    ตามที่ขอเจาะจง ดูคอมเมนต์เต็มที่หัวไฟล์ */}
+                {/* ส่วนที่ 3 — "กิจกรรมล่าสุด" ครอบคลุมทั้งผลสำเร็จของการกระทำ
+                    ที่ทำเอง (อนุมัติ/แก้ไขใบสั่งงาน — เดิมมาจากแถบข้อความบนหน้า
+                    จองรถ ผ่าน BOOKING_NOTICE_EVENT) และเหตุการณ์ที่คนอื่นทำ
+                    (การจอง/ยกเลิกห้องประชุมใหม่ จากส่วนที่ 4) ตามที่ขอเพิ่ม
+                    ภายหลัง ("อยากให้เป็นช่องแจ้งเตือนหลายอย่างเท่าที่ทำได้และ
+                    เหมาะสม ไม่ใช่แค่การจองรถ") — ต่างจากแถบข้อความบนหน้าซึ่ง
+                    หายไปเองเมื่อกดปิด ส่วนนี้ค้างอยู่ในรายการจนกว่าจะกดลบเอง
+                    (รายการเดียว/ล้างทั้งหมด) ตามที่ขอเจาะจง ดูคอมเมนต์เต็มที่
+                    หัวไฟล์ */}
                 {recentNotices.length > 0 && (
                   <div className="border-t border-zinc-100 dark:border-zinc-800">
                     <div className="flex items-center justify-between px-4 py-2">
@@ -434,8 +509,8 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
         </div>
       )}
 
-      {/* Toast stack — ใช้ร่วมกันทั้งสองส่วน (แสดงเสมอไม่ว่า enabled จะเป็น
-          อะไร) เพื่อไม่ให้มีกล่อง toast ลอยซ้อนกันสองกล่องตำแหน่งเดียวกัน */}
+      {/* Toast stack — ใช้ร่วมกันทุกส่วน (แสดงเสมอไม่ว่า enabled จะเป็นอะไร)
+          เพื่อไม่ให้มีกล่อง toast ลอยซ้อนกันหลายกล่องตำแหน่งเดียวกัน */}
       <div className="fixed bottom-4 right-4 z-50 flex w-[calc(100vw-2rem)] max-w-sm flex-col gap-2">
         {toasts.map((t) => (
           <button
@@ -444,6 +519,8 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
             onClick={() => {
               if (t.kind === "approved") {
                 router.push("/booking/car");
+              } else if (t.kind === "room") {
+                router.push("/booking/room");
               } else {
                 setOpen(true);
               }
@@ -456,6 +533,13 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
                 size={16}
                 strokeWidth={2}
                 className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                aria-hidden="true"
+              />
+            ) : t.kind === "room" ? (
+              <DoorOpen
+                size={16}
+                strokeWidth={2}
+                className="mt-0.5 shrink-0 text-sky-600 dark:text-sky-400"
                 aria-hidden="true"
               />
             ) : (
