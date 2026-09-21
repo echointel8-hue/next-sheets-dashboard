@@ -634,7 +634,7 @@ export default function BookingDashboard({
                       className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-br from-sky-600 to-sky-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-opacity hover:opacity-90"
                     >
                       <Truck size={14} strokeWidth={2} aria-hidden="true" />
-                      สั่งงานเดินทาง ({selectedBookingIds.size.toLocaleString("th-TH")})
+                      จัดรถและคนขับ ({selectedBookingIds.size.toLocaleString("th-TH")})
                     </button>
                   )}
                   <button
