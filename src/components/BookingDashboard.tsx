@@ -808,24 +808,30 @@ export default function BookingDashboard({
                                   </>
                                 )}
                                 {!cancelled && tripOrderByBookingId.get(booking.bookingId) && (
-                                  <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 px-2 py-1 text-xs font-medium text-sky-700 dark:border-sky-900/50 dark:text-sky-300">
-                                    <Truck size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
-                                    {/* ตัดชื่อรถออก — ตอนนี้แสดงอยู่แล้วที่ช่อง
-                                        {typeLabel} ด้านซ้าย (displayResourceName
-                                        ด้านบน) เหลือแค่คนขับตรงนี้ กันข้อมูลซ้ำซ้อน
-                                        ตามที่ขอ */}
-                                    คนขับ: {tripOrderByBookingId.get(booking.bookingId)!.driverName || "—"}
+                                  <>
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 px-2 py-1 text-xs font-medium text-sky-700 dark:border-sky-900/50 dark:text-sky-300">
+                                      <Truck size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                                      {/* ตัดชื่อรถออก — ตอนนี้แสดงอยู่แล้วที่ช่อง
+                                          {typeLabel} ด้านซ้าย (displayResourceName
+                                          ด้านบน) เหลือแค่คนขับตรงนี้ กันข้อมูลซ้ำซ้อน
+                                          ตามที่ขอ */}
+                                      คนขับ: {tripOrderByBookingId.get(booking.bookingId)!.driverName || "—"}
+                                    </span>
+                                    {/* ย้ายปุ่มแก้ไขใบสั่งงานออกมาเป็นปุ่มแยก มี
+                                        ข้อความกำกับชัดเจน แทนไอคอนดินสอเล็กๆ ที่
+                                        ฝังอยู่ในป้ายคนขับ สังเกตเห็นยาก ตามที่ขอ
+                                        (สอดคล้องกับปุ่มเดียวกันในมุมมองปฏิทิน) */}
                                     {canApprove && (
                                       <button
                                         type="button"
                                         onClick={() => setEditTripOrderTarget(tripOrderByBookingId.get(booking.bookingId)!)}
-                                        className="rounded-full p-0.5 text-sky-700 transition-colors hover:bg-sky-100 dark:text-sky-300 dark:hover:bg-sky-900/40"
-                                        aria-label="แก้ไขใบสั่งงานเดินทาง"
+                                        className={`${ACTION_BUTTON} border-sky-300 text-sky-700 hover:bg-sky-50 dark:border-sky-800 dark:text-sky-300 dark:hover:bg-sky-900/40`}
                                       >
-                                        <Pencil size={11} strokeWidth={2} aria-hidden="true" />
+                                        <Pencil size={12} strokeWidth={2} aria-hidden="true" />
+                                        แก้ไขใบสั่งงานเดินทาง
                                       </button>
                                     )}
-                                  </span>
+                                  </>
                                 )}
                                 {!cancelled && canEditBooking && (
                                   <button

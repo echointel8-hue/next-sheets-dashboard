@@ -577,25 +577,29 @@ function DayDetailModal({
                       ต่อกลุ่ม (ไม่ว่าจะมี 1 หรือหลายคำขอ) ไม่ซ้ำต่อคำขอ ตามที่
                       ขอ ("อยู่ข้างกับรถ หรืออยู่ใต้ก็ได้") — วางไว้ใต้ชื่อรถ */}
                   {showDestination && trip && (
-                    <span className="flex items-start justify-between gap-1.5 rounded-lg bg-sky-50 p-2 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
-                      <span className="flex items-start gap-1.5">
+                    <div className="flex flex-col gap-1.5">
+                      <span className="flex items-start gap-1.5 rounded-lg bg-sky-50 p-2 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
                         <Truck size={13} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
                         <span>
                           คนขับ: {trip.driverName || "—"}
                           {travelingTogether && <> · รวม {items.length.toLocaleString("th-TH")} คำขอเดินทางร่วมกัน</>}
                         </span>
                       </span>
+                      {/* ย้ายปุ่มแก้ไขใบสั่งงานออกมาเป็นปุ่มแยกต่างหาก มีข้อความ
+                          กำกับ ("แก้ไขใบสั่งงานเดินทาง") ให้เห็นชัดเจนว่าปุ่มนี้
+                          ทำอะไร — เดิมเป็นไอคอนดินสอเล็กๆ ฝังอยู่ในกล่องคนขับ
+                          สังเกตเห็นยาก ตามที่ขอ */}
                       {canApprove && (
                         <button
                           type="button"
                           onClick={() => onEditTripOrder(trip)}
-                          className="shrink-0 rounded-full p-1 text-sky-700 transition-colors hover:bg-sky-100 dark:text-sky-300 dark:hover:bg-sky-900/40"
-                          aria-label="แก้ไขใบสั่งงานเดินทาง"
+                          className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-sky-300 bg-white px-2.5 py-1.5 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-900/40"
                         >
-                          <Pencil size={12} strokeWidth={2} aria-hidden="true" />
+                          <Pencil size={13} strokeWidth={2} aria-hidden="true" />
+                          แก้ไขใบสั่งงานเดินทาง
                         </button>
                       )}
-                    </span>
+                    </div>
                   )}
                   {items.map((b, index) => {
                     const cancelled = isBookingCancelled(b);
