@@ -51,18 +51,12 @@ const STATUS_SORT_PRIORITY: Record<ReturnType<typeof bookingStatusLabel>["tone"]
   cancelled: 3,
 };
 
-// สีแถบของ "เส้นเวลาการเดินทาง" ในหน้าต่างรายละเอียดวัน (DayDetailModal) —
-// ใช้ชุดสีตามสถานะเดียวกับ CAR_STATUS_DOT_CLASSES/STATUS_BADGE_CLASSES ด้าน
-// บน (ไม่สร้างชุดสีใหม่) เพราะแต่ละแถวในเส้นเวลานี้ครอบคลุมได้หลายรถ/ห้อง
-// ในวันเดียวกัน สถานะจึงสื่อความหมายชัดกว่าสีระบุตัวตนแบบที่ใช้ในเส้นเวลาของ
-// TripOrderModal (ซึ่งจำกัดอยู่แค่รถคันเดียว) — ที่ยกเลิกแล้วให้จางลงเล็กน้อย
-// (opacity) เพื่อให้เห็นว่าไม่ได้ใช้งานจริงแล้ว แต่ยังคงมองเห็นแถบได้
-const TIMELINE_BAR_CLASSES: Record<ReturnType<typeof bookingStatusLabel>["tone"], string> = {
-  pending: "bg-amber-500 dark:bg-amber-400",
-  approved: "bg-emerald-600 dark:bg-emerald-500",
-  rejected: "bg-red-500 dark:bg-red-500",
-  cancelled: "bg-zinc-400 opacity-60 dark:bg-zinc-500",
-};
+// สีแถบของ "เส้นเวลาการเดินทาง" ใน DayDetailModal (ดู buildTripTimeline
+// ด้านล่าง) — คงที่เป็นเขียวเสมอ ไม่ใช่สีตามสถานะแบบเดิมอีกต่อไป เพราะเส้นเวลา
+// นี้ผูกอยู่กับคำขอที่ "อนุมัติแล้ว" (มีใบสั่งงานคุมอยู่) เท่านั้นแล้ว ตามที่ขอ
+// ภายหลัง ("สีที่แสดงให้เห็นต้องเป็นอนุญาตเท่านั่น") — รออนุมัติ/ไม่อนุมัติ/
+// ยกเลิก ไม่มีทางมาถึงเส้นเวลานี้เลย จึงไม่จำเป็นต้องมี legend อธิบายสีอีกด้วย
+const TIMELINE_BAR_CLASS = "bg-emerald-600 dark:bg-emerald-500";
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
@@ -78,6 +72,91 @@ function pickTickStepMinutes(domainSpanMin: number): number {
     if (domainSpanMin / step <= 8) return step;
   }
   return 720;
+}
+
+interface TripTimelineRow {
+  bookingId: string;
+  label: string;
+  resourceLabel: string;
+  timeLabel: string;
+  leftPct: number;
+  widthPct: number;
+  sortKey: number;
+}
+
+interface TripTimelineTick {
+  min: number;
+  label: string;
+  leftPct: number;
+}
+
+/** สร้างข้อมูล "เส้นเวลาการเดินทาง" ของ "เที่ยวรถ/ห้องหนึ่งรายการ" (ไม่ใช่ทั้ง
+ * วันเหมือนเดิม) — ตามที่ขอภายหลัง ("ขอให้กล่องเส้นเวลาการเดินทาง อยู่ภายใน
+ * กล่องสั่งงานเดินทางแต่ละรายการหรือรถนั้นๆ เช่น หากวันเดียวมีการจ่ายรถเดินทาง
+ * 3 การเดินทางก็ต้องมี 3 กล่องเส้นเวลาการเดินทาง") เรียกครั้งเดียวต่อกลุ่มตอน
+ * render (ไม่ใช่ hook — ไม่เรียก useMemo ในลูปได้อยู่แล้ว แต่จำนวนคำขอต่อกลุ่ม
+ * น้อยมากจึงไม่คุ้มจะ memo แยก) กรองเอาเฉพาะคำขอที่ยังไม่ถูกยกเลิกออกมาก่อน
+ * เสมอ — "รอบริหารจัดสรร"/"ไม่อนุมัติ"/"ยกเลิก" ไม่มีทางเข้าเส้นเวลานี้เลย ตามที่
+ * ขอ ("ส่วนที่อยู่ระหว่างรอบริหารจัดสรร แยกออกมาจากเส้นเวลา... รออนุมัติ ไม่
+ * อนุมัติ ยกเลิกไม่ต้องมีเส้นเวลา") เพราะฟังก์ชันนี้ถูกเรียกเฉพาะตอนกลุ่มมีใบ
+ * สั่งงาน (trip) แล้วเท่านั้น (ดู caller ใน DayDetailModal) คืน null เมื่อไม่มี
+ * คำขอที่ยังไม่ถูกยกเลิกเหลือเลย (เช่น เที่ยวที่ถูกยกเลิกไปทั้งกลุ่ม) ให้ caller
+ * ไม่ render กล่องนี้ */
+function buildTripTimeline(
+  items: Booking[],
+  tripOrderByBookingId: Map<string, TripOrder>
+): { domain: { startMin: number; endMin: number }; rows: TripTimelineRow[]; ticks: TripTimelineTick[] } | null {
+  const activeItems = items.filter((b) => !isBookingCancelled(b));
+  if (activeItems.length === 0) return null;
+
+  let minStart = Infinity;
+  let maxEnd = -Infinity;
+  for (const b of activeItems) {
+    const s = splitBookingDateTime(b.startTime);
+    const e = splitBookingDateTime(b.endTime);
+    if (s) minStart = Math.min(minStart, Number(s.time.slice(0, 2)) * 60 + Number(s.time.slice(3, 5)));
+    if (e) maxEnd = Math.max(maxEnd, Number(e.time.slice(0, 2)) * 60 + Number(e.time.slice(3, 5)));
+  }
+  if (!Number.isFinite(minStart) || !Number.isFinite(maxEnd) || maxEnd <= minStart) return null;
+  const domain = { startMin: minStart, endMin: maxEnd };
+  const domainSpan = Math.max(domain.endMin - domain.startMin, 1);
+
+  const rows = activeItems
+    .map((b) => {
+      const s = splitBookingDateTime(b.startTime);
+      const e = splitBookingDateTime(b.endTime);
+      const bStart = s ? Number(s.time.slice(0, 2)) * 60 + Number(s.time.slice(3, 5)) : domain.startMin;
+      const bEnd = e ? Number(e.time.slice(0, 2)) * 60 + Number(e.time.slice(3, 5)) : domain.endMin;
+      const leftPct = Math.min(100, Math.max(0, ((bStart - domain.startMin) / domainSpan) * 100));
+      const rawWidthPct = ((bEnd - bStart) / domainSpan) * 100;
+      const widthPct = Math.min(100 - leftPct, Math.max(rawWidthPct, 3));
+      const resourceLabel =
+        b.resourceType === "car" ? carBookingDisplayName(b, tripOrderByBookingId.get(b.bookingId)) : b.resourceName;
+      const label = b.department || resourceLabel;
+      return {
+        bookingId: b.bookingId,
+        label,
+        resourceLabel,
+        timeLabel: `${s?.time ?? "--:--"}–${e?.time ?? "--:--"}`,
+        leftPct,
+        widthPct,
+        sortKey: bStart,
+      };
+    })
+    .sort((a, b) => a.sortKey - b.sortKey);
+
+  const step = pickTickStepMinutes(domainSpan);
+  const firstTick = Math.ceil(domain.startMin / step) * step;
+  const ticks: TripTimelineTick[] = [];
+  for (let m = firstTick; m <= domain.endMin; m += step) {
+    ticks.push({
+      min: m,
+      label: `${pad2(Math.floor(m / 60) % 24)}:${pad2(m % 60)}`,
+      leftPct: ((m - domain.startMin) / domainSpan) * 100,
+    });
+  }
+
+  return { domain, rows, ticks };
 }
 
 const THAI_MONTHS = [
@@ -486,80 +565,6 @@ function DayDetailModal({
   const [y, mo, d] = dateKey.split("-");
   const dateLabel = `${d}/${mo}/${Number(y) + 543}`;
 
-  // โดเมนเวลา (นาทีนับจากเที่ยงคืน) ของเส้นเวลาการเดินทางทั้งวัน — ครอบคลุม
-  // ตั้งแต่เวลาเริ่มต้นที่เร็วที่สุดถึงเวลาสิ้นสุดที่ช้าที่สุดของทุกคำขอในวัน
-  // นี้ (ทุกคัน/ทุกห้อง ไม่ใช่แค่คันเดียวเหมือนเส้นเวลาใน TripOrderModal) — ถ้า
-  // ไม่มีคำขอเลยหรือคำนวณไม่ได้ fallback เป็นช่วงเวลาราชการปกติ (08:00-17:00)
-  const dayTimelineDomain = useMemo(() => {
-    let minStart = Infinity;
-    let maxEnd = -Infinity;
-    for (const b of bookings) {
-      const s = splitBookingDateTime(b.startTime);
-      const e = splitBookingDateTime(b.endTime);
-      if (s) minStart = Math.min(minStart, Number(s.time.slice(0, 2)) * 60 + Number(s.time.slice(3, 5)));
-      if (e) maxEnd = Math.max(maxEnd, Number(e.time.slice(0, 2)) * 60 + Number(e.time.slice(3, 5)));
-    }
-    if (!Number.isFinite(minStart) || !Number.isFinite(maxEnd) || maxEnd <= minStart) {
-      return { startMin: 8 * 60, endMin: 17 * 60 };
-    }
-    return { startMin: minStart, endMin: maxEnd };
-  }, [bookings]);
-
-  // แถบของแต่ละคำขอ — หนึ่งแถวต่อหนึ่งคำขอ (ไม่รวมเป็นแถวเดียวตามกลุ่มเดินทาง
-  // ร่วมกันเหมือนการ์ดด้านล่าง) เรียงตามเวลาเริ่มต้นจากเช้าไปเย็น ป้ายชื่อใช้
-  // กลุ่มงานผู้จอง (b.department) แทนชื่อรถ/ห้อง ตามที่ขอภายหลัง ("กล่องที่ 3
-  // แสดงข้อมูลเป็นกลุ่มผู้จองแทน") — เดิมใช้ชื่อรถ/ห้องที่ใช้จริง แต่เมื่อรถ/
-  // ห้องเดียวกันมีหลายคำขอในวันเดียว (เช่น "รถตู้ (บข 6005)" ซ้ำกันหลายแถว)
-  // ป้ายชื่อจะซ้ำกันจนแยกไม่ออกว่าแถวไหนเป็นของใคร กลุ่มงานผู้จองจึงสื่อความ
-  // หมายชัดกว่า ชื่อรถ/ห้องที่ใช้จริงยังคงอยู่ใน resourceLabel เพื่อโชว์ใน
-  // title (hover) ควบคู่ไปด้วย ไม่ได้หายไปไหน สีของแถบยังบอกสถานะเหมือนเดิม
-  // (ดู TIMELINE_BAR_CLASSES ด้านบน)
-  const dayTimelineRows = useMemo(() => {
-    const domainSpan = Math.max(dayTimelineDomain.endMin - dayTimelineDomain.startMin, 1);
-    return bookings
-      .map((b) => {
-        const s = splitBookingDateTime(b.startTime);
-        const e = splitBookingDateTime(b.endTime);
-        const bStart = s ? Number(s.time.slice(0, 2)) * 60 + Number(s.time.slice(3, 5)) : dayTimelineDomain.startMin;
-        const bEnd = e ? Number(e.time.slice(0, 2)) * 60 + Number(e.time.slice(3, 5)) : dayTimelineDomain.endMin;
-        const leftPct = Math.min(100, Math.max(0, ((bStart - dayTimelineDomain.startMin) / domainSpan) * 100));
-        const rawWidthPct = ((bEnd - bStart) / domainSpan) * 100;
-        const widthPct = Math.min(100 - leftPct, Math.max(rawWidthPct, 3));
-        const resourceLabel =
-          b.resourceType === "car" ? carBookingDisplayName(b, tripOrderByBookingId.get(b.bookingId)) : b.resourceName;
-        const label = b.department || resourceLabel;
-        return {
-          bookingId: b.bookingId,
-          label,
-          resourceLabel,
-          timeLabel: `${s?.time ?? "--:--"}–${e?.time ?? "--:--"}`,
-          tone: bookingStatusLabel(b).tone,
-          leftPct,
-          widthPct,
-          sortKey: bStart,
-        };
-      })
-      .sort((a, b) => a.sortKey - b.sortKey);
-  }, [bookings, dayTimelineDomain, tripOrderByBookingId]);
-
-  // ขีดบอกเวลา — เหมือนกับของ TripOrderModal ทุกประการ (ดู pickTickStepMinutes
-  // ด้านบน) ตำแหน่งคำนวณจาก dayTimelineDomain เดียวกับแถบสีด้านบน จึงอยู่แนว
-  // เดียวกันเป๊ะ
-  const dayTimelineTicks = useMemo(() => {
-    const domainSpan = Math.max(dayTimelineDomain.endMin - dayTimelineDomain.startMin, 1);
-    const step = pickTickStepMinutes(domainSpan);
-    const firstTick = Math.ceil(dayTimelineDomain.startMin / step) * step;
-    const ticks: { min: number; label: string; leftPct: number }[] = [];
-    for (let m = firstTick; m <= dayTimelineDomain.endMin; m += step) {
-      ticks.push({
-        min: m,
-        label: `${pad2(Math.floor(m / 60) % 24)}:${pad2(m % 60)}`,
-        leftPct: ((m - dayTimelineDomain.startMin) / domainSpan) * 100,
-      });
-    }
-    return ticks;
-  }, [dayTimelineDomain]);
-
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -587,94 +592,6 @@ function DayDetailModal({
           </button>
         </div>
         <div className="flex flex-col gap-3 overflow-y-auto px-5 py-4">
-          {/* เส้นเวลาการเดินทางของทั้งวัน — วางไว้บนสุดของเนื้อหา ก่อนรายการ
-              การ์ดแต่ละคัน/ห้องด้านล่าง ตามที่ขอเพิ่มภายหลัง ("เพิ่มกราฟเวลา
-              การเดินทางของแต่ละการจอง") ต่างจากเส้นเวลาใน TripOrderModal
-              ตรงที่ครอบคลุม "ทุกคำขอในวันนี้" (ทุกคัน/ทุกห้อง ไม่ใช่แค่คำขอที่
-              รวมอยู่ในใบสั่งงานเดียว) และใช้สีตามสถานะแทนสีระบุตัวตันคำขอ (ดู
-              คอมเมนต์ที่ TIMELINE_BAR_CLASSES ด้านบน) */}
-          {dayTimelineRows.length > 0 && (
-            <div className="flex flex-col gap-2.5 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
-              <div className="flex items-center justify-between text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                <span>เส้นเวลาการเดินทาง</span>
-                <span className="tabular-nums">
-                  {pad2(Math.floor(dayTimelineDomain.startMin / 60) % 24)}:{pad2(dayTimelineDomain.startMin % 60)} –{" "}
-                  {pad2(Math.floor(dayTimelineDomain.endMin / 60) % 24)}:{pad2(dayTimelineDomain.endMin % 60)}
-                </span>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                {dayTimelineRows.map((row) => (
-                  <div key={row.bookingId} className="flex items-center gap-2">
-                    <span
-                      className="w-20 shrink-0 truncate text-xs text-zinc-600 dark:text-zinc-300"
-                      title={`${row.label} (${row.resourceLabel})`}
-                    >
-                      {row.label}
-                    </span>
-                    <div className="relative h-5 flex-1 rounded-full bg-zinc-200 dark:bg-zinc-700">
-                      {dayTimelineTicks.map((tick) => (
-                        <span
-                          key={tick.min}
-                          className="absolute inset-y-0 w-px bg-zinc-300/70 dark:bg-zinc-600/70"
-                          style={{ left: `${tick.leftPct}%` }}
-                          aria-hidden="true"
-                        />
-                      ))}
-                      <div
-                        className={`absolute inset-y-0 rounded-full ${TIMELINE_BAR_CLASSES[row.tone]}`}
-                        style={{ left: `${row.leftPct}%`, width: `${row.widthPct}%` }}
-                        title={`${row.label} (${row.resourceLabel}): ${row.timeLabel}`}
-                      />
-                    </div>
-                    <span className="w-24 shrink-0 text-right text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
-                      {row.timeLabel}
-                    </span>
-                  </div>
-                ))}
-                {/* แถวขีดบอกเวลา — layout เดียวกับแถวแถบสีด้านบนทุกประการ
-                    (spacer ซ้าย/ขวากว้างเท่ากัน) ตำแหน่งขีดจึงตรงกับเส้นไกด์
-                    ในแถบสีเป๊ะ เหมือนที่ทำไว้ใน TripOrderModal */}
-                {dayTimelineTicks.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <span className="w-20 shrink-0" aria-hidden="true" />
-                    <div className="relative h-3.5 flex-1">
-                      {dayTimelineTicks.map((tick) => (
-                        <span
-                          key={tick.min}
-                          className="absolute top-0 -translate-x-1/2 text-[10px] tabular-nums text-zinc-400 first:translate-x-0 last:translate-x-[-100%] dark:text-zinc-500"
-                          style={{ left: `${tick.leftPct}%` }}
-                        >
-                          {tick.label}
-                        </span>
-                      ))}
-                    </div>
-                    <span className="w-24 shrink-0" aria-hidden="true" />
-                  </div>
-                )}
-                {/* คำอธิบายสีตามสถานะ — เส้นเวลานี้ใช้สีตามสถานะ (มีแค่ 4 แบบ
-                    คงที่) ต่างจากสีระบุตัวตันคำขอในเส้นเวลาของ TripOrderModal
-                    จึงใส่ legend สั้นๆ กำกับไว้เลยแทนให้ผู้ใช้ต้องเดาเอง */}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-amber-500 dark:bg-amber-400" aria-hidden="true" />
-                    รออนุมัติ
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-emerald-600 dark:bg-emerald-500" aria-hidden="true" />
-                    อนุญาต
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
-                    ไม่อนุมัติ
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-zinc-400 opacity-60 dark:bg-zinc-500" aria-hidden="true" />
-                    ยกเลิก
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
           {(() => {
             // จัดกลุ่มคำขอที่เดินทางร่วมกัน (TripOrder เดียวกันครอบคลุม >1
             // คำขอ) ให้อยู่ใน "การ์ดเดียวกัน" แทนที่จะแยกเป็นหลายกล่องซ้อนกัน
@@ -718,6 +635,11 @@ function DayDetailModal({
               const carDotClass = isCar && !allCancelled ? CAR_STATUS_DOT_CLASSES[carTone] : undefined;
               const displayResourceName =
                 first.resourceType === "car" ? carBookingDisplayName(first, trip) : first.resourceName;
+              // เส้นเวลาการเดินทางของกลุ่มนี้เอง — เฉพาะกลุ่มที่มีใบสั่งงาน
+              // (trip, คำขอห้องประชุมไม่มี trip อยู่แล้วจึงไม่มีเส้นเวลานี้ตาม
+              // ธรรมชาติ) และมีคำขอที่ยังไม่ถูกยกเลิกเหลืออยู่จริง — ดูคอมเมนต์
+              // เต็มที่ buildTripTimeline ด้านบนว่าทำไมกรองแบบนี้
+              const timeline = showDestination && trip ? buildTripTimeline(items, tripOrderByBookingId) : null;
               return (
                 <div
                   key={key}
@@ -783,6 +705,76 @@ function DayDetailModal({
                       )
                     )}
                   </div>
+                  {/* เส้นเวลาการเดินทางของ "เที่ยวรถรายการนี้" เอง — ย้ายมาจาก
+                      กล่องรวมทั้งวันที่หัวหน้าต่างเดิมมาไว้ในการ์ดของแต่ละเที่ยว
+                      แทน ตามที่ขอภายหลัง ("ขอให้กล่องเส้นเวลาการเดินทาง อยู่
+                      ภายในกล่องสั่งงานเดินทางแต่ละรายการหรือรถนั้นๆ... หากวัน
+                      เดียวมีการจ่ายรถเดินทาง 3 การเดินทางก็ต้องมี 3 กล่องเส้น
+                      เวลาการเดินทาง") มีเฉพาะกลุ่มที่มีใบสั่งงานคุมอยู่แล้ว (ดู
+                      timeline ด้านบน) จึงไม่มีทางโผล่ในกลุ่ม "รอบริหารจัดสรร"/
+                      ไม่อนุมัติ/ยกเลิกเลย (ดูคอมเมนต์เต็มที่ buildTripTimeline)
+                      สีของแถบเลยคงที่เป็นเขียวเสมอ ไม่ต้องมี legend อธิบายสี */}
+                  {timeline && (
+                    <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 dark:border-zinc-700 dark:bg-zinc-800/60">
+                      <div className="flex items-center justify-between text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                        <span>เส้นเวลาการเดินทาง</span>
+                        <span className="tabular-nums">
+                          {pad2(Math.floor(timeline.domain.startMin / 60) % 24)}:{pad2(timeline.domain.startMin % 60)} –{" "}
+                          {pad2(Math.floor(timeline.domain.endMin / 60) % 24)}:{pad2(timeline.domain.endMin % 60)}
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        {timeline.rows.map((row) => (
+                          <div key={row.bookingId} className="flex items-center gap-2">
+                            <span
+                              className="w-16 shrink-0 truncate text-[11px] text-zinc-600 dark:text-zinc-300"
+                              title={`${row.label} (${row.resourceLabel})`}
+                            >
+                              {row.label}
+                            </span>
+                            <div className="relative h-4 flex-1 rounded-full bg-zinc-200 dark:bg-zinc-700">
+                              {timeline.ticks.map((tick) => (
+                                <span
+                                  key={tick.min}
+                                  className="absolute inset-y-0 w-px bg-zinc-300/70 dark:bg-zinc-600/70"
+                                  style={{ left: `${tick.leftPct}%` }}
+                                  aria-hidden="true"
+                                />
+                              ))}
+                              <div
+                                className={`absolute inset-y-0 rounded-full ${TIMELINE_BAR_CLASS}`}
+                                style={{ left: `${row.leftPct}%`, width: `${row.widthPct}%` }}
+                                title={`${row.label} (${row.resourceLabel}): ${row.timeLabel}`}
+                              />
+                            </div>
+                            <span className="w-20 shrink-0 text-right text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
+                              {row.timeLabel}
+                            </span>
+                          </div>
+                        ))}
+                        {/* แถวขีดบอกเวลา — layout เดียวกับแถวแถบสีด้านบนทุก
+                            ประการ (spacer ซ้าย/ขวากว้างเท่ากัน) ตำแหน่งขีดจึงตรง
+                            กับเส้นไกด์ในแถบสีเป๊ะ */}
+                        {timeline.ticks.length > 0 && (
+                          <div className="flex items-center gap-2">
+                            <span className="w-16 shrink-0" aria-hidden="true" />
+                            <div className="relative h-3 flex-1">
+                              {timeline.ticks.map((tick) => (
+                                <span
+                                  key={tick.min}
+                                  className="absolute top-0 -translate-x-1/2 text-[9px] tabular-nums text-zinc-400 first:translate-x-0 last:translate-x-[-100%] dark:text-zinc-500"
+                                  style={{ left: `${tick.leftPct}%` }}
+                                >
+                                  {tick.label}
+                                </span>
+                              ))}
+                            </div>
+                            <span className="w-20 shrink-0" aria-hidden="true" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {/* กล่องคนขับ/รถ — ข้อมูลของ "เที่ยวรถ" โดยรวม แสดงครั้งเดียว
                       ต่อกลุ่ม (ไม่ว่าจะมี 1 หรือหลายคำขอ) ไม่ซ้ำต่อคำขอ ตามที่
                       ขอ ("อยู่ข้างกับรถ หรืออยู่ใต้ก็ได้") — วางไว้ใต้ชื่อรถ ปุ่ม
