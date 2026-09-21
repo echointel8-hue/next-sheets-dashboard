@@ -792,6 +792,18 @@ function DayDetailModal({
                   {items.map((b, index) => {
                     const cancelled = isBookingCancelled(b);
                     const status = bookingStatusLabel(b);
+                    // ตัดวันที่ออก เหลือแค่เวลา เมื่อเริ่ม/สิ้นสุดเป็นวันเดียวกัน
+                    // — ตามที่ขอ ("นำวันที่ที่วงด้านล่างออก เพราะมันซ้ำซ้อนกับ
+                    // ที่วงด้านบน") เพราะหัวหน้าต่าง (DayDetailModal) บอกวันที่
+                    // ไว้ครั้งเดียวอยู่แล้ว ("การจองรถ วันที่ ...") กรณีคำขอข้าม
+                    // คืน (เริ่ม/สิ้นสุดคนละวัน) ยังคงต้องเห็นวันที่ทั้งสองฝั่ง
+                    // เหมือนเดิม กันข้อมูลวันที่ที่ต่างจากหัวหน้าต่างหายไป
+                    const bStart = splitBookingDateTime(b.startTime);
+                    const bEnd = splitBookingDateTime(b.endTime);
+                    const timeRangeLabel =
+                      bStart && bEnd && bStart.dateKey === bEnd.dateKey
+                        ? `${bStart.time} – ${bEnd.time}`
+                        : `${formatBookingDateTime(b.startTime)} – ${formatBookingDateTime(b.endTime)}`;
                     return (
                       <div
                         key={b.bookingId}
@@ -803,9 +815,7 @@ function DayDetailModal({
                             หลายคำขอเท่านั้น — คำขอเดียวสถานะอยู่ที่หัวการ์ด
                             ด้านบนแล้ว) */}
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                            {formatBookingDateTime(b.startTime)} – {formatBookingDateTime(b.endTime)}
-                          </span>
+                          <span className="text-xs text-zinc-500 dark:text-zinc-400">{timeRangeLabel}</span>
                           {travelingTogether && (
                             <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[status.tone]}`}>
                               {status.text}
