@@ -45,24 +45,18 @@ function pickTickStepMinutes(domainSpanMin: number): number {
   return 720;
 }
 
-/** "กลุ่มงาน/ผู้จอง — วัตถุประสงค์" — ตัดส่วน "— วัตถุประสงค์" ทิ้งเมื่อ
- * วัตถุประสงค์ว่างเปล่าหรือเป็นแค่เครื่องหมายขีด "-" เฉยๆ (ที่ผู้จองบางคน
- * กรอกไว้แทนความหมาย "ไม่มี/ไม่ระบุ") กันไม่ให้ขึ้นข้อความซ้อนกันแปลกๆ แบบ
- * "...— -" ตามที่ขอ ("ตัดขีดออก...ไม่จำเป็น") ใช้ร่วมกันทั้งกล่องยืนยัน
- * รายการที่จะรวมในใบสั่งงาน และกล่องคำขอรถอื่นในวันเดียวกันด้านล่าง */
+/** "กลุ่มงาน/ผู้จอง" — เดิมมีต่อท้ายด้วย "— วัตถุประสงค์" แต่ตัดส่วนนั้นออก
+ * ตามที่ขอภายหลัง ("ลบ - ในวง และชื่อสถานที่ที่ไปในวงออก เพราะซ้ำซ้อนการ
+ * แสดงผลกัน") เนื่องจากวัตถุประสงค์ที่กรอกไว้มักซ้ำกับ "(ปลายทาง: ...)" ที่
+ * แสดงแยกอยู่แล้วในบรรทัดถัดไปของทั้งสองกล่อง คงชื่อฟังก์ชันเดิมไว้ (เรียก
+ * ใช้ร่วมกันทั้งกล่องยืนยันรายการที่จะรวมในใบสั่งงาน และกล่องคำขอรถอื่นใน
+ * วันเดียวกันด้านล่าง) แต่เหลือแค่กลุ่มงาน/ผู้จอง ไม่แสดงวัตถุประสงค์อีกต่อไป */
 function BookingWhoAndPurpose({
   booking,
 }: {
-  booking: Pick<Booking, "department" | "bookedByDisplayName" | "bookedByUsername" | "purpose">;
+  booking: Pick<Booking, "department" | "bookedByDisplayName" | "bookedByUsername">;
 }) {
-  const who = booking.department || booking.bookedByDisplayName || booking.bookedByUsername;
-  const purpose = booking.purpose.trim();
-  if (!purpose || purpose === "-") return <>{who}</>;
-  return (
-    <>
-      {who} — {purpose}
-    </>
-  );
+  return <>{booking.department || booking.bookedByDisplayName || booking.bookedByUsername}</>;
 }
 
 /** เวลารวมของใบสั่งงาน — ครอบคลุมทุกคำขอที่เลือกไว้พอดี: เริ่มต้นปัดลงถึง
