@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, ImageOff, Loader2, Save, Truck, Users, X } from "lucide-react";
 import {
   formatBookingDateRange,
-  formatBookingDateTime,
   splitBookingDateTime,
   type Booking,
   type BookingResource,
@@ -31,6 +30,26 @@ type MinuteOption = "00" | "30";
 
 function combineDateTime(date: string, hour: string, minute: string): string {
   return date ? `${date}T${hour}:${minute}` : "";
+}
+
+/** "กลุ่มงาน/ผู้จอง — วัตถุประสงค์" — ตัดส่วน "— วัตถุประสงค์" ทิ้งเมื่อ
+ * วัตถุประสงค์ว่างเปล่าหรือเป็นแค่เครื่องหมายขีด "-" เฉยๆ (ที่ผู้จองบางคน
+ * กรอกไว้แทนความหมาย "ไม่มี/ไม่ระบุ") กันไม่ให้ขึ้นข้อความซ้อนกันแปลกๆ แบบ
+ * "...— -" ตามที่ขอ ("ตัดขีดออก...ไม่จำเป็น") ใช้ร่วมกันทั้งกล่องยืนยัน
+ * รายการที่จะรวมในใบสั่งงาน และกล่องคำขอรถอื่นในวันเดียวกันด้านล่าง */
+function BookingWhoAndPurpose({
+  booking,
+}: {
+  booking: Pick<Booking, "department" | "bookedByDisplayName" | "bookedByUsername" | "purpose">;
+}) {
+  const who = booking.department || booking.bookedByDisplayName || booking.bookedByUsername;
+  const purpose = booking.purpose.trim();
+  if (!purpose || purpose === "-") return <>{who}</>;
+  return (
+    <>
+      {who} — {purpose}
+    </>
+  );
 }
 
 /** เวลารวมของใบสั่งงาน — ครอบคลุมทุกคำขอที่เลือกไว้พอดี: เริ่มต้นปัดลงถึง
@@ -478,7 +497,7 @@ export default function TripOrderModal({
                       {formatBookingDateRange(b.startTime, b.endTime)}
                     </span>
                     <span>
-                      {b.department || b.bookedByDisplayName || b.bookedByUsername} — {b.purpose}
+                      <BookingWhoAndPurpose booking={b} />
                       {extraBookingIds.has(b.bookingId) && (
                         <span className="ml-1 text-emerald-700 dark:text-emerald-400">(เพิ่มเข้ามา)</span>
                       )}
@@ -573,8 +592,12 @@ export default function TripOrderModal({
                     ? "คำขอจองรถอื่นในวันเดียวกัน — เลือกเพิ่มเข้าใบสั่งงานนี้ได้ถ้าจะเดินทางไปด้วยกัน"
                     : "คำขอจองรถอื่นในวันเดียวกัน — เลือกเพิ่มได้ถ้าจะเดินทางไปด้วยกัน"}
                 </p>
-                <ul className="flex flex-col gap-1.5">
+                <ul className="flex flex-col gap-2">
                   {eligibleCandidates.map((b) => (
+                    // ลำดับ/แยกบรรทัดแบบเดียวกับกล่อง "คำขอการเดินทาง" ด้านบน
+                    // ตามที่ขอ — วันที่+ช่วงเวลาก่อน ตามด้วยกลุ่มงาน/วัตถุประสงค์
+                    // แล้วค่อยปลายทางท้ายสุด (ดู formatBookingDateRange/
+                    // BookingWhoAndPurpose)
                     <li key={b.bookingId}>
                       <label className="flex cursor-pointer items-start gap-2 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
                         <input
@@ -584,12 +607,14 @@ export default function TripOrderModal({
                           disabled={saving}
                           className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--brand)]"
                         />
-                        <span>
+                        <span className="flex flex-col gap-0.5">
                           <span className="font-medium text-zinc-800 dark:text-zinc-100">
-                            {formatBookingDateTime(b.startTime)} – {formatBookingDateTime(b.endTime)}
-                          </span>{" "}
-                          {b.department || b.bookedByDisplayName || b.bookedByUsername} — {b.purpose}
-                          {b.destination && <> (ปลายทาง: {b.destination})</>}
+                            {formatBookingDateRange(b.startTime, b.endTime)}
+                          </span>
+                          <span>
+                            <BookingWhoAndPurpose booking={b} />
+                          </span>
+                          {b.destination && <span>(ปลายทาง: {b.destination})</span>}
                         </span>
                       </label>
                     </li>
