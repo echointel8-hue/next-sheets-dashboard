@@ -507,9 +507,13 @@ function DayDetailModal({
 
   // แถบของแต่ละคำขอ — หนึ่งแถวต่อหนึ่งคำขอ (ไม่รวมเป็นแถวเดียวตามกลุ่มเดินทาง
   // ร่วมกันเหมือนการ์ดด้านล่าง) เรียงตามเวลาเริ่มต้นจากเช้าไปเย็น ป้ายชื่อใช้
-  // ชื่อรถ/ห้องที่ใช้จริง (ไม่ใช่กลุ่มงานผู้จอง) เพราะวันเดียวนี้อาจมีได้หลาย
-  // คัน/หลายห้อง สีของแถบบอกสถานะ (ดู TIMELINE_BAR_CLASSES ด้านบน) ตามที่ขอ
-  // เพิ่มภายหลัง ("เพิ่มกราฟเวลาการเดินทางของแต่ละการจอง")
+  // กลุ่มงานผู้จอง (b.department) แทนชื่อรถ/ห้อง ตามที่ขอภายหลัง ("กล่องที่ 3
+  // แสดงข้อมูลเป็นกลุ่มผู้จองแทน") — เดิมใช้ชื่อรถ/ห้องที่ใช้จริง แต่เมื่อรถ/
+  // ห้องเดียวกันมีหลายคำขอในวันเดียว (เช่น "รถตู้ (บข 6005)" ซ้ำกันหลายแถว)
+  // ป้ายชื่อจะซ้ำกันจนแยกไม่ออกว่าแถวไหนเป็นของใคร กลุ่มงานผู้จองจึงสื่อความ
+  // หมายชัดกว่า ชื่อรถ/ห้องที่ใช้จริงยังคงอยู่ใน resourceLabel เพื่อโชว์ใน
+  // title (hover) ควบคู่ไปด้วย ไม่ได้หายไปไหน สีของแถบยังบอกสถานะเหมือนเดิม
+  // (ดู TIMELINE_BAR_CLASSES ด้านบน)
   const dayTimelineRows = useMemo(() => {
     const domainSpan = Math.max(dayTimelineDomain.endMin - dayTimelineDomain.startMin, 1);
     return bookings
@@ -521,11 +525,13 @@ function DayDetailModal({
         const leftPct = Math.min(100, Math.max(0, ((bStart - dayTimelineDomain.startMin) / domainSpan) * 100));
         const rawWidthPct = ((bEnd - bStart) / domainSpan) * 100;
         const widthPct = Math.min(100 - leftPct, Math.max(rawWidthPct, 3));
-        const label =
+        const resourceLabel =
           b.resourceType === "car" ? carBookingDisplayName(b, tripOrderByBookingId.get(b.bookingId)) : b.resourceName;
+        const label = b.department || resourceLabel;
         return {
           bookingId: b.bookingId,
           label,
+          resourceLabel,
           timeLabel: `${s?.time ?? "--:--"}–${e?.time ?? "--:--"}`,
           tone: bookingStatusLabel(b).tone,
           leftPct,
@@ -601,7 +607,7 @@ function DayDetailModal({
                   <div key={row.bookingId} className="flex items-center gap-2">
                     <span
                       className="w-20 shrink-0 truncate text-xs text-zinc-600 dark:text-zinc-300"
-                      title={row.label}
+                      title={`${row.label} (${row.resourceLabel})`}
                     >
                       {row.label}
                     </span>
@@ -617,7 +623,7 @@ function DayDetailModal({
                       <div
                         className={`absolute inset-y-0 rounded-full ${TIMELINE_BAR_CLASSES[row.tone]}`}
                         style={{ left: `${row.leftPct}%`, width: `${row.widthPct}%` }}
-                        title={`${row.label}: ${row.timeLabel}`}
+                        title={`${row.label} (${row.resourceLabel}): ${row.timeLabel}`}
                       />
                     </div>
                     <span className="w-24 shrink-0 text-right text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
@@ -745,45 +751,50 @@ function DayDetailModal({
                         {displayResourceName}
                       </span>
                     </div>
-                    {/* แบดจ์สถานะรวมไว้ตรงหัวการ์ดเฉพาะกลุ่มที่มีคำขอเดียว —
-                        กลุ่มที่เดินทางร่วมกันแต่ละคำขออาจมีสถานะต่างกันได้
-                        (เช่น อนุมัติแล้ว 1 / ยกเลิกไป 1) จึงย้ายไปแสดงแยกราย
-                        คำขอด้านล่างแทน กันข้อความ "สถานะ" ที่ไม่ตรงความจริง
-                        ของบางคำขอในกลุ่ม */}
-                    {!travelingTogether && (
-                      <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[bookingStatusLabel(first).tone]}`}
+                    {/* มุมขวาบนของหัวการ์ด: ปุ่ม "แก้ไขใบสั่งงานเดินทาง" (ถ้ามี
+                        ใบสั่งงานและมีสิทธิ์อนุมัติ) — ย้ายมาจากแถวกล่องคนขับ
+                        ด้านล่างมาไว้ตรงนี้แทน ตามที่ขอภายหลัง ("ย้ายปุ่มไปไว้
+                        ที่ว่างข้างชื่อรถ") ไม่ชนกับแบดจ์สถานะด้านล่าง เพราะ
+                        แบดจ์แสดงเฉพาะกลุ่มที่มีคำขอเดียว (!travelingTogether)
+                        ส่วนปุ่มนี้แสดงเมื่อมีใบสั่งงานคุมอยู่ (trip) ซึ่งทับ
+                        ซ้อนกันได้เฉพาะกรณีคำขอเดี่ยวที่มีใบสั่งงานของตัวเองแล้ว
+                        — เมื่อนั้นให้ปุ่มมาก่อน (แก้ไขได้สำคัญกว่าดูสถานะเฉยๆ) */}
+                    {showDestination && trip && canApprove ? (
+                      <button
+                        type="button"
+                        onClick={() => onEditTripOrder(trip)}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-sky-300 bg-white px-2 py-1 text-right text-xs font-medium text-sky-700 transition-colors hover:bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-900/40"
                       >
-                        {bookingStatusLabel(first).text}
-                      </span>
+                        <Pencil size={12} strokeWidth={2} className="shrink-0" aria-hidden="true" />
+                        แก้ไขใบสั่งงานเดินทาง
+                      </button>
+                    ) : (
+                      // แบดจ์สถานะรวมไว้ตรงหัวการ์ดเฉพาะกลุ่มที่มีคำขอเดียว —
+                      // กลุ่มที่เดินทางร่วมกันแต่ละคำขออาจมีสถานะต่างกันได้
+                      // (เช่น อนุมัติแล้ว 1 / ยกเลิกไป 1) จึงย้ายไปแสดงแยกราย
+                      // คำขอด้านล่างแทน กันข้อความ "สถานะ" ที่ไม่ตรงความจริง
+                      // ของบางคำขอในกลุ่ม
+                      !travelingTogether && (
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[bookingStatusLabel(first).tone]}`}
+                        >
+                          {bookingStatusLabel(first).text}
+                        </span>
+                      )
                     )}
                   </div>
                   {/* กล่องคนขับ/รถ — ข้อมูลของ "เที่ยวรถ" โดยรวม แสดงครั้งเดียว
                       ต่อกลุ่ม (ไม่ว่าจะมี 1 หรือหลายคำขอ) ไม่ซ้ำต่อคำขอ ตามที่
-                      ขอ ("อยู่ข้างกับรถ หรืออยู่ใต้ก็ได้") — วางไว้ใต้ชื่อรถ */}
+                      ขอ ("อยู่ข้างกับรถ หรืออยู่ใต้ก็ได้") — วางไว้ใต้ชื่อรถ ปุ่ม
+                      "แก้ไขใบสั่งงานเดินทาง" ย้ายขึ้นไปอยู่ที่หัวการ์ดแล้ว (ดู
+                      คอมเมนต์ด้านบน) จึงเหลือแค่ข้อความคนขับ/จำนวนคำขอตรงนี้ */}
                   {showDestination && trip && (
-                    <span className="flex items-start justify-between gap-2 rounded-lg bg-sky-50 p-2 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
-                      <span className="flex items-start gap-1.5">
-                        <Truck size={13} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
-                        <span>
-                          คนขับ: {trip.driverName || "—"}
-                          {travelingTogether && <> · รวม {items.length.toLocaleString("th-TH")} คำขอเดินทางร่วมกัน</>}
-                        </span>
+                    <span className="flex items-start gap-1.5 rounded-lg bg-sky-50 p-2 text-xs leading-5 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
+                      <Truck size={13} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />
+                      <span>
+                        คนขับ: {trip.driverName || "—"}
+                        {travelingTogether && <> · รวม {items.length.toLocaleString("th-TH")} คำขอเดินทางร่วมกัน</>}
                       </span>
-                      {/* ย้ายกลับมาอยู่แนวเดียวกับกล่องคนขับ (มุมขวาบนของกล่อง)
-                          ตามที่ขอภายหลัง — ยังคงมีข้อความกำกับ "แก้ไขใบสั่งงาน
-                          เดินทาง" ไว้เหมือนเดิม (ไม่ใช่แค่ไอคอนดินสออย่างที่เคย
-                          เป็นก่อนหน้านั้น) ให้เห็นชัดว่าปุ่มนี้ทำอะไร */}
-                      {canApprove && (
-                        <button
-                          type="button"
-                          onClick={() => onEditTripOrder(trip)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-sky-300 bg-white px-2 py-1 text-right text-xs font-medium text-sky-700 transition-colors hover:bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-900/40"
-                        >
-                          <Pencil size={12} strokeWidth={2} className="shrink-0" aria-hidden="true" />
-                          แก้ไขใบสั่งงานเดินทาง
-                        </button>
-                      )}
                     </span>
                   )}
                   {items.map((b, index) => {
