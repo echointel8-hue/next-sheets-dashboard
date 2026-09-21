@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, canAccessEquipmentRegistry, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog, appendEquipmentRow, getEquipmentDataUnredacted } from "@/lib/sheets";
 import { STATUS_ACTIVE, findDuplicateAssetNumberRow, isDeleted } from "@/lib/fields";
 import { hasPermission } from "@/lib/permissions";
@@ -44,18 +44,23 @@ function formatSheetTimestamp(date: Date): string {
 }
 
 /**
- * Lists equipment rows scoped by role: superadmin and it both see every
- * row (it is read-only across every department — see /manage/it — but
- * still needs the full unrestricted list to build its spec tables and
- * maintenance reports), admin sees only rows whose department column
- * matches their own department. proxy.ts already blocks unauthenticated
- * requests to /api/manage/*, but this route re-checks the session itself
- * too — never trust that alone.
+ * Lists equipment rows scoped by role: superadmin and any account granted
+ * "manageEquipmentAllDept" see every row, everyone else sees only rows whose
+ * department column matches their own department. proxy.ts already blocks
+ * unauthenticated requests to /api/manage/*, but this route re-checks the
+ * session itself too — never trust that alone. Also hard-gated on
+ * canAccessEquipmentRegistry() (lib/auth.ts): the page-level redirect in
+ * /manage/page.tsx is only a UX nicety, this is the actual boundary — an
+ * account without base registry access must be refused here even if it
+ * reaches this URL directly.
  */
 export async function GET(request: NextRequest) {
   const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session) {
     return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
+  }
+  if (!canAccessEquipmentRegistry(session)) {
+    return NextResponse.json({ error: "คุณไม่มีสิทธิ์เข้าถึงทะเบียนครุภัณฑ์คอมพิวเตอร์" }, { status: 403 });
   }
 
   try {
@@ -64,7 +69,7 @@ export async function GET(request: NextRequest) {
     // from every role, not just filtered out of the UI.
     const notDeleted = snapshot.rows.filter((r) => !isDeleted(r.data, snapshot.fields));
     const scopedRows =
-      session.role === "superadmin" || session.role === "it"
+      session.role === "superadmin" || hasPermission(session, "manageEquipmentAllDept")
         ? notDeleted
         : notDeleted.filter((r) => fieldValue(r.data, snapshot.fields.department) === session.department);
 

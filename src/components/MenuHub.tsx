@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { Car, DoorOpen, Package } from "lucide-react";
 import type { Role } from "@/lib/auth";
-import { canAccessItDashboardClient, canManageUsersClient, roleLabelFor } from "@/lib/roleLabel";
+import {
+  canAccessEquipmentRegistryClient,
+  canAccessItDashboardClient,
+  canManageUsersClient,
+  roleLabelFor,
+} from "@/lib/roleLabel";
 import { canApproveCarBooking } from "@/lib/booking";
 import type { PermissionKey } from "@/lib/permissions";
 import AppShell from "@/components/AppShell";
@@ -24,8 +29,9 @@ interface MenuItem {
  * ให้เจอหน้าเมนูซึ่งเป็นทางเลือกใช้งานระบบ") instead of dropping straight
  * into /manage the way login used to. Every card is shown to every
  * logged-in account regardless of role — each destination page still
- * enforces its own rules once clicked (e.g. /manage redirects an "it"
- * session on to /manage/it automatically, see that page's own comment).
+ * enforces its own rules once clicked (e.g. /manage redirects a session
+ * without accessEquipmentRegistry back to /menu, see that page's own
+ * comment).
  */
 export default function MenuHub({
   session,
@@ -66,7 +72,12 @@ export default function MenuHub({
       roleLabel={roleLabelFor(session.role, session.department, session.isBootstrap)}
       username={session.username}
       displayName={session.displayName}
-      canAccessManage={session.role !== "it"}
+      canAccessManage={canAccessEquipmentRegistryClient(
+        session.role,
+        session.isBootstrap,
+        session.extraPermissions,
+        session.revokedPermissions
+      )}
       canManageUsers={canManageUsersClient(
         session.role,
         session.isBootstrap,

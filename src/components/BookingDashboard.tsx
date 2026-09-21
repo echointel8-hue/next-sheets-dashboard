@@ -39,6 +39,7 @@ import {
   type TripOrder,
 } from "@/lib/booking";
 import {
+  canAccessEquipmentRegistryClient,
   canAccessItDashboardClient,
   canManageBookingResourcesClient,
   canManageUsersClient,
@@ -491,7 +492,12 @@ export default function BookingDashboard({
       roleLabel={roleLabelFor(session.role, session.department, session.isBootstrap)}
       username={session.username}
       displayName={session.displayName}
-      canAccessManage={session.role !== "it"}
+      canAccessManage={canAccessEquipmentRegistryClient(
+        session.role,
+        session.isBootstrap,
+        session.extraPermissions,
+        session.revokedPermissions
+      )}
       canManageUsers={canManageUsersClient(
         session.role,
         session.isBootstrap,

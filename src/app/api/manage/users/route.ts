@@ -110,7 +110,7 @@ function readNewUserPayload(body: unknown): NewUserPayload | null {
   const b = body as Record<string, unknown>;
   if (typeof b.username !== "string" || b.username.trim() === "") return null;
   if (typeof b.password !== "string" || b.password.length < 4) return null;
-  if (b.role !== "superadmin" && b.role !== "admin" && b.role !== "it") return null;
+  if (b.role !== "superadmin" && b.role !== "admin" && b.role !== "user") return null;
   if (typeof b.displayName !== "string") return null;
   if (typeof b.department !== "string") return null;
   return {
@@ -118,11 +118,12 @@ function readNewUserPayload(body: unknown): NewUserPayload | null {
     password: b.password,
     role: b.role,
     // ทุกสิทธิ์ต้องระบุกลุ่มงานแล้วตอนนี้ (ไม่ใช่แค่ admin เหมือนก่อนหน้านี้)
-    // ตามที่ขอ เพื่อให้ superadmin/it ที่สร้างในระบบมีกลุ่มงานติดไปกับบัญชี
+    // ตามที่ขอ เพื่อให้ superadmin ที่สร้างในระบบมีกลุ่มงานติดไปกับบัญชี
     // ด้วย (เช่น ตอนจองห้องประชุม/จองรถจะได้ขึ้นหน่วยงาน) — ไม่กระทบสิทธิ์การ
-    // มองเห็น/จัดการข้อมูลของ superadmin/it เลย เพราะจุดที่ scope ตาม
-    // department (เช่น GET /api/manage/records) เช็คแค่ role === "admin"
-    // เท่านั้น ดูคอมเมนต์ที่ SessionPayload.department ใน lib/auth.ts
+    // มองเห็น/จัดการข้อมูลของ superadmin เลย เพราะจุดที่ scope ตาม
+    // department (เช่น GET /api/manage/records) เช็คแค่ role !== "superadmin"
+    // และไม่มีสิทธิ์ manageEquipmentAllDept เท่านั้น ดูคอมเมนต์ที่
+    // SessionPayload.department ใน lib/auth.ts
     department: b.department.trim(),
     displayName: b.displayName.trim(),
     extraPermissions: readPermissionKeyArray(b.extraPermissions),
@@ -218,7 +219,7 @@ function readUpdateUserPayload(body: unknown): UpdateUserPayload | null {
     out.password = b.password;
   }
   if (b.role !== undefined) {
-    if (b.role !== "superadmin" && b.role !== "admin" && b.role !== "it") return null;
+    if (b.role !== "superadmin" && b.role !== "admin" && b.role !== "user") return null;
     out.role = b.role;
   }
   if (b.department !== undefined) {

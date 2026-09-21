@@ -410,14 +410,25 @@ function parsePermissionKeyList(raw: string): PermissionKey[] {
 }
 
 /** Parses the Role column's raw text, defaulting to the most restrictive
- * role ("admin") for anything unrecognized — e.g. a blank cell, or a typo
+ * role ("user") for anything unrecognized — e.g. a blank cell, or a typo
  * hand-edited into the sheet — rather than silently granting broader
- * access than intended. */
+ * access than intended. "it" was a real role once, but has since been
+ * folded into "superadmin" (per the hospital's explicit request — see
+ * lib/auth.ts's Role comment) — any row still holding the literal text
+ * "it" from before that change is treated as "superadmin" rather than
+ * falling through to the generic unrecognized-value default, since that's
+ * where its capabilities actually went. Note this does NOT automatically
+ * restore what that account could do as "it": accessItDashboard/
+ * manageBookingResources are no longer an automatic default for any
+ * superadmin (regular or migrated) — re-grant them for this specific
+ * account through /manage/users if the hospital wants that account to keep
+ * reaching /manage/it and managing booking resources. */
 function parseRole(raw: string): Role {
   const trimmed = raw.trim();
   if (trimmed === "superadmin") return "superadmin";
-  if (trimmed === "it") return "it";
-  return "admin";
+  if (trimmed === "admin") return "admin";
+  if (trimmed === "it") return "superadmin";
+  return "user";
 }
 
 function parseActive(raw: string): boolean {

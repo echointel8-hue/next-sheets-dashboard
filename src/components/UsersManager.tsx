@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, Pencil, Plus, ShieldCheck, UserRound, Wrench } from "lucide-react";
+import { AlertTriangle, Pencil, Plus, ShieldCheck, User, UserRound } from "lucide-react";
 import UserFormModal, { type ManagedUser } from "@/components/UserFormModal";
 import AppShell from "@/components/AppShell";
 
@@ -127,10 +127,10 @@ export default function UsersManager({
                           <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
                             {u.role === "superadmin" ? (
                               <ShieldCheck size={14} strokeWidth={2} aria-hidden="true" />
-                            ) : u.role === "it" ? (
-                              <Wrench size={14} strokeWidth={2} aria-hidden="true" />
-                            ) : (
+                            ) : u.role === "admin" ? (
                               <UserRound size={14} strokeWidth={2} aria-hidden="true" />
+                            ) : (
+                              <User size={14} strokeWidth={2} aria-hidden="true" />
                             )}
                             {u.role}
                           </span>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, canAccessEquipmentRegistry, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { appendEditLog, getEquipmentDataUnredacted, updateEquipmentRow } from "@/lib/sheets";
 import { findDuplicateAssetNumberRow, isDeleted, isDisposed } from "@/lib/fields";
 import { hasPermission } from "@/lib/permissions";
@@ -27,9 +27,10 @@ function readEditPayload(
   return { values, expectedSnapshotHash: b.expectedSnapshotHash };
 }
 
-/** Edits one equipment row. superadmin: any row. admin: only a row whose
- * department column matches their own department — checked fresh against
- * the live sheet on every request, not just hidden in the UI. */
+/** Edits one equipment row. superadmin (or any account granted
+ * "manageEquipmentAllDept"): any row. Everyone else (admin/user): only a row
+ * whose department column matches their own department — checked fresh
+ * against the live sheet on every request, not just hidden in the UI. */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ rowNumber: string }> }
@@ -38,12 +39,14 @@ export async function PATCH(
   if (!session) {
     return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   }
-  // it is read-only everywhere (see /manage/it) — without this, it would
-  // fall through the admin-only department check below and land in the
-  // same unrestricted branch as superadmin.
-  if (session.role === "it") {
+  // Hard gate on base registry access — the page-level redirect in
+  // /manage/page.tsx is only a UX nicety, this is the actual boundary.
+  // Without this, an account without accessEquipmentRegistry would fall
+  // through the department-scoping check below and could still edit rows in
+  // its own department.
+  if (!canAccessEquipmentRegistry(session)) {
     return NextResponse.json(
-      { error: "สิทธิ์ it ดูข้อมูลได้เท่านั้น ไม่สามารถแก้ไขรายการครุภัณฑ์ได้" },
+      { error: "คุณไม่มีสิทธิ์เข้าถึงทะเบียนครุภัณฑ์คอมพิวเตอร์" },
       { status: 403 }
     );
   }
@@ -87,13 +90,13 @@ export async function PATCH(
       );
     }
 
-    // Department-scoped by default for admin — but see hasPermission's
-    // "manageEquipmentAllDept" key (lib/permissions.ts): an admin account
-    // can be granted this per-account to edit every department, the same
-    // reach a superadmin already has here unconditionally (superadmin's
-    // role isn't checked in this block at all, exactly as before this
-    // feature existed).
-    if (session.role === "admin" && !hasPermission(session, "manageEquipmentAllDept")) {
+    // Department-scoped by default for admin/user — but see hasPermission's
+    // "manageEquipmentAllDept" key (lib/permissions.ts): an account can be
+    // granted this per-account to edit every department, the same reach a
+    // superadmin already has here unconditionally (superadmin's role isn't
+    // checked in this block at all, exactly as before this feature
+    // existed).
+    if (session.role !== "superadmin" && !hasPermission(session, "manageEquipmentAllDept")) {
       const rowDepartment = fieldValue(record.data, snapshot.fields.department);
       if (!rowDepartment || rowDepartment !== session.department) {
         return NextResponse.json({ error: "ไม่มีสิทธิ์แก้ไขรายการนี้" }, { status: 403 });
@@ -114,10 +117,10 @@ export async function PATCH(
       nextValues[header] = payload.values[header] ?? record.data[header] ?? "";
     }
 
-    // admin can't smuggle a department change that would move a row out of
-    // (or into) their own scope via this endpoint — unless granted
+    // admin/user can't smuggle a department change that would move a row out
+    // of (or into) their own scope via this endpoint — unless granted
     // manageEquipmentAllDept, same carve-out as the scoping check above.
-    if (session.role === "admin" && !hasPermission(session, "manageEquipmentAllDept") && snapshot.fields.department) {
+    if (session.role !== "superadmin" && !hasPermission(session, "manageEquipmentAllDept") && snapshot.fields.department) {
       nextValues[snapshot.fields.department] = session.department;
     }
 

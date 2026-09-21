@@ -13,7 +13,7 @@ import { hasPermission, type PermissionKey } from "@/lib/permissions";
 export function roleLabelFor(role: Role, department: string, isBootstrap: boolean): string {
   if (role === "superadmin") return isBootstrap ? "Superadmin (Bootstrap)" : "Superadmin";
   if (role === "admin") return department ? `Admin · ${department}` : "Admin";
-  return "IT";
+  return department ? `User · ${department}` : "User";
 }
 
 /**
@@ -54,6 +54,26 @@ export function canManageBookingResourcesClient(
   revokedPermissions?: PermissionKey[]
 ): boolean {
   return hasPermission({ role, isBootstrap, extraPermissions, revokedPermissions }, "manageBookingResources");
+}
+
+/**
+ * Client-safe mirror of lib/auth.ts's canAccessEquipmentRegistry() — a
+ * superadmin always passes unconditionally (role check, never disturbed by
+ * anything below), admin/user go through hasPermission()'s
+ * "accessEquipmentRegistry" key (on by default for admin, off by default
+ * for user, either grantable/revocable per account through /manage/users).
+ * Used only to decide whether AppShell's sidebar shows the
+ * "ครุภัณฑ์คอมพิวเตอร์" (/manage) link — the real authorization decision
+ * always stays server-side (/manage's own page.tsx and every
+ * /api/manage/records* route all re-check this themselves).
+ */
+export function canAccessEquipmentRegistryClient(
+  role: Role,
+  isBootstrap: boolean,
+  extraPermissions?: PermissionKey[],
+  revokedPermissions?: PermissionKey[]
+): boolean {
+  return role === "superadmin" || hasPermission({ role, isBootstrap, extraPermissions, revokedPermissions }, "accessEquipmentRegistry");
 }
 
 /**

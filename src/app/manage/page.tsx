@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, verifySessionToken, canAccessEquipmentRegistry } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { getEquipmentDataUnredacted } from "@/lib/sheets";
 import { rowSnapshotHash } from "@/lib/recordHash";
 import ManageDashboard, { type ManageData } from "@/components/ManageDashboard";
@@ -18,17 +19,18 @@ export default async function ManagePage() {
   if (!session) {
     redirect("/login?next=/manage");
   }
-  // it never sees the general equipment table (view+report only, see
-  // /manage/it) — send it straight there instead of an empty/wrong page.
-  if (session.role === "it") {
-    redirect("/manage/it");
+  // Accounts without accessEquipmentRegistry (default off for "user", and
+  // revocable per-account for "admin") never see the general equipment
+  // table — send them back to the menu instead of an empty/wrong page.
+  if (!canAccessEquipmentRegistry(session)) {
+    redirect("/menu");
   }
 
   let initial: ManageData | { error: string };
   try {
     const snapshot = await getEquipmentDataUnredacted();
     const scopedRows =
-      session.role === "superadmin"
+      session.role === "superadmin" || hasPermission(session, "manageEquipmentAllDept")
         ? snapshot.rows
         : snapshot.rows.filter(
             (r) => fieldValue(r.data, snapshot.fields.department) === session.department,

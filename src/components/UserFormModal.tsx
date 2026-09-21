@@ -275,7 +275,7 @@ export default function UserFormModal({
               >
                 <option value="admin">admin</option>
                 <option value="superadmin">superadmin</option>
-                <option value="it">it</option>
+                <option value="user">user</option>
               </select>
             </label>
 

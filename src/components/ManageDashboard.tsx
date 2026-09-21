@@ -25,7 +25,12 @@ import {
   type FieldMap,
 } from "@/lib/fields";
 import type { Role } from "@/lib/auth";
-import { canAccessItDashboardClient, canManageUsersClient, roleLabelFor } from "@/lib/roleLabel";
+import {
+  canAccessEquipmentRegistryClient,
+  canAccessItDashboardClient,
+  canManageUsersClient,
+  roleLabelFor,
+} from "@/lib/roleLabel";
 import { canApproveCarBooking } from "@/lib/booking";
 import { hasPermission, type PermissionKey } from "@/lib/permissions";
 import AppShell from "@/components/AppShell";
@@ -198,15 +203,18 @@ export default function ManageDashboard({
   }
 
   const isSuperadmin = session.role === "superadmin";
+  // Drives the *view scope* UI (the "ทุกกลุ่มงาน" department filter/label) —
+  // mirrors the GET route's own scoping in /api/manage/records (see that
+  // route's own comment): superadmin always sees every department, and so
+  // does any admin/user account specifically granted
+  // "manageEquipmentAllDept".
+  const canViewAllDepartments = isSuperadmin || hasPermission(session, "manageEquipmentAllDept");
   // These three mirror the actual server-side gates 1:1 (see hasPermission's
   // "addEquipment"/"disposeRestoreEquipment"/"deleteEquipment" keys in
-  // lib/permissions.ts and the matching /api/manage/records* routes) —
-  // unlike isSuperadmin above, which now only drives the *view scope* UI
-  // (the "ทุกกลุ่มงาน" department filter), left role-based on purpose since
-  // the GET route's own department-visibility scoping wasn't migrated (see
-  // the comment atop lib/permissions.ts). A specific admin/it account
-  // granted one of these three keys now actually sees the matching button,
-  // not just have the API accept the request if they somehow triggered it.
+  // lib/permissions.ts and the matching /api/manage/records* routes). A
+  // specific admin/user account granted one of these three keys now
+  // actually sees the matching button, not just have the API accept the
+  // request if they somehow triggered it.
   const canAddEquipment = hasPermission(session, "addEquipment");
   const canDisposeRestoreEquipment = hasPermission(session, "disposeRestoreEquipment");
   const canDeleteEquipment = hasPermission(session, "deleteEquipment");
@@ -329,7 +337,9 @@ export default function ManageDashboard({
   function openEdit(record: ManageRecord) {
     if (!fields) return;
     const readOnlyHeaders =
-      session.role === "admin" && fields.department ? [fields.department] : [];
+      session.role !== "superadmin" && !hasPermission(session, "manageEquipmentAllDept") && fields.department
+        ? [fields.department]
+        : [];
     setModal({
       mode: "edit",
       rowNumber: record.rowNumber,
@@ -502,7 +512,12 @@ export default function ManageDashboard({
       roleLabel={roleLabelFor(session.role, session.department, session.isBootstrap)}
       username={session.username}
       displayName={session.displayName}
-      canAccessManage={session.role !== "it"}
+      canAccessManage={canAccessEquipmentRegistryClient(
+        session.role,
+        session.isBootstrap,
+        session.extraPermissions,
+        session.revokedPermissions
+      )}
       canManageUsers={canManageUsersClient(
         session.role,
         session.isBootstrap,
@@ -532,7 +547,7 @@ export default function ManageDashboard({
             </h1>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
               {session.displayName || session.username} ·{" "}
-              {isSuperadmin ? "superadmin (ทุกกลุ่มงาน)" : `admin · ${session.department}`}
+              {canViewAllDepartments ? `${session.role} (ทุกกลุ่มงาน)` : `${session.role} · ${session.department}`}
             </p>
           </div>
         </header>
@@ -635,7 +650,7 @@ export default function ManageDashboard({
                 </div>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-                {isSuperadmin && (
+                {canViewAllDepartments && (
                   <MultiSelect
                     label="กลุ่มงาน"
                     options={departmentOptions}
@@ -663,7 +678,7 @@ export default function ManageDashboard({
                 )}
                 <span className="text-sm text-zinc-400 sm:ml-auto sm:self-center" aria-live="polite">
                   {visibleRows.length.toLocaleString("th-TH")} / {rows.length.toLocaleString("th-TH")} รายการ
-                  {!isSuperadmin && "ในกลุ่มงานของคุณ"}
+                  {!canViewAllDepartments && "ในกลุ่มงานของคุณ"}
                 </span>
               </div>
             </div>

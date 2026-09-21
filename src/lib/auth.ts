@@ -4,16 +4,31 @@ import { hasPermission, type PermissionKey } from "@/lib/permissions";
 import { clearActiveSessionId, isSessionStoreConfigured, isSessionSuperseded, setActiveSessionId } from "@/lib/sessionStore";
 
 // Login/session auth for the /manage area. Three roles:
-// - superadmin: every department, can add/edit/dispose equipment
-// - admin: one per department, can only edit rows in their own department
-// - it: every department, read-only — no add/edit/dispose anywhere. Scoped
-//   to the technical dashboard at /manage/it (spec tables + printable
-//   maintenance-report generator) rather than the general /manage table.
-//   Only reaches /manage/it alongside the single bootstrap superadmin
-//   account, per the hospital's request — a regular superadmin created
-//   later through /manage/users does NOT get /manage/it access, even
-//   though role="superadmin" still means "every department" everywhere
-//   else. See the isBootstrap check in src/app/manage/it/page.tsx.
+// - superadmin: every department, can add/edit/dispose equipment by
+//   default. The old, separate "it" role (every department, read-only —
+//   the technical dashboard at /manage/it, spec tables + printable
+//   maintenance-report generator + car/meeting-room resource management)
+//   was folded into this role per the hospital's later explicit request
+//   ("นำสิทธิ it ออกไป และนำความสามารถในสิทธิ it ไปรวมกับ superadmin") — those
+//   two capabilities (accessItDashboard/manageBookingResources — see
+//   lib/permissions.ts) are NOT on by default for a regular (non-bootstrap)
+//   superadmin though, to avoid silently changing what every existing
+//   superadmin account can do ("ไม่ให้ยุ่งกับสิทธิ superadmin[bootstrap]");
+//   instead they're now grantable per account through /manage/users, same
+//   as any other togglable key. The single bootstrap account still gets
+//   everything unconditionally, exactly as before.
+// - admin: one per department, can (by default) view/edit equipment rows
+//   in their own department only — see the new "accessEquipmentRegistry"
+//   key in lib/permissions.ts — and can now also optionally be granted
+//   car-booking approval ("อนุมัติ/ไม่อนุมัติ/ออกใบสั่งงานการจองรถ") through
+//   the same per-account checkbox, per the hospital's explicit later
+//   request ("ปรับให้สิทธิ admin สามารถเลือกความสามารถในการอนุมัติ").
+// - user: the newest, most-restrictive role — booking (car/meeting room)
+//   only by default, no equipment-registry access at all, added per the
+//   hospital's explicit request for a role that "ทำได้เพียงใช้ระบบ" (can
+//   only use the booking system). Can optionally be granted
+//   accessEquipmentRegistry too (the same per-department equipment access
+//   admin gets by default) through the same checkbox mechanism.
 //
 // User accounts live in the "Users" tab of the spreadsheet (see
 // src/lib/sheets.ts getUsers/addUser/updateUser) — only a password *hash*
@@ -40,7 +55,7 @@ const SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutes of inactivity
 export const SESSION_COOKIE = "manage_session";
 export const SESSION_MAX_AGE_SECONDS = SESSION_TTL_MS / 1000;
 
-export type Role = "superadmin" | "admin" | "it";
+export type Role = "superadmin" | "admin" | "user";
 
 export interface SessionPayload {
   username: string;
@@ -96,19 +111,21 @@ export interface SessionPayload {
 }
 
 /**
- * /manage/it (spec dashboard + maintenance-report generator) is reachable
- * by the "it" role, and — per the hospital's explicit request — the single
- * env-configured bootstrap account alone, NOT every "superadmin" account.
- * A regular superadmin created later through /manage/users has full
- * add/edit/dispose rights everywhere else, but does not get this page.
- * Centralized here since the page itself, its settings API route, and any
- * future IT-only route all need the exact same check.
+ * /manage/it (spec dashboard + maintenance-report generator) — reachable by
+ * the single env-configured bootstrap account always, and by any other
+ * superadmin account that's been specifically granted this through
+ * /manage/users' per-account checkboxes. The old, separate "it" role used
+ * to get this by default; now that it's been folded into "superadmin" (per
+ * the hospital's explicit request), this stopped being a role default for
+ * every superadmin — a regular superadmin created through /manage/users
+ * does NOT get this page unless the bootstrap account ticks the box for
+ * that specific account (see NON_GRANTABLE_KEYS in lib/permissions.ts,
+ * which this key is no longer part of). Centralized here since the page
+ * itself, its settings API route, and any future IT-only route all need
+ * the exact same check.
  *
- * Now backed by hasPermission()'s "accessItDashboard" key (see
- * lib/permissions.ts) rather than a hardcoded role/isBootstrap comparison —
- * the default outcome for every existing account is unchanged (it role, or
- * the bootstrap superadmin), but a specific account can now additionally be
- * granted this through /manage/users' per-account permission overrides.
+ * Backed by hasPermission()'s "accessItDashboard" key (see
+ * lib/permissions.ts).
  */
 export function canAccessItDashboard(
   session: Pick<SessionPayload, "role" | "isBootstrap" | "extraPermissions" | "revokedPermissions">
@@ -118,24 +135,44 @@ export function canAccessItDashboard(
 
 /**
  * Managing booking resources (adding a car/meeting room, editing one,
- * toggling it active/inactive) — per the hospital's explicit request, only
- * the "it" role or the single env-configured bootstrap superadmin account
- * may do this, exactly the same rule as canAccessItDashboard above. A
- * superadmin created later through /manage/users has full add/edit/dispose
- * rights everywhere else, but not here. *Making* a booking itself stays
- * open to every logged-in account regardless — see lib/booking.ts's top
- * comment — this only gates the resource list itself. Kept as its own
- * named function (rather than reusing canAccessItDashboard directly) so
- * the two rules can diverge later without one silently changing the other,
- * even though they start out identical.
+ * toggling it active/inactive) — same reach as canAccessItDashboard above
+ * (bootstrap always, any other superadmin only when specifically granted
+ * through /manage/users), for the same reason: this used to be the old
+ * "it" role's default, now folded into "superadmin" but not made an
+ * automatic default for every superadmin account. *Making* a booking
+ * itself stays open to every logged-in account regardless — see
+ * lib/booking.ts's top comment — this only gates the resource list itself.
+ * Kept as its own named function (rather than reusing canAccessItDashboard
+ * directly) so the two rules can diverge later without one silently
+ * changing the other, even though they start out identical.
  *
- * Now backed by hasPermission()'s "manageBookingResources" key — same
- * unchanged default outcome, now also grantable per account.
+ * Backed by hasPermission()'s "manageBookingResources" key.
  */
 export function canManageBookingResources(
   session: Pick<SessionPayload, "role" | "isBootstrap" | "extraPermissions" | "revokedPermissions">
 ): boolean {
   return hasPermission(session, "manageBookingResources");
+}
+
+/**
+ * Reaching the general equipment registry (/manage — view/edit rows,
+ * scoped to the account's own department unless also granted
+ * "manageEquipmentAllDept") at all. A superadmin always gets this
+ * unconditionally (role check, not a permission key — untouched by
+ * anything below, per explicit choice not to disturb superadmin's own
+ * access). For "admin" and the newer "user" role, this is backed by
+ * hasPermission()'s "accessEquipmentRegistry" key: on by default for
+ * admin (unchanged behavior from before this key existed), off by default
+ * for user (added per the hospital's explicit request for a role that
+ * "ทำได้เพียงใช้ระบบ" — booking only) — either can be flipped per account
+ * through /manage/users' checkboxes. Centralized here since /manage's own
+ * page, its data API route, and the per-row edit route all need the exact
+ * same check (never just the page-level redirect alone).
+ */
+export function canAccessEquipmentRegistry(
+  session: Pick<SessionPayload, "role" | "isBootstrap" | "extraPermissions" | "revokedPermissions">
+): boolean {
+  return session.role === "superadmin" || hasPermission(session, "accessEquipmentRegistry");
 }
 
 /** Hashes a plaintext password for storage (in the Users sheet tab or the
@@ -247,7 +284,7 @@ export function verifySessionTokenWithReason(
   }
   if (
     typeof payload.username !== "string" ||
-    (payload.role !== "superadmin" && payload.role !== "admin" && payload.role !== "it") ||
+    (payload.role !== "superadmin" && payload.role !== "admin" && payload.role !== "user") ||
     typeof payload.department !== "string" ||
     typeof payload.isBootstrap !== "boolean" ||
     typeof payload.exp !== "number"
