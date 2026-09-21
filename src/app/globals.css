@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+/* บังคับให้ระบบเป็นโทนสีขาว/สว่างเสมอ ตามที่ขอ ("แก้ไขให้เป็นโทนสีขาว
+   เสมอ") — เดิม dark: ของ Tailwind (และ @media (prefers-color-scheme: dark)
+   ด้านล่าง) ตามค่าเริ่มต้นของ Tailwind v4 จะอิงตามการตั้งค่าธีมมืดของ
+   เบราว์เซอร์/ระบบปฏิบัติการผู้ใช้เองโดยอัตโนมัติ ซึ่งเป็นสาเหตุที่ผู้ใช้ที่
+   เปิดเบราว์เซอร์/ระบบเป็นธีมมืดไว้เห็นพื้นหลังระบบเป็นสีดำไปด้วยทั้งที่ไม่ได้
+   ตั้งใจ — เปลี่ยนตรงนี้ให้ dark: ทำงานเฉพาะเมื่อมี class "dark" อยู่บน
+   ancestor เท่านั้น (ไม่มีจุดไหนในแอปนี้เพิ่ม class นี้ให้เอง จึงไม่มีทางถูก
+   เปิดใช้งานโดยไม่ตั้งใจอีกต่อไป) ไม่ต้องแก้ไฟล์คอมโพเนนต์อื่นเลยแม้แต่ไฟล์
+   เดียว — คลาส dark: ที่มีอยู่เดิมหลายร้อยจุดทั่วทั้งแอปยังคงถูกต้องตามไวยากรณ์
+   เพียงแค่ไม่ถูกเรียกใช้งานอีกต่อไป (เผื่ออนาคตอยากเพิ่มปุ่มสลับธีมเองจริงๆ
+   ก็แค่ toggle class "dark" นี้บน <html> ได้เลยโดยไม่ต้องแก้ CSS จุดนี้อีก) */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   /* Base font size, in %, so it scales relative to the visitor's own
      browser/OS default rather than overriding it outright (some visitors —
@@ -68,38 +81,41 @@
   --font-sans: var(--font-inter), var(--font-noto-thai);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ค่าตัวแปรสีธีมมืด — เดิมอยู่ใน @media (prefers-color-scheme: dark) ซึ่งเปิด
+   ใช้งานอัตโนมัติตามธีมมืดของเบราว์เซอร์/ระบบปฏิบัติการผู้ใช้ (สาเหตุของ
+   ปัญหา "พื้นหลังกลายเป็นสีดำ" ที่ขอแก้) เปลี่ยนมาผูกกับ class "dark" แทน
+   (ให้สอดคล้องกับ @custom-variant dark ด้านบน) — ไม่มีจุดไหนในแอปเพิ่ม class
+   นี้ จึงไม่ถูกใช้งานอีกต่อไป ค่าเดิมยังเก็บไว้ทั้งหมดเผื่ออนาคตต้องการ */
+:root.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
 
-    --brand: #10b981;
-    --brand-strong: #34d399;
-    --brand-contrast: #062e21;
-    --brand-2: #2dd4bf;
-    --brand-3: #4ade80;
+  --brand: #10b981;
+  --brand-strong: #34d399;
+  --brand-contrast: #062e21;
+  --brand-2: #2dd4bf;
+  --brand-3: #4ade80;
 
-    --brand-bar-from: #6ee7b7;
-    --brand-bar-to: #059669;
+  --brand-bar-from: #6ee7b7;
+  --brand-bar-to: #059669;
 
-    --page-bg: #07120d;
-    --page-bg-2: #0b1912;
+  --page-bg: #07120d;
+  --page-bg-2: #0b1912;
 
-    --cat-1: #3987e5;
-    --cat-2: #d95926;
-    --cat-3: #199e70;
-    --cat-4: #c98500;
-    --cat-5: #d55181;
-    --cat-6: #008300;
-    --cat-7: #9085e9;
-    --cat-8: #e66767;
+  --cat-1: #3987e5;
+  --cat-2: #d95926;
+  --cat-3: #199e70;
+  --cat-4: #c98500;
+  --cat-5: #d55181;
+  --cat-6: #008300;
+  --cat-7: #9085e9;
+  --cat-8: #e66767;
 
-    --chart-surface: #18181b;
-    --chart-text-secondary: #c3c2b7;
-    --chart-text-muted: #898781;
-    --chart-border: rgba(255, 255, 255, 0.1);
-    --chart-grid: #2c2c2a;
-  }
+  --chart-surface: #18181b;
+  --chart-text-secondary: #c3c2b7;
+  --chart-text-muted: #898781;
+  --chart-border: rgba(255, 255, 255, 0.1);
+  --chart-grid: #2c2c2a;
 }
 
 /* Used by AppShell (src/components/AppShell.tsx) in place of a flat
