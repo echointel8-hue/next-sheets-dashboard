@@ -136,6 +136,19 @@ export const PENDING_CAR_RESOURCE_NAME = "รถ (รอบริหารจั
  * handleTripOrderCreated) */
 export const TRIP_ORDER_CHANGED_EVENT = "ttk:trip-order-changed";
 
+/** ชื่อ window CustomEvent (detail: { text: string }) ที่ยิงออกไปทุกครั้งที่
+ * มีข้อความแจ้งผลสำเร็จของการดำเนินการจองรถ (เช่น "อนุมัติสำเร็จ...",
+ * "บันทึกการแก้ไขสำเร็จ...") — เดิมข้อความนี้แสดงแค่เป็นแถบข้อความบนหน้าจองรถ
+ * (BookingDashboard) เท่านั้น ตามที่ขอเพิ่มภายหลังให้ข้อความเดียวกันนี้ไป
+ * ปรากฏที่กระดิ่งแจ้งเตือน (NotificationBell) ด้วย ("เอาการแจ้งเตือนในกล่อง 1
+ * ไปใส่ในแจ้งเตือนกล่อง 2 ด้วย") — คงแถบเดิมไว้ทั้งคู่ ไม่ได้ย้ายออก แค่ยิง
+ * event นี้เพิ่มขนานกันไปให้ NotificationBell (ซึ่งลอยอยู่ทุกหน้า mount แยก
+ * ก้อน state ต่างหาก ไม่ได้แชร์กับ BookingDashboard โดยตรง) เก็บเข้ารายการ
+ * "กิจกรรมล่าสุด" ของตัวเองด้วย ให้เปิดกระดิ่งดูย้อนได้แม้พลาดแถบข้อความบนหน้า
+ * ไป — เก็บในหน่วยความจำของแท็บนี้เท่านั้น (ไม่ persist ข้ามเซสชัน เหมือนกับ
+ * ส่วนอื่นของ NotificationBell ที่ตั้งใจไม่เก็บประวัติถาวรอยู่แล้ว) */
+export const BOOKING_NOTICE_EVENT = "ttk:booking-notice";
+
 export interface Booking {
   bookingId: string;
   /** "" for every car booking (see PENDING_CAR_RESOURCE_NAME above) — still

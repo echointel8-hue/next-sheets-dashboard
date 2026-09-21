@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, CheckCircle2, Loader2, Truck, X as XIcon } from "lucide-react";
 import {
+  BOOKING_NOTICE_EVENT,
   formatBookingDateTime,
   isBookingCancelled,
   TRIP_ORDER_CHANGED_EVENT,
@@ -33,7 +34,7 @@ interface Toast {
 }
 
 /**
- * ลอยอยู่เหนือทุกหน้า (mounted once ผ่าน AppShell) สองหน้าที่แยกกันชัดเจน:
+ * ลอยอยู่เหนือทุกหน้า (mounted once ผ่าน AppShell) สามส่วนที่แยกกันชัดเจน:
  *
  * 1. กระดิ่งแจ้งเตือนคำขอจองรถรออนุมัติ — แสดงเฉพาะ superadmin (ดู
  *    canApproveCarBooking ใน lib/booking.ts; `enabled` คำนวณจาก
@@ -55,16 +56,22 @@ interface Toast {
  *    กล่อง toast ลอยซ้อนกันสองกล่องตำแหน่งเดียวกันเวลาบัญชีเดียวกันเป็นทั้ง
  *    superadmin และมีคำขอจองรถของตัวเองด้วย
  *
- * ทั้งสองส่วนแชร์ poll() เดียวกัน (ดึง GET /api/booking/bookings — และตอนนี้
+ * 3. "กิจกรรมล่าสุด" ในแผงกระดิ่ง — เฉพาะ superadmin (ผูกกับ `enabled`
+ *    เหมือนส่วนที่ 1) รายการข้อความแจ้งผลสำเร็จของการดำเนินการต่างๆ (อนุมัติ/
+ *    แก้ไขใบสั่งงาน) ทั้งที่ทำผ่านป็อปอัปนี้เอง และที่ทำผ่านหน้าจองรถ
+ *    (BookingDashboard.tsx) — รับข้อความจากฝั่งนั้นผ่าน BOOKING_NOTICE_EVENT
+ *    (ดูคอมเมนต์เต็มที่ประกาศ event นี้ใน lib/booking.ts) ตามที่ขอเพิ่ม
+ *    ภายหลัง ("เอาการแจ้งเตือน[แถบข้อความบนหน้า]ไปใส่ในแจ้งเตือน[กระดิ่ง]
+ *    ด้วย") — ต่างจากแถบข้อความบนหน้าซึ่งหายไปเองเมื่อกดปิด/ทำอย่างอื่นต่อ
+ *    ส่วนนี้ "ค้างอยู่ในรายการ" จนกว่าจะกดล้างเอง ตามที่ขอเจาะจง (เก็บใน
+ *    หน่วยความจำของแท็บนี้เท่านั้น ไม่ persist ข้ามเซสชัน เหมือนส่วนอื่นๆ ของ
+ *    กระดิ่งนี้ — จำกัดไว้ไม่เกิน 20 รายการล่าสุดกันไม่ให้โตไม่มีที่สิ้นสุด)
+ *
+ * ส่วนที่ 1-2 แชร์ poll() เดียวกัน (ดึง GET /api/booking/bookings — และตอนนี้
  * GET /api/booking/trip-orders เพิ่มด้วยสำหรับส่วนที่ 2 — ทุก 15 วินาที) และ
  * useEffect เดียวกัน (ทำงานเสมอ ไม่ผูกกับ `enabled` อีกต่อไป เพราะส่วนที่ 2
- * ต้องทำงานสำหรับทุกบัญชี) มีแค่ตัวกระดิ่ง+แผงของส่วนที่ 1 เท่านั้นที่ยังคง
- * ถูกซ่อนเมื่อ `enabled` เป็น false
- *
- * Per explicit scope choices: no persisted notification history — "seen"
- * bookingIds/statuses live only in this tab's memory for this session, and
- * the panel always shows exactly "what's pending right now" (scrollable if
- * there are several), not a permanent log of past decisions.
+ * ต้องทำงานสำหรับทุกบัญชี) มีแค่ตัวกระดิ่ง+แผงของส่วนที่ 1 และ 3 เท่านั้นที่
+ * ยังคงถูกซ่อนเมื่อ `enabled` เป็น false
  */
 export default function NotificationBell({ enabled, username }: { enabled: boolean; username: string }) {
   const router = useRouter();
@@ -99,6 +106,9 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
   // null = ยังไม่เคย poll เลย เหมือน seenIds ด้านบน (ตั้ง baseline เงียบๆ
   // ครั้งแรก ไม่ toast ย้อนหลังสำหรับคำขอที่อนุมัติไปนานแล้วก่อนเปิดหน้านี้)
   const seenBookingStatuses = useRef<Map<string, Booking["approvalStatus"]> | null>(null);
+  // ส่วนที่ 3 — "กิจกรรมล่าสุด" ในแผงกระดิ่ง เก็บล่าสุดไว้บนสุด (unshift) จำกัด
+  // ไม่เกิน 20 รายการ ดูคอมเมนต์เต็มที่หัวไฟล์
+  const [recentNotices, setRecentNotices] = useState<{ id: string; text: string }[]>([]);
 
   const pushToast = useCallback((text: string, kind?: Toast["kind"]) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -107,6 +117,24 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, TOAST_DURATION_MS);
   }, []);
+
+  const pushRecent = useCallback((text: string) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setRecentNotices((prev) => [{ id, text }, ...prev].slice(0, 20));
+  }, []);
+
+  // รับข้อความแจ้งผลสำเร็จจากหน้าจองรถ (BookingDashboard.tsx) ผ่าน
+  // BOOKING_NOTICE_EVENT — เฉพาะ superadmin (ผูกกับ `enabled` เหมือนส่วนที่ 1
+  // เพราะข้อความเหล่านี้ล้วนมาจากการกระทำที่ต้องมีสิทธิ์ superadmin อยู่แล้ว)
+  useEffect(() => {
+    if (!enabled) return;
+    function onNotice(e: Event) {
+      const text = (e as CustomEvent<{ text: string }>).detail?.text;
+      if (text) pushRecent(text);
+    }
+    window.addEventListener(BOOKING_NOTICE_EVENT, onNotice);
+    return () => window.removeEventListener(BOOKING_NOTICE_EVENT, onNotice);
+  }, [enabled, pushRecent]);
 
   const poll = useCallback(async () => {
     try {
@@ -254,13 +282,20 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
     setOpen(false);
   }
 
-  function handleTripOrderCreated({ tripOrder }: { tripOrder: TripOrder; bookings: Booking[] }) {
+  function handleTripOrderCreated({ tripOrder, bookings: updatedBookings }: { tripOrder: TripOrder; bookings: Booking[] }) {
     setApprovalPanel((prev) => ({
       ...prev,
       pending: prev.pending.filter((b) => !tripOrder.bookingIds.includes(b.bookingId)),
     }));
     for (const bookingId of tripOrder.bookingIds) seenIds.current?.delete(bookingId);
     setDispatchBooking(null);
+    // เก็บเข้า "กิจกรรมล่าสุด" ของกระดิ่งเองด้วย — ข้อความเดียวกับที่
+    // BookingDashboard.tsx ใช้ตอนอนุมัติผ่านหน้าจองรถโดยตรง (ดูคอมเมนต์ที่
+    // ประกาศ BOOKING_NOTICE_EVENT ใน lib/booking.ts) เพื่อให้การอนุมัติผ่าน
+    // ป็อปอัปนี้เองก็ขึ้นในรายการเดียวกันเช่นกัน ไม่ต้องรอ event จากที่อื่น
+    pushRecent(
+      `อนุมัติสำเร็จ (${tripOrder.resourceName} · คนขับ: ${tripOrder.driverName || "—"}) — รายการจองที่เกี่ยวข้อง ${updatedBookings.length.toLocaleString("th-TH")} รายการปรับสถานะเป็น "อนุญาต" ในปฏิทินแล้ว`
+    );
     // แจ้งหน้าจองรถ (BookingDashboard.tsx) ที่อาจเปิดอยู่พร้อมกัน (เช่น
     // อนุมัติจากป็อปอัปนี้ขณะดูปฏิทินอยู่) ให้รีเฟรชข้อมูลสดใหม่ทันที — ไม่งั้น
     // ปฏิทินจะยังค้างสถานะ "รออนุมัติ" เดิมจนกว่าจะรีเฟรชหน้าเอง เพราะสอง
@@ -350,6 +385,49 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
                     </ul>
                   )}
                 </div>
+                {/* ส่วนที่ 3 — "กิจกรรมล่าสุด" ตามที่ขอเพิ่มภายหลัง ("เอาการ
+                    แจ้งเตือน[แถบข้อความบนหน้าจองรถ]ไปใส่ในแจ้งเตือน[กระดิ่ง]
+                    ด้วย") ต่างจากแถบข้อความบนหน้าซึ่งหายไปเองเมื่อกดปิด ส่วนนี้
+                    ค้างอยู่ในรายการจนกว่าจะกดลบเอง (รายการเดียว/ล้างทั้งหมด)
+                    ตามที่ขอเจาะจง ดูคอมเมนต์เต็มที่หัวไฟล์ */}
+                {recentNotices.length > 0 && (
+                  <div className="border-t border-zinc-100 dark:border-zinc-800">
+                    <div className="flex items-center justify-between px-4 py-2">
+                      <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">กิจกรรมล่าสุด</span>
+                      <button
+                        type="button"
+                        onClick={() => setRecentNotices([])}
+                        className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+                      >
+                        ล้างทั้งหมด
+                      </button>
+                    </div>
+                    <ul className="max-h-52 space-y-1.5 overflow-y-auto px-2 pb-2">
+                      {recentNotices.map((n) => (
+                        <li
+                          key={n.id}
+                          className="flex items-start gap-1.5 rounded-lg bg-emerald-50/60 px-2.5 py-2 text-xs leading-5 text-zinc-700 dark:bg-emerald-950/20 dark:text-zinc-300"
+                        >
+                          <CheckCircle2
+                            size={13}
+                            strokeWidth={2}
+                            className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                            aria-hidden="true"
+                          />
+                          <span className="flex-1">{n.text}</span>
+                          <button
+                            type="button"
+                            onClick={() => setRecentNotices((prev) => prev.filter((x) => x.id !== n.id))}
+                            aria-label="ลบการแจ้งเตือนนี้"
+                            className="shrink-0 rounded-full p-0.5 text-zinc-400 transition-colors hover:bg-zinc-200/60 hover:text-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-700/60 dark:hover:text-zinc-300"
+                          >
+                            <XIcon size={12} strokeWidth={2} aria-hidden="true" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             </>
           )}

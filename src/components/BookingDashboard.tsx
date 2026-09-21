@@ -25,6 +25,7 @@ import { buildActionColorMap, actionColorVars, type ActionColor } from "@/lib/ac
 import {
   bookingColorMapKey,
   bookingStatusLabel,
+  BOOKING_NOTICE_EVENT,
   canApproveCarBooking,
   canCancelBooking,
   canEditBookingByManagement,
@@ -138,6 +139,15 @@ export default function BookingDashboard({
   // TripOrderModal เงียบๆ อย่างเดียว ผู้ใช้จึงไม่แน่ใจว่าสั่งงานสำเร็จหรือไม่
   // ตามที่รายงาน ("ไม่แสดงข้อความหลังจากการสั่งงาน")
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  /** แสดงแถบข้อความบนหน้านี้ (เหมือนเดิมทุกประการ) + ยิง BOOKING_NOTICE_EVENT
+   * ขนานกันไปให้กระดิ่งแจ้งเตือน (NotificationBell.tsx) เก็บข้อความเดียวกัน
+   * นี้เข้ารายการ "กิจกรรมล่าสุด" ของตัวเองด้วย ตามที่ขอเพิ่มภายหลัง ("เอาการ
+   * แจ้งเตือนในกล่อง 1 ไปใส่ในแจ้งเตือนกล่อง 2 ด้วย" — เลือกคงแถบเดิมไว้ ไม่
+   * ย้ายออก) ดูคอมเมนต์เต็มที่ BOOKING_NOTICE_EVENT ใน lib/booking.ts */
+  function notify(text: string) {
+    setSuccessMessage(text);
+    window.dispatchEvent(new CustomEvent(BOOKING_NOTICE_EVENT, { detail: { text } }));
+  }
   const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
   // รายการจองรถที่ "รออนุมัติ" ที่ถูกเลือกไว้เพื่อรวมออกใบสั่งงานเดียวกัน —
   // เลือกได้มากกว่า 1 รายการ นั่นคือฟีเจอร์ "รวมเที่ยว/คาร์พูล" ในตัว ไม่มี
@@ -434,7 +444,7 @@ export default function BookingDashboard({
     });
     setSelectedBookingIds(new Set());
     setTripOrderModalOpen(false);
-    setSuccessMessage(
+    notify(
       `อนุมัติสำเร็จ (${tripOrder.resourceName} · คนขับ: ${tripOrder.driverName || "—"}) — รายการจองที่เกี่ยวข้อง ${updatedBookings.length.toLocaleString("th-TH")} รายการปรับสถานะเป็น "อนุญาต" ในปฏิทินแล้ว`
     );
   }
@@ -460,7 +470,7 @@ export default function BookingDashboard({
     });
     setEditTripOrderTarget(null);
     if (addedBookings.length > 0) {
-      setSuccessMessage(
+      notify(
         `บันทึกการแก้ไขสำเร็จ — เพิ่มคำขอใหม่เข้าใบสั่งงานนี้ ${addedBookings.length.toLocaleString("th-TH")} รายการ`
       );
     }
