@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
-import { canApproveCarBooking } from "@/lib/booking";
+import { canApproveCarBooking, formatBookingDateTime } from "@/lib/booking";
 import { appendEditLog, createTripOrder, getBookingResources, getTripOrders } from "@/lib/sheets";
+import { driverCalendarUrl, notifyDriverGroup } from "@/lib/lineNotify";
 
 // Always live — see the identical comment on ../bookings/route.ts: a
 // dispatch changes what's still "pending" for every viewer, so this must
@@ -135,6 +136,19 @@ export async function POST(request: NextRequest) {
         request
       )}`,
     });
+
+    // แจ้งเตือนกลุ่ม LINE คนขับ — best-effort ล้วนๆ (ดูคอมเมนต์หัวไฟล์
+    // lib/lineNotify.ts) ไม่ await ผลลัพธ์เพื่อตัดสินใจอย่างอื่นต่อ และไม่
+    // เคย throw ออกมาเองอยู่แล้ว จึงไม่ต้องครอบ try/catch เพิ่มตรงนี้
+    const totalParticipants = bookings.reduce((sum, b) => sum + b.participants, 0);
+    void notifyDriverGroup(
+      `🚐 มีงานใหม่\n` +
+        `รถ: ${tripOrder.resourceName}\n` +
+        `คนขับ: ${tripOrder.driverName || "—"}\n` +
+        `ออกเดินทาง: ${formatBookingDateTime(tripOrder.startTime)}\n` +
+        `ผู้โดยสารรวม: ${totalParticipants.toLocaleString("th-TH")} คน\n` +
+        `ดูรายละเอียด: ${driverCalendarUrl(request.nextUrl.origin)}`
+    );
 
     return NextResponse.json({ tripOrder, bookings });
   } catch (err: unknown) {

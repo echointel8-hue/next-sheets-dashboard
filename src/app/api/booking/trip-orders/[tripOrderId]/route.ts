@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
 import { canApproveCarBooking, formatBookingDateTime } from "@/lib/booking";
 import { appendEditLog, getBookingResources, splitBookingFromTripOrder, updateTripOrder } from "@/lib/sheets";
+import { driverCalendarUrl, notifyDriverGroup } from "@/lib/lineNotify";
 
 export const dynamic = "force-dynamic";
 
@@ -149,6 +150,20 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           updated.driverName || "—"
         } — กลับเป็นรออนุมัติแล้ว ${requestAuditTag(request)}`,
       });
+
+      // แจ้งเตือนกลุ่ม LINE คนขับ — best-effort (ดูคอมเมนต์หัวไฟล์
+      // lib/lineNotify.ts)
+      void notifyDriverGroup(
+        `⚠️ มีรายการถูกแยกออกจากเที่ยว\n` +
+          `รถ: ${updated.resourceName}\n` +
+          `คนขับ: ${updated.driverName || "—"}\n` +
+          `${splitBooking.department || splitBooking.bookedByDisplayName || splitBooking.bookedByUsername} ` +
+          `(${formatBookingDateTime(splitBooking.startTime)} – ${formatBookingDateTime(
+            splitBooking.endTime
+          )}) ถูกแยกออก — เหลือ ${updated.bookingIds.length.toLocaleString("th-TH")} คำขอในเที่ยวนี้\n` +
+          `ดูรายละเอียด: ${driverCalendarUrl(request.nextUrl.origin)}`
+      );
+
       return NextResponse.json({ tripOrder: updated, booking: splitBooking });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -192,6 +207,22 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         addedBookings.length > 0 ? ` — เพิ่มเข้ามาใหม่ ${addedBookings.length} รายการ` : ""
       }) ${requestAuditTag(request)}`,
     });
+
+    // แจ้งเตือนกลุ่ม LINE คนขับ — best-effort (ดูคอมเมนต์หัวไฟล์
+    // lib/lineNotify.ts) แจ้งทุกครั้งที่แก้ไขสำเร็จ (รถ/คนขับ/เวลา/หมายเหตุ/
+    // เพิ่มคำขอ) ไม่แยกกรองว่าแก้ฟิลด์ไหนบ้าง ตามขอบเขตที่ตกลงกันไว้ — "ทุก
+    // เหตุการณ์ที่กระทบงานของคนขับ" ดู docs/line-driver-notify-plan.md
+    void notifyDriverGroup(
+      `✏️ แก้ไขงาน\n` +
+        `รถ: ${updated.resourceName}\n` +
+        `คนขับ: ${updated.driverName || "—"}\n` +
+        `เวลาออกเดินทาง: ${formatBookingDateTime(updated.startTime)}\n` +
+        (addedBookings.length > 0
+          ? `เพิ่มคำขอใหม่เข้ามา ${addedBookings.length.toLocaleString("th-TH")} รายการ\n`
+          : "") +
+        `ดูรายละเอียด: ${driverCalendarUrl(request.nextUrl.origin)}`
+    );
+
     return NextResponse.json({ tripOrder: updated, addedBookings });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

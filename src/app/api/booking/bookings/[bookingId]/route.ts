@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, requestAuditTag, verifySessionToken } from "@/lib/auth";
-import { canApproveCarBooking, canCancelBooking, canEditBookingByManagement } from "@/lib/booking";
-import { appendEditLog, cancelBooking, editBookingByManagement, getBookings, rejectCarBooking } from "@/lib/sheets";
+import { canApproveCarBooking, canCancelBooking, canEditBookingByManagement, formatBookingDateTime } from "@/lib/booking";
+import {
+  appendEditLog,
+  cancelBooking,
+  editBookingByManagement,
+  getBookings,
+  getTripOrders,
+  rejectCarBooking,
+} from "@/lib/sheets";
+import { driverCalendarUrl, notifyDriverGroup } from "@/lib/lineNotify";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +54,41 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       oldValue: "",
       newValue: `${cancelled.resourceName}: ${cancelled.startTime} - ${cancelled.endTime} ${requestAuditTag(request)}`,
     });
+
+    // แจ้งเตือนกลุ่ม LINE คนขับ — best-effort (ดูคอมเมนต์หัวไฟล์
+    // lib/lineNotify.ts) เฉพาะตอนคำขอที่ถูกยกเลิกเป็นการจองรถที่ "จ่ายรถแล้ว"
+    // จริงๆ (มี tripOrderId อยู่ — ยังรออนุมัติ/ถูกปฏิเสธไปแล้วไม่ต้องแจ้ง เพราะ
+    // ไม่เคยเป็นงานจริงของคนขับตั้งแต่แรก) — cancelBooking ไม่แตะ tripOrderId
+    // เลย (ดูคอมเมนต์ที่ฟังก์ชันนั้นใน lib/sheets.ts) จึงยังอ่านค่าเดิมได้ตรงนี้
+    if (cancelled.resourceType === "car" && cancelled.tripOrderId) {
+      // resourceName บนตัว Booking เองยังเป็นชื่อ placeholder ("รอบริหาร
+      // จัดสรร") เสมอ แม้จะจ่ายรถไปแล้ว — ชื่อรถ/คนขับจริงอยู่ที่ TripOrder
+      // เท่านั้น (ดูคอมเมนต์ที่ createTripOrder ใน lib/sheets.ts) จึงต้องดึง
+      // ใบสั่งงานมาประกอบข้อความ ไม่ใช้ cancelled.resourceName ตรงๆ
+      void (async () => {
+        try {
+          const tripOrders = await getTripOrders();
+          const trip = tripOrders.find((t) => t.tripOrderId === cancelled.tripOrderId);
+          if (!trip) return;
+          const remaining = trip.bookingIds.filter((id) => id !== cancelled.bookingId).length;
+          await notifyDriverGroup(
+            `❌ มีการยกเลิกคำขอในเที่ยว\n` +
+              `รถ: ${trip.resourceName}\n` +
+              `คนขับ: ${trip.driverName || "—"}\n` +
+              `${cancelled.department || cancelled.bookedByDisplayName || cancelled.bookedByUsername} ` +
+              `(${formatBookingDateTime(cancelled.startTime)} – ${formatBookingDateTime(
+                cancelled.endTime
+              )}) ถูกยกเลิก — เหลือ ${remaining.toLocaleString("th-TH")} คำขอในเที่ยวนี้\n` +
+              `ดูรายละเอียด: ${driverCalendarUrl(request.nextUrl.origin)}`
+          );
+        } catch (err: unknown) {
+          // Best-effort เหมือนกัน — อ่านใบสั่งงานเพิ่มล้มเหลวไม่ควรกระทบการ
+          // ยกเลิกที่สำเร็จไปแล้ว
+          console.error("[lineNotify] เตรียมข้อความแจ้งยกเลิกไม่สำเร็จ:", err);
+        }
+      })();
+    }
+
     return NextResponse.json({ booking: cancelled });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

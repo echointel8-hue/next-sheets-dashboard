@@ -11,6 +11,7 @@ import {
   hasBookingConflict,
   isBookingCancelled,
   PENDING_CAR_RESOURCE_NAME,
+  splitBookingDateTime,
   type Booking,
   type BookingApprovalStatus,
   type BookingResource,
@@ -2234,6 +2235,104 @@ export async function getTripOrders(): Promise<TripOrder[]> {
   return (values ?? [])
     .filter((row) => (row[0] ?? "").toString().trim() !== "")
     .map(rowToTripOrder);
+}
+
+/** วันที่ (YYYY-MM-DD) ตามเขตเวลา Asia/Bangkok ของ Date ที่ให้มา — เซิร์ฟเวอร์
+ * (Vercel) รันเป็น UTC แต่ startTime/endTime ของคำขอจองเก็บเป็นเวลาท้องถิ่น
+ * กรุงเทพฯ ตรงๆ (ดู splitBookingDateTime/bookingDateTimeToMillis ใน
+ * lib/booking.ts) ใช้เทียบ "วันนี้"/ช่วงวันข้างหน้าให้ตรงเขตเวลาเดียวกัน
+ * ไม่งั้นช่วงหัวค่ำ/ดึกจะเลื่อนวันผิดไป 1 วันเมื่อรันบนเซิร์ฟเวอร์ UTC — ใช้
+ * locale "en-CA" เพราะให้ผลลัพธ์เป็น YYYY-MM-DD ตรงตัว เทียบ string ต่อได้เลย
+ * เหมือน dateKey อื่นๆ ในระบบนี้ */
+function bangkokDateKey(date: Date): string {
+  return date.toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+}
+
+/** คำขอย่อยหนึ่งรายการที่ครอบคลุมอยู่ในเที่ยวรถเดียวกัน — เฉพาะฟิลด์ที่จำเป็น
+ * ต่องานขับรถจริงๆ ดูคอมเมนต์เต็มที่ getDriverTrips ด้านล่างว่าทำไมตัดฟิลด์
+ * อื่นออก (โดยเฉพาะเบอร์โทรผู้จอง) */
+export interface DriverTripRequestSummary {
+  department: string;
+  purpose: string;
+  destination: string;
+  participants: number;
+  startTime: string;
+  endTime: string;
+  cancelled: boolean;
+}
+
+/** เที่ยวรถหนึ่งเที่ยว (ใบสั่งงานเดินทางหนึ่งใบ) รูปแบบย่อสำหรับหน้าปฏิทินงาน
+ * คนขับสาธารณะ — ดู getDriverTrips ด้านล่าง */
+export interface DriverTripSummary {
+  tripOrderId: string;
+  resourceName: string;
+  driverName: string;
+  startTime: string;
+  endTime: string;
+  totalParticipants: number;
+  requests: DriverTripRequestSummary[];
+}
+
+/**
+ * ข้อมูลสำหรับหน้า /driver (ปฏิทินงานคนขับ) — สาธารณะ ไม่ต้องล็อกอิน ตามที่
+ * ออกแบบไว้ใน docs/line-driver-notify-plan.md เรียกทั้งจาก page.tsx ของ
+ * /driver เอง (server component, render ครั้งแรก) และจาก
+ * GET /api/public/driver-trips (client-side refresh เป็นระยะ) — รวม logic
+ * กรอง/แปลงข้อมูลไว้ที่นี่ที่เดียว กันโค้ดสองจุดเพี้ยนไปจากกัน
+ *
+ * เห็นเฉพาะเที่ยวรถที่ "จ่ายรถแล้ว" เท่านั้น (มีใบสั่งงานคุมอยู่จริง) — คำขอที่
+ * ยังรออนุมัติยังไม่ใช่งานจริงของคนขับ จึงไม่แสดง ตัดฟิลด์ที่ไม่จำเป็นต่องาน
+ * ขับรถออกทั้งหมด โดยเฉพาะเบอร์โทร/ชื่อผู้จอง (ข้อมูลส่วนบุคคล ไม่จำเป็นต้อง
+ * เผยแพร่แบบไม่ล็อกอิน — ถ้าคนขับต้องติดต่อผู้จองให้ประสานผ่านฝ่ายบริหารแทน)
+ * เหลือแค่กลุ่มงาน/วัตถุประสงค์/ปลายทาง/จำนวนคน
+ *
+ * จำกัดช่วงเวลาวันนี้ถึง +lookaheadDays วัน (ตามเขตเวลา Asia/Bangkok — ดู
+ * bangkokDateKey ด้านบน) กันข้อมูลย้อนหลังทั้งหมดถูกดึงออกไปโดยไม่จำเป็น —
+ * เรียงจากเวลาออกเดินทางเร็วสุดไปช้าสุด
+ */
+export async function getDriverTrips(lookaheadDays: number = 14): Promise<DriverTripSummary[]> {
+  const [bookings, tripOrders] = await Promise.all([getBookings(), getTripOrders()]);
+  const todayKey = bangkokDateKey(new Date());
+  const endKey = bangkokDateKey(new Date(Date.now() + lookaheadDays * 24 * 60 * 60 * 1000));
+  const bookingById = new Map(bookings.map((b) => [b.bookingId, b]));
+
+  const trips: DriverTripSummary[] = [];
+  for (const trip of tripOrders) {
+    const dateKey = splitBookingDateTime(trip.startTime)?.dateKey;
+    if (!dateKey || dateKey < todayKey || dateKey > endKey) continue;
+
+    const covered = trip.bookingIds
+      .map((id) => bookingById.get(id))
+      .filter((b): b is Booking => !!b && b.resourceType === "car");
+    if (covered.length === 0) continue;
+    // ทุกคำขอที่ครอบคลุมถูกยกเลิกหมดแล้ว — ไม่มีเที่ยวจริงเหลือให้คนขับไปแล้ว
+    if (covered.every((b) => isBookingCancelled(b))) continue;
+
+    const totalParticipants = covered
+      .filter((b) => !isBookingCancelled(b))
+      .reduce((sum, b) => sum + b.participants, 0);
+
+    trips.push({
+      tripOrderId: trip.tripOrderId,
+      resourceName: trip.resourceName,
+      driverName: trip.driverName,
+      startTime: trip.startTime,
+      endTime: trip.endTime,
+      totalParticipants,
+      requests: covered.map((b) => ({
+        department: b.department || b.bookedByDisplayName || b.bookedByUsername,
+        purpose: b.purpose,
+        destination: b.destination,
+        participants: b.participants,
+        startTime: b.startTime,
+        endTime: b.endTime,
+        cancelled: isBookingCancelled(b),
+      })),
+    });
+  }
+
+  trips.sort((a, b) => a.startTime.localeCompare(b.startTime));
+  return trips;
 }
 
 /** Dispatches one or more *pending* car bookings at once — appends the
