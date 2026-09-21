@@ -491,7 +491,9 @@ export default function TripOrderModal({
                   // ลำดับใหม่ตามที่ขอ ("จัดลำดับเพื่อความสวยงาม") — วันที่+
                   // ช่วงเวลาขึ้นก่อนบรรทัดเดียว (ไม่เขียนวันที่ซ้ำสองรอบเมื่อ
                   // เป็นวันเดียวกัน ดู formatBookingDateRange) ตามด้วยกลุ่มงาน/
-                  // วัตถุประสงค์ แล้วค่อยปลายทางท้ายสุด
+                  // วัตถุประสงค์ แล้วค่อยจำนวนผู้โดยสารของคำขอนั้นๆ (ตามที่ขอ
+                  // เพิ่มภายหลัง — ให้เห็นที่มาที่ไปของยอดรวมด้านล่าง) แล้วค่อย
+                  // ปลายทางท้ายสุด
                   <li key={b.bookingId} className="flex flex-col gap-0.5 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
                     <span className="font-medium text-zinc-800 dark:text-zinc-100">
                       {formatBookingDateRange(b.startTime, b.endTime)}
@@ -502,11 +504,15 @@ export default function TripOrderModal({
                         <span className="ml-1 text-emerald-700 dark:text-emerald-400">(เพิ่มเข้ามา)</span>
                       )}
                     </span>
+                    <span className="inline-flex items-center gap-1">
+                      <Users size={11} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                      {b.participants.toLocaleString("th-TH")} คน
+                    </span>
                     {b.destination && <span>(ปลายทาง: {b.destination})</span>}
                   </li>
                 ))}
               </ul>
-              <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+              <p className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
                 <Users size={12} strokeWidth={2} aria-hidden="true" className="shrink-0" />
                 รวมผู้โดยสารตามคำขอ {totalParticipants.toLocaleString("th-TH")} คน
               </p>
@@ -613,6 +619,10 @@ export default function TripOrderModal({
                           </span>
                           <span>
                             <BookingWhoAndPurpose booking={b} />
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <Users size={11} strokeWidth={2} aria-hidden="true" className="shrink-0" />
+                            {b.participants.toLocaleString("th-TH")} คน
                           </span>
                           {b.destination && <span>(ปลายทาง: {b.destination})</span>}
                         </span>
