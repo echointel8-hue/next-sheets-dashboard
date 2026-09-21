@@ -32,6 +32,19 @@ function combineDateTime(date: string, hour: string, minute: string): string {
   return date ? `${date}T${hour}:${minute}` : "";
 }
 
+/** ระยะห่างระหว่างขีดบอกเวลาบนเส้นเวลาการเดินทาง (นาที) — เลือกจาก "ก้าว"
+ * ที่ดูเป็นธรรมชาติ (15/30 นาที, 1/2/3/4/6/8/12 ชั่วโมง) ตัวแรกที่ทำให้ได้
+ * ขีดไม่เกิน ~8 ขีดตลอดทั้งเส้น ไม่ว่าเที่ยวนั้นจะสั้นแค่ครึ่งชั่วโมงหรือยาว
+ * ข้ามวัน ตามที่ขอเพิ่มภายหลัง ("บอกเวลาเป็นช่วงๆ...เห็นความห่างของเวลาได้
+ * ชัดเจนขึ้น") */
+function pickTickStepMinutes(domainSpanMin: number): number {
+  const steps = [15, 30, 60, 120, 180, 240, 360, 480, 720];
+  for (const step of steps) {
+    if (domainSpanMin / step <= 8) return step;
+  }
+  return 720;
+}
+
 /** "กลุ่มงาน/ผู้จอง — วัตถุประสงค์" — ตัดส่วน "— วัตถุประสงค์" ทิ้งเมื่อ
  * วัตถุประสงค์ว่างเปล่าหรือเป็นแค่เครื่องหมายขีด "-" เฉยๆ (ที่ผู้จองบางคน
  * กรอกไว้แทนความหมาย "ไม่มี/ไม่ระบุ") กันไม่ให้ขึ้นข้อความซ้อนกันแปลกๆ แบบ
@@ -328,6 +341,23 @@ export default function TripOrderModal({
     () => buildActionColorMap(includedBookings.map((b) => b.bookingId)),
     [includedBookings]
   );
+  // ขีดบอกเวลา — ตำแหน่ง (leftPct) คำนวณจาก timelineDomain เดียวกับแถบสีของ
+  // แต่ละคำขอด้านบน จึงอยู่แนวเดียวกันเป๊ะ ใช้ทั้งเป็นป้ายเวลาใต้เส้น และเป็น
+  // เส้นไกด์บางๆ พาดผ่านแต่ละแถบด้วย (ดูจุดที่ใช้ด้านล่าง) ตามที่ขอเพิ่มภายหลัง
+  const timelineTicks = useMemo(() => {
+    const domainSpan = Math.max(timelineDomain.endMin - timelineDomain.startMin, 1);
+    const step = pickTickStepMinutes(domainSpan);
+    const firstTick = Math.ceil(timelineDomain.startMin / step) * step;
+    const ticks: { min: number; label: string; leftPct: number }[] = [];
+    for (let m = firstTick; m <= timelineDomain.endMin; m += step) {
+      ticks.push({
+        min: m,
+        label: `${pad2(Math.floor(m / 60) % 24)}:${pad2(m % 60)}`,
+        leftPct: ((m - timelineDomain.startMin) / domainSpan) * 100,
+      });
+    }
+    return ticks;
+  }, [timelineDomain]);
 
   const [driverName, setDriverName] = useState(editing?.driverName ?? "");
   const [notes, setNotes] = useState(editing?.notes ?? "");
@@ -547,6 +577,17 @@ export default function TripOrderModal({
                           {row.label}
                         </span>
                         <div className="relative h-5 flex-1 rounded-full bg-zinc-200 dark:bg-zinc-700">
+                          {/* เส้นไกด์บางๆ ตามขีดเวลา — วางไว้ใต้แถบสี (ก่อนใน
+                              DOM) ให้ดูเป็นพื้นหลังเบาๆ ไม่แย่งความสนใจจากแถบสี
+                              เอง (recessive grid) ตามที่ขอเพิ่มภายหลัง */}
+                          {timelineTicks.map((tick) => (
+                            <span
+                              key={tick.min}
+                              className="absolute inset-y-0 w-px bg-zinc-300/70 dark:bg-zinc-600/70"
+                              style={{ left: `${tick.leftPct}%` }}
+                              aria-hidden="true"
+                            />
+                          ))}
                           {color && (
                             <div
                               className="absolute inset-y-0 rounded-full bg-[var(--seg-c)] dark:bg-[var(--seg-c-dark)]"
@@ -561,6 +602,27 @@ export default function TripOrderModal({
                       </div>
                     );
                   })}
+                  {/* แถวขีดบอกเวลา — จัดวางด้วย layout เดียวกับแถวแถบสีด้านบน
+                      ทุกประการ (spacer ซ้าย/ขวากว้างเท่ากัน) ตำแหน่งขีดจึง
+                      ตรงกับเส้นไกด์ในแถบสีเป๊ะ ตามที่ขอ ("บอกเวลาเป็นช่วงๆ...
+                      เห็นความห่างของเวลาได้ชัดเจนขึ้น") */}
+                  {timelineTicks.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="w-20 shrink-0" aria-hidden="true" />
+                      <div className="relative h-3.5 flex-1">
+                        {timelineTicks.map((tick) => (
+                          <span
+                            key={tick.min}
+                            className="absolute top-0 -translate-x-1/2 text-[10px] tabular-nums text-zinc-400 first:translate-x-0 last:translate-x-[-100%] dark:text-zinc-500"
+                            style={{ left: `${tick.leftPct}%` }}
+                          >
+                            {tick.label}
+                          </span>
+                        ))}
+                      </div>
+                      <span className="w-24 shrink-0" aria-hidden="true" />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
