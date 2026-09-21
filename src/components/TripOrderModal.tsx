@@ -692,36 +692,15 @@ export default function TripOrderModal({
               />
             </label>
 
-            <div className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
-              วันเดินทาง
-              {/* ไม่มีช่องให้แก้ — คำขอที่รวมกันได้ต้องเป็นวันเดียวกันทุก
-                  รายการอยู่แล้ว (บังคับไว้ตอนเลือก/เพิ่มคำขอด้านบน) จึงตรึง
-                  ไว้ตามวันที่ของคำขอที่เลือกไว้เลย ไม่ต้องให้ฝ่ายบริหารกรอกซ้ำ
-                  ตามที่ขอ */}
-              <p className={`${INPUT_CLASS} flex items-center bg-zinc-50 text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400`}>
-                {tripDateKey
-                  ? `${tripDateKey.slice(8, 10)}/${tripDateKey.slice(5, 7)}/${tripDateKey.slice(0, 4)}`
-                  : "—"}
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <div className="flex flex-1 flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
-                เวลาเริ่มต้น (รวม)
-                {/* ล็อกไว้ ไม่มีช่องให้แก้ไขเองแล้ว (ตามที่ขอเพิ่มภายหลัง) —
-                    ปรับอัตโนมัติล้วนๆ จากเวลาเริ่มเร็วที่สุด/สิ้นสุดช้าที่สุด
-                    ของคำขอที่เลือกไว้เท่านั้น (ดู autoTimeParts ด้านบน)
-                    เหมือนวันเดินทางด้านบนที่ล็อกไว้อยู่แล้วเช่นกัน */}
-                <p className={`${INPUT_CLASS} flex items-center bg-zinc-50 text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400`}>
-                  {startHour}:{startMinute} น.
-                </p>
-              </div>
-              <div className="flex flex-1 flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
-                เวลาสิ้นสุด (รวม)
-                <p className={`${INPUT_CLASS} flex items-center bg-zinc-50 text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400`}>
-                  {endHour}:{endMinute} น.
-                </p>
-              </div>
-            </div>
+            {/* ซ่อนบล็อก "วันเดินทาง"/"เวลาเริ่มต้น-สิ้นสุด (รวม)" ที่เคยอยู่
+                ตรงนี้ออกทั้งหมดตามที่ขอ — ข้อมูลชุดเดียวกันนี้ (วันที่+ช่วง
+                เวลารวม) แสดงซ้ำอยู่แล้วทั้งในกล่อง "คำขอการเดินทาง" ด้านบนสุด
+                และแถบ "เส้นเวลาการเดินทาง" (มุมขวาบน) เป็นข้อมูลอ่านอย่างเดียว
+                ล็อกไว้เหมือนกันทุกจุดอยู่แล้ว (ดู tripDateKey/startHour/
+                startMinute/endHour/endMinute ด้านบน) ไม่จำเป็นต้องแสดงซ้ำเป็น
+                ช่องอีกรอบด้านล่างนี้ — ตัวแปรเหล่านั้นยังใช้งานอยู่ที่อื่น
+                (startTime/endTime ที่ส่งไป API, เส้นเวลาการเดินทางด้านบน) จึง
+                ไม่ได้ลบออกจากโค้ด แค่ไม่เรนเดอร์เป็นช่องซ้ำตรงนี้อีกแล้ว */}
 
             <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
               หมายเหตุ (ไม่บังคับ)
