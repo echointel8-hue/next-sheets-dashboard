@@ -688,6 +688,23 @@ export interface ReportSettings {
    * it stays attached to the right entry through a reorder. Stored as a
    * JSON array, same as actionOptions/hiddenActionOptions. */
   detailRequiredActionOptions: string[];
+  /** Exact text of any actionOptions entries currently "ล็อก" (locked) —
+   * forced into every printing round's selection on
+   * MaintenanceReportBuilder's "เลือกรายการที่จะดำเนินการ" card and
+   * impossible to exclude from there (toggleActiveAction there is a no-op
+   * for a locked name) — for a checklist item IT must always carry out
+   * every round (e.g. a mandatory safety check), not just when someone
+   * remembers to tick it. Same membership-by-name convention as
+   * hiddenActionOptions/detailRequiredActionOptions above (stays attached to
+   * the right entry through a reorder, never disturbs buildActionColorMap's
+   * index-based colors). Unlike those two — bootstrap-only via
+   * manageReportActionList — toggling this one is open to any superadmin
+   * account, bootstrap or not (see lockReportActionOptions in
+   * lib/permissions.ts and canLockActionOptions in
+   * MaintenanceReportBuilder.tsx), per the hospital's explicit request.
+   * Stored as a JSON array, same as actionOptions/hiddenActionOptions/
+   * detailRequiredActionOptions. */
+  lockedActionOptions: string[];
   /** The order buildActionColorMap (lib/actionColors) actually assigns
    * colors in — deliberately NOT the same as actionOptions' own order, so
    * that reordering the settings list with the up/down-arrow buttons
@@ -724,6 +741,7 @@ export const DEFAULT_REPORT_SETTINGS: ReportSettings = {
   actionOptions: ["บำรุงรักษา"],
   hiddenActionOptions: [],
   detailRequiredActionOptions: [],
+  lockedActionOptions: [],
   actionColorOrder: ["บำรุงรักษา"],
 };
 
@@ -768,6 +786,7 @@ export async function getReportSettings(): Promise<ReportSettings> {
     actionOptions: [...DEFAULT_REPORT_SETTINGS.actionOptions],
     hiddenActionOptions: [...DEFAULT_REPORT_SETTINGS.hiddenActionOptions],
     detailRequiredActionOptions: [...DEFAULT_REPORT_SETTINGS.detailRequiredActionOptions],
+    lockedActionOptions: [...DEFAULT_REPORT_SETTINGS.lockedActionOptions],
     actionColorOrder: [...DEFAULT_REPORT_SETTINGS.actionColorOrder],
   };
   for (const key of REPORT_SETTINGS_KEYS) {
@@ -777,6 +796,7 @@ export async function getReportSettings(): Promise<ReportSettings> {
       key === "actionOptions" ||
       key === "hiddenActionOptions" ||
       key === "detailRequiredActionOptions" ||
+      key === "lockedActionOptions" ||
       key === "actionColorOrder"
     ) {
       // JSON array, not plain text — see the interface comment above.
@@ -785,15 +805,18 @@ export async function getReportSettings(): Promise<ReportSettings> {
         if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
           // actionOptions must never end up empty (nothing to print/pick
           // from) — hiddenActionOptions/detailRequiredActionOptions/
-          // actionColorOrder have no such floor, an empty array just means
-          // "nothing hidden/flagged/color-assigned yet" (actionColorOrder
-          // self-heals right below anyway).
+          // lockedActionOptions/actionColorOrder have no such floor, an
+          // empty array just means "nothing hidden/flagged/locked/
+          // color-assigned yet" (actionColorOrder self-heals right below
+          // anyway).
           if (key === "actionOptions") {
             if (parsed.length > 0) result.actionOptions = parsed as string[];
           } else if (key === "hiddenActionOptions") {
             result.hiddenActionOptions = parsed as string[];
           } else if (key === "detailRequiredActionOptions") {
             result.detailRequiredActionOptions = parsed as string[];
+          } else if (key === "lockedActionOptions") {
+            result.lockedActionOptions = parsed as string[];
           } else {
             result.actionColorOrder = parsed as string[];
           }

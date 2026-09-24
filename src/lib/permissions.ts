@@ -83,7 +83,8 @@ export type PermissionKey =
   | "accessEquipmentRegistry"
   | "manageUsers"
   | "manageReportActionList"
-  | "viewAllMaintenanceTasks";
+  | "viewAllMaintenanceTasks"
+  | "lockReportActionOptions";
 
 export const PERMISSION_KEYS: PermissionKey[] = [
   "approveCarBooking",
@@ -99,6 +100,7 @@ export const PERMISSION_KEYS: PermissionKey[] = [
   "manageUsers",
   "manageReportActionList",
   "viewAllMaintenanceTasks",
+  "lockReportActionOptions",
 ];
 
 /** Thai labels for the checkbox list in UserFormModal — kept here, next to
@@ -117,6 +119,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   manageUsers: "จัดการผู้ใช้งาน (เพิ่ม/แก้ไข/ปิดใช้งานบัญชี)",
   manageReportActionList: 'จัดการรายการ "การดำเนินการ" มาตรฐานในรายงาน',
   viewAllMaintenanceTasks: "ดูงานบำรุงรักษาของทุกคนในทีม (ไม่ใช่แค่ของตัวเอง)",
+  lockReportActionOptions: 'ล็อกรายการ "การดำเนินการ" ให้บังคับเลือกเสมอทุกครั้งที่พิมพ์รายงาน',
 };
 
 /** Keys reserved to the bootstrap account by default — never grantable to
@@ -153,8 +156,9 @@ export const NON_GRANTABLE_KEYS: PermissionKey[] = [
  * hospital pointed out that even the "superadmin ทั่วไป" tier (the keys NOT
  * in NON_GRANTABLE_KEYS: approveCarBooking, editBookingData,
  * cancelAnyBooking, manageEquipmentAllDept, addEquipment,
- * disposeRestoreEquipment, accessItDashboard, manageBookingResources) was
- * too much to let an "admin" account reach in full — ticking every one of
+ * disposeRestoreEquipment, accessItDashboard, manageBookingResources,
+ * lockReportActionOptions) was too much to let an "admin" account reach in
+ * full — ticking every one of
  * those still made an admin account functionally identical to a plain
  * superadmin, the exact problem this whole cap exists to prevent, just one
  * tier down. Only a role listed here has its grantable additions narrowed
@@ -231,6 +235,19 @@ export function defaultPermissionsForRole(role: Role, isBootstrap: boolean): Set
       "manageEquipmentAllDept",
       "addEquipment",
       "disposeRestoreEquipment",
+      // Locking a รายการ "การดำเนินการ" entry (forcing it into every print
+      // round's selection — see lockedActionOptions in lib/sheets.ts and
+      // MaintenanceReportBuilder's canLockActionOptions) is on by default
+      // for any superadmin, bootstrap or not — deliberately NOT reserved to
+      // bootstrap the way manageReportActionList (adding/renaming/reordering/
+      // deleting an entry) is, per the hospital's explicit request that a
+      // superadmin created through /manage/users should be able to set this
+      // lock too. "admin"/"user" never get this: GRANTABLE_EXTRA_KEYS_BY_ROLE
+      // below has its own narrow allow-list for each and doesn't include
+      // this key, so isGrantablePermission keeps it off the checkbox list
+      // for those two roles entirely (see that function's own comment) —
+      // exactly "superadmin only", without a one-off plain role check.
+      "lockReportActionOptions",
     ]);
   }
   if (role === "admin") {

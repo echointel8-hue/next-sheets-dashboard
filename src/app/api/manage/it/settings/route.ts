@@ -54,7 +54,11 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
   const b = body as Record<string, unknown>;
   const stringKeys: Exclude<
     keyof ReportSettings,
-    "actionOptions" | "hiddenActionOptions" | "detailRequiredActionOptions" | "actionColorOrder"
+    | "actionOptions"
+    | "hiddenActionOptions"
+    | "detailRequiredActionOptions"
+    | "lockedActionOptions"
+    | "actionColorOrder"
   >[] = [
     "orgName",
     "maintenanceFormTitle",
@@ -119,6 +123,13 @@ function readSettingsPayload(body: unknown): Partial<ReportSettings> | null {
     // is a perfectly normal, common state.
     out.detailRequiredActionOptions = (b.detailRequiredActionOptions as string[]).map((s) => s.trim()).filter(Boolean);
   }
+  if (b.lockedActionOptions !== undefined) {
+    if (!Array.isArray(b.lockedActionOptions) || !b.lockedActionOptions.every((x) => typeof x === "string")) return null;
+    // Same "no non-empty floor" as hiddenActionOptions/
+    // detailRequiredActionOptions above — "nothing locked" is a perfectly
+    // normal, common state.
+    out.lockedActionOptions = (b.lockedActionOptions as string[]).map((s) => s.trim()).filter(Boolean);
+  }
   // actionColorOrder is deliberately never read from the request body at
   // all — it's entirely server-derived (see updateReportSettings, which
   // always recomputes it from the current persisted order plus whatever
@@ -160,26 +171,52 @@ export async function PATCH(request: NextRequest) {
     // controls and renders every entry read-only for a non-bootstrap
     // account (see MaintenanceReportBuilder's canManageActionOptions) —
     // this is the actual boundary in case that UI is ever bypassed.
-    if (
+    const needsActionListCheck =
       !hasPermission(session, "manageReportActionList") &&
       (updates.actionOptions !== undefined ||
         updates.hiddenActionOptions !== undefined ||
-        updates.detailRequiredActionOptions !== undefined)
-    ) {
+        updates.detailRequiredActionOptions !== undefined);
+    // Locking/unlocking an entry (lockedActionOptions) is its own, separate
+    // boundary from the CRUD checks above — see lockReportActionOptions in
+    // lib/permissions.ts and lockedActionOptions' own comment in
+    // lib/sheets.ts. Open to any superadmin account, not just bootstrap,
+    // per the hospital's explicit request — deliberately checked
+    // independently so a non-bootstrap superadmin can save a lock/unlock
+    // toggle in the same PATCH that also (harmlessly, per sameStringList)
+    // re-sends the untouched actionOptions/hiddenActionOptions/
+    // detailRequiredActionOptions it isn't allowed to actually change.
+    const needsLockCheck = !hasPermission(session, "lockReportActionOptions") && updates.lockedActionOptions !== undefined;
+
+    if (needsActionListCheck || needsLockCheck) {
       const current = await getReportSettings();
-      const actionOptionsChanged =
-        updates.actionOptions !== undefined && !sameStringList(current.actionOptions, updates.actionOptions);
-      const hiddenChanged =
-        updates.hiddenActionOptions !== undefined &&
-        !sameStringList(current.hiddenActionOptions, updates.hiddenActionOptions);
-      const detailRequiredChanged =
-        updates.detailRequiredActionOptions !== undefined &&
-        !sameStringList(current.detailRequiredActionOptions, updates.detailRequiredActionOptions);
-      if (actionOptionsChanged || hiddenChanged || detailRequiredChanged) {
-        return NextResponse.json(
-          { error: "จัดการรายการ \"การดำเนินการ\" ได้เฉพาะบัญชีผู้ดูแลระบบหลักเท่านั้น" },
-          { status: 403 }
-        );
+
+      if (needsActionListCheck) {
+        const actionOptionsChanged =
+          updates.actionOptions !== undefined && !sameStringList(current.actionOptions, updates.actionOptions);
+        const hiddenChanged =
+          updates.hiddenActionOptions !== undefined &&
+          !sameStringList(current.hiddenActionOptions, updates.hiddenActionOptions);
+        const detailRequiredChanged =
+          updates.detailRequiredActionOptions !== undefined &&
+          !sameStringList(current.detailRequiredActionOptions, updates.detailRequiredActionOptions);
+        if (actionOptionsChanged || hiddenChanged || detailRequiredChanged) {
+          return NextResponse.json(
+            { error: "จัดการรายการ \"การดำเนินการ\" ได้เฉพาะบัญชีผู้ดูแลระบบหลักเท่านั้น" },
+            { status: 403 }
+          );
+        }
+      }
+
+      if (needsLockCheck) {
+        const lockedChanged =
+          updates.lockedActionOptions !== undefined &&
+          !sameStringList(current.lockedActionOptions, updates.lockedActionOptions);
+        if (lockedChanged) {
+          return NextResponse.json(
+            { error: 'ล็อกรายการ "การดำเนินการ" ได้เฉพาะบัญชีผู้ดูแลระบบ (superadmin) เท่านั้น' },
+            { status: 403 }
+          );
+        }
       }
     }
 

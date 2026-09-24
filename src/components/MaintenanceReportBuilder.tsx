@@ -24,6 +24,7 @@ import {
   Settings,
   Sparkles,
   Trash2,
+  Unlock,
   Wrench,
   X,
 } from "lucide-react";
@@ -580,6 +581,17 @@ export default function MaintenanceReportBuilder({
   // /api/manage/it/settings — this is a UI convenience, not the actual
   // security boundary.
   const canManageActionOptions = hasPermission(currentUser, "manageReportActionList");
+  // ล็อก/ปลดล็อก one รายการ "การดำเนินการ" entry (forcing it into every
+  // printing round's selection — see toggleLockedActionOption below) is a
+  // separate, broader permission than canManageActionOptions above: open to
+  // any superadmin account, bootstrap or not, per the hospital's explicit
+  // request — NOT restricted to bootstrap the way add/rename/reorder/delete
+  // still is. Backed by hasPermission()'s "lockReportActionOptions" key
+  // (lib/permissions.ts), on by default for every superadmin and never
+  // grantable to admin/user (see that key's own comment there). Enforced
+  // again server-side in /api/manage/it/settings — this is a UI convenience,
+  // not the actual security boundary.
+  const canLockActionOptions = hasPermission(currentUser, "lockReportActionOptions");
   // How many รายการ "การดำเนินการ" entries are already saved (and therefore
   // locked for non-bootstrap accounts) — starts at however many the page
   // loaded with, and grows whenever a save succeeds (see
@@ -600,14 +612,22 @@ export default function MaintenanceReportBuilder({
   // risk an unwanted item slipping onto the print because it defaulted to
   // "on". Not persisted anywhere (resets to "everything off" on reload).
   // See the "เลือกรายการที่จะดำเนินการ" card below and printActionOptions
-  // further down.
+  // further down. A locked entry (formSettings.lockedActionOptions — see
+  // that field's own comment in lib/sheets.ts) never starts here even
+  // though everything else does: it's forced ON for every round, not just
+  // this one, so it's excluded from "everything off" by design — see
+  // toggleActiveAction right below, which also refuses to add one here.
   const [excludedActionOptions, setExcludedActionOptions] = useState<string[]>(() =>
     cleanActionOptions(formSettings.actionOptions).filter(
-      (name) => !formSettings.hiddenActionOptions.includes(name)
+      (name) => !formSettings.hiddenActionOptions.includes(name) && !formSettings.lockedActionOptions.includes(name)
     )
   );
 
   function toggleActiveAction(name: string) {
+    // A locked entry can't be turned off for this round — the whole point
+    // of ล็อก is that IT can't skip it. See canLockActionOptions above for
+    // who can lock/unlock an entry in the first place.
+    if (formSettings.lockedActionOptions.includes(name)) return;
     setExcludedActionOptions((prev) =>
       prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
     );
@@ -977,10 +997,11 @@ export default function MaintenanceReportBuilder({
       return {
         ...prev,
         actionOptions: prev.actionOptions.filter((_, i) => i !== index),
-        // A removed entry has nothing left to hide — drop it from
-        // hiddenActionOptions too so that list never accumulates names
-        // that no longer exist.
+        // A removed entry has nothing left to hide, or lock, — drop it from
+        // hiddenActionOptions/lockedActionOptions too so neither list ever
+        // accumulates names that no longer exist.
         hiddenActionOptions: prev.hiddenActionOptions.filter((n) => n !== removed),
+        lockedActionOptions: prev.lockedActionOptions.filter((n) => n !== removed),
       };
     });
     setSettingsSaved(false);
@@ -1029,6 +1050,30 @@ export default function MaintenanceReportBuilder({
     setSettingsSaved(false);
   }
 
+  /** Superadmin-only (any superadmin, not just bootstrap — see
+   * canLockActionOptions above) ล็อก/ปลดล็อก toggle for one รายการ
+   * "การดำเนินการ" entry. Deliberately NOT gated behind canManageActionOptions
+   * the way toggleHiddenActionOption/toggleDetailRequiredActionOption/
+   * moveActionOption are — a non-bootstrap superadmin can lock or unlock an
+   * entry even though it still can't rename/reorder/hide/delete one. Like
+   * toggleHiddenActionOption, this never touches actionOptions itself — the
+   * entry stays at its exact array index (so its color from
+   * buildActionColorMap never shifts) — it only adds/removes the entry's
+   * exact text from lockedActionOptions. A locked entry can no longer be
+   * excluded from any single printing round (see toggleActiveAction/
+   * excludedActionOptions above) — it's forced into every round's selection
+   * until unlocked again. */
+  function toggleLockedActionOption(name: string) {
+    if (!canLockActionOptions) return;
+    setFormSettings((prev) => ({
+      ...prev,
+      lockedActionOptions: prev.lockedActionOptions.includes(name)
+        ? prev.lockedActionOptions.filter((n) => n !== name)
+        : [...prev.lockedActionOptions, name],
+    }));
+    setSettingsSaved(false);
+  }
+
   /** Bootstrap-only toggle for whether one รายการ "การดำเนินการ" entry needs
    * IT to write in a free-text detail when marking it taken — e.g. "อัปเกรด/
    * เปลี่ยนอะไหล่ฮาร์ดแวร์" needs to say *which* part. Same
@@ -1059,13 +1104,15 @@ export default function MaintenanceReportBuilder({
       const payload: ReportSettings = {
         ...formSettings,
         actionOptions: cleanedActionOptions,
-        // Drop any hidden-name/detail-required-name that no longer matches
-        // a real entry (e.g. it got removed, or a blank row it referenced
-        // was cleaned away) so neither list ever grows stale.
+        // Drop any hidden-name/detail-required-name/locked-name that no
+        // longer matches a real entry (e.g. it got removed, or a blank row
+        // it referenced was cleaned away) so none of these lists ever grow
+        // stale.
         hiddenActionOptions: formSettings.hiddenActionOptions.filter((n) => cleanedActionOptions.includes(n)),
         detailRequiredActionOptions: formSettings.detailRequiredActionOptions.filter((n) =>
           cleanedActionOptions.includes(n)
         ),
+        lockedActionOptions: formSettings.lockedActionOptions.filter((n) => cleanedActionOptions.includes(n)),
       };
       const res = await fetch("/api/manage/it/settings", {
         method: "PATCH",
@@ -1488,6 +1535,12 @@ export default function MaintenanceReportBuilder({
                         const detailRequired = opt.trim()
                           ? formSettings.detailRequiredActionOptions.includes(opt)
                           : false;
+                        // "บังคับเลือกเสมอ" (mandatory) — see toggleLockedActionOption
+                        // above. Named "mandatory" here, not "locked", so it never
+                        // gets confused with this row's own `locked` (an unrelated
+                        // concept: "already saved, this account can't edit/delete
+                        // it at all" — see that variable's own definition above).
+                        const mandatory = opt.trim() ? formSettings.lockedActionOptions.includes(opt) : false;
                         const color = opt.trim() ? colorForAction(opt) : null;
                         return (
                           <div key={idx} className={`flex items-center gap-2 ${hidden ? "opacity-50" : ""}`}>
@@ -1531,6 +1584,11 @@ export default function MaintenanceReportBuilder({
                                 {detailRequired && (
                                   <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
                                     มีช่องกรอกรายละเอียด
+                                  </span>
+                                )}
+                                {mandatory && (
+                                  <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-950/40 dark:text-amber-300">
+                                    บังคับเลือกเสมอ
                                   </span>
                                 )}
                               </span>
@@ -1579,6 +1637,29 @@ export default function MaintenanceReportBuilder({
                                 }`}
                               >
                                 <PenLine size={16} strokeWidth={2} aria-hidden="true" />
+                              </button>
+                            )}
+                            {canLockActionOptions && opt.trim() && (
+                              <button
+                                type="button"
+                                onClick={() => toggleLockedActionOption(opt)}
+                                title={
+                                  mandatory
+                                    ? "ยกเลิกบังคับ — IT จะเลือกไม่ใช้รายการนี้ในบางรอบได้อีกครั้ง"
+                                    : "บังคับเลือกเสมอ — รายการนี้จะถูกเลือกอัตโนมัติทุกครั้งที่พิมพ์ และ IT จะปิดใช้งานไม่ได้"
+                                }
+                                aria-label={mandatory ? "ยกเลิกบังคับเลือกเสมอ" : "บังคับเลือกเสมอ"}
+                                className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                                  mandatory
+                                    ? "border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300"
+                                    : "border-zinc-200 text-zinc-500 hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                                }`}
+                              >
+                                {mandatory ? (
+                                  <Lock size={16} strokeWidth={2} aria-hidden="true" />
+                                ) : (
+                                  <Unlock size={16} strokeWidth={2} aria-hidden="true" />
+                                )}
                               </button>
                             )}
                             {locked ? (
@@ -2012,7 +2093,11 @@ export default function MaintenanceReportBuilder({
                   onClick={() =>
                     setExcludedActionOptions(
                       cleanActionOptions(formSettings.actionOptions).filter(
-                        (name) => !formSettings.hiddenActionOptions.includes(name)
+                        (name) =>
+                          !formSettings.hiddenActionOptions.includes(name) &&
+                          // A locked entry can't be cleared out by "ล้างที่เลือก"
+                          // either — see toggleActiveAction's own guard above.
+                          !formSettings.lockedActionOptions.includes(name)
                       )
                     )
                   }
@@ -2029,15 +2114,25 @@ export default function MaintenanceReportBuilder({
                 .filter((name) => !formSettings.hiddenActionOptions.includes(name))
                 .map((name) => {
                   const active = !excludedActionOptions.includes(name);
+                  const mandatory = formSettings.lockedActionOptions.includes(name);
                   return (
                   <button
                     key={name}
                     type="button"
                     onClick={() => toggleActiveAction(name)}
+                    disabled={mandatory}
                     aria-pressed={active}
-                    title={active ? "คลิกเพื่อไม่ใช้รายการนี้ในรอบนี้" : "คลิกเพื่อใช้รายการนี้ในรอบนี้"}
+                    title={
+                      mandatory
+                        ? "รายการนี้ถูกล็อกให้บังคับเลือกเสมอทุกครั้งที่พิมพ์ — ปิดใช้งานไม่ได้"
+                        : active
+                        ? "คลิกเพื่อไม่ใช้รายการนี้ในรอบนี้"
+                        : "คลิกเพื่อใช้รายการนี้ในรอบนี้"
+                    }
                     className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-                      active
+                      mandatory
+                        ? "cursor-default border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
+                        : active
                         ? "border-zinc-200 bg-white text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
                         : "border-dashed border-zinc-200 bg-transparent text-zinc-400 line-through dark:border-zinc-700 dark:text-zinc-500"
                     }`}
@@ -2048,7 +2143,9 @@ export default function MaintenanceReportBuilder({
                       aria-hidden="true"
                     />
                     {name}
-                    {active ? (
+                    {mandatory ? (
+                      <Lock size={12} strokeWidth={2.5} aria-hidden="true" />
+                    ) : active ? (
                       <Check size={12} strokeWidth={2.5} aria-hidden="true" />
                     ) : (
                       <X size={12} strokeWidth={2.5} aria-hidden="true" />
