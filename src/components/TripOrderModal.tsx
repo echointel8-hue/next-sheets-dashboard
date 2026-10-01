@@ -8,12 +8,18 @@ import {
   splitBookingDateTime,
   type Booking,
   type BookingResource,
+  type Driver,
   type TripOrder,
 } from "@/lib/booking";
 import { buildActionColorMap, actionColorVars } from "@/lib/actionColors";
 
 const INPUT_CLASS =
   "h-11 rounded-lg border border-zinc-200 bg-white px-3 text-base text-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:disabled:bg-zinc-800/60 dark:disabled:text-zinc-500";
+
+// ค่าพิเศษของตัวเลือก "ชื่อพนักงานขับรถ" (select) ที่หมายถึง "สลับไปพิมพ์ชื่อ
+// เอง" — ไม่ใช่ driverId/ชื่อคนขับจริง ดูคอมเมนต์ที่ driverName/
+// manualDriverEntry state ด้านล่างสำหรับรายละเอียดทั้งหมด
+const DRIVER_MANUAL_OPTION = "__manual__";
 
 // เวลาเริ่ม/สิ้นสุดแยกวันที่+ชั่วโมง+นาที เหมือน BookingFormModal ทุกประการ —
 // คัดลอกชุดตัวช่วยเล็กๆ นี้มาเป็นชุดของตัวเองแทนการ import ข้ามไฟล์ ตาม
@@ -140,6 +146,7 @@ export default function TripOrderModal({
   bookings,
   candidateBookings,
   resources,
+  drivers,
   existingTripOrders,
   editing,
   onClose,
@@ -163,6 +170,12 @@ export default function TripOrderModal({
    * ไม่อยู่ในรายการนี้แล้ว (เช่น ถูกปิดใช้งานไปหลังออกใบสั่งงาน) คอมโพเนนต์นี้
    * จะเติมให้เองเพื่อให้ตัวเลือกเดิมยังแสดงถูกต้อง. */
   resources: BookingResource[];
+  /** คนขับที่เปิดใช้งานอยู่ — ใช้เป็นตัวเลือกใน select "ชื่อพนักงานขับรถ"
+   * ด้านล่าง แทนที่จะต้องพิมพ์ชื่อใหม่ทุกครั้ง (ดึงมาเป็นตัวเลือกในกระบวนการ
+   * จัดรถ ตามที่ขอ) ว่างได้ (ยังไม่มีคนขับลงทะเบียนไว้เลย) — คอมโพเนนต์นี้จะ
+   * สลับไปโหมดพิมพ์ชื่อเองอัตโนมัติเมื่อว่าง ดูคอมเมนต์ที่ manualDriverEntry
+   * ด้านล่าง. */
+  drivers: Driver[];
   /** ใบสั่งงานเดินทางทั้งหมดที่ออกไปแล้ว (ทุกคัน/ทุกวัน) — ใช้เช็คว่ารถคันไหน
    * "ไม่ว่าง" ในช่วงเวลาของใบสั่งงานนี้บ้าง (ถูกจัดไปทับกับใบสั่งงานอื่นแล้ว)
    * เพื่อล็อกไม่ให้เลือกซ้ำ ตามที่ขอเพิ่มภายหลัง — ดู conflictingResourceIds
@@ -370,6 +383,19 @@ export default function TripOrderModal({
   }, [timelineDomain]);
 
   const [driverName, setDriverName] = useState(editing?.driverName ?? "");
+  // true = ช่อง "ชื่อพนักงานขับรถ" แสดงเป็นกล่องพิมพ์ชื่อเอง (input ธรรมดา),
+  // false = แสดงเป็น select เลือกจากรายชื่อคนขับที่ลงทะเบียนไว้ (drivers
+  // prop) — ค่าเริ่มต้นคำนวณครั้งเดียวตอนเปิดหน้าต่าง (lazy initializer):
+  // ยังไม่มีคนขับในระบบเลย (drivers ว่าง) เริ่มเป็นโหมดพิมพ์เองเสมอ (ไม่มี
+  // อะไรให้เลือก); โหมดแก้ไขที่ชื่อคนขับเดิมไม่ตรงกับใครในรายชื่อพอดี (เช่น
+  // พิมพ์เองไว้ตั้งแต่ก่อนมีฟีเจอร์นี้ หรือคนขับคนนั้นถูกปิดใช้งานไปแล้ว) ก็
+  // เริ่มเป็นโหมดพิมพ์เองเช่นกัน เพื่อไม่ให้ชื่อเดิมหายไปจากจอ — นอกนั้นเริ่ม
+  // เป็นโหมด select เสมอ (รวมถึงตอนสร้างใหม่ที่มีคนขับให้เลือกแล้ว)
+  const [manualDriverEntry, setManualDriverEntry] = useState(() => {
+    if (drivers.length === 0) return true;
+    if (editing && editing.driverName && !drivers.some((d) => d.name === editing.driverName)) return true;
+    return false;
+  });
   const [notes, setNotes] = useState(editing?.notes ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -838,13 +864,58 @@ export default function TripOrderModal({
 
             <label className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
               ชื่อพนักงานขับรถ
-              <input
-                type="text"
-                value={driverName}
-                onChange={(e) => setDriverName(e.target.value)}
-                disabled={saving}
-                className={INPUT_CLASS}
-              />
+              {manualDriverEntry ? (
+                <>
+                  <input
+                    type="text"
+                    value={driverName}
+                    onChange={(e) => setDriverName(e.target.value)}
+                    disabled={saving}
+                    className={INPUT_CLASS}
+                  />
+                  {/* สลับกลับไปเลือกจากรายชื่อได้ก็ต่อเมื่อมีคนขับให้เลือกจริง
+                      — ถ้า drivers ว่างเปล่า ไม่มีประโยชน์ที่จะมีปุ่มนี้เลย */}
+                  {drivers.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualDriverEntry(false);
+                        // คงชื่อเดิมไว้ถ้าตรงกับคนขับในรายชื่อพอดี ไม่งั้นเริ่ม
+                        // ว่างใหม่ให้เลือกเอง (กันกรณีพิมพ์ชื่อที่ไม่มีในระบบ
+                        // ค้างอยู่ใน select ซึ่งไม่มีตัวเลือกนั้นให้เลือก)
+                        if (!drivers.some((d) => d.name === driverName)) setDriverName("");
+                      }}
+                      disabled={saving}
+                      className="self-start text-xs font-medium text-sky-600 hover:underline disabled:opacity-60 dark:text-sky-400"
+                    >
+                      เลือกจากรายชื่อคนขับที่มี
+                    </button>
+                  )}
+                </>
+              ) : (
+                <select
+                  value={driverName}
+                  onChange={(e) => {
+                    if (e.target.value === DRIVER_MANUAL_OPTION) {
+                      setManualDriverEntry(true);
+                      setDriverName("");
+                    } else {
+                      setDriverName(e.target.value);
+                    }
+                  }}
+                  disabled={saving}
+                  className={INPUT_CLASS}
+                >
+                  <option value="">-- เลือกคนขับ --</option>
+                  {drivers.map((d) => (
+                    <option key={d.driverId} value={d.name}>
+                      {d.name}
+                      {d.phone ? ` (${d.phone})` : ""}
+                    </option>
+                  ))}
+                  <option value={DRIVER_MANUAL_OPTION}>อื่นๆ (ระบุชื่อเอง)</option>
+                </select>
+              )}
             </label>
 
             {/* ซ่อนบล็อก "วันเดินทาง"/"เวลาเริ่มต้น-สิ้นสุด (รวม)" ที่เคยอยู่

@@ -54,6 +54,29 @@ export interface BookingResource {
   seatCount: number;
 }
 
+/** One registered driver (คนขับรถ) — a reusable entity the dispatch step
+ * (TripOrderModal) picks from instead of retyping a name/phone from
+ * scratch every time, per the hospital's explicit request ("ช่วยสร้างปุ่ม
+ * สำหรับกดแล้วเพิ่มผู้ขับรถ และจะได้สามารถดึงมาเป็นตัวเลือกในกระบวนการจัดรถ").
+ * Same soft-deactivate convention as BookingResource — never hard-deleted,
+ * so a past TripOrder's driverName (still just a free-text string snapshot,
+ * see TripOrder below) keeps its meaning even after the driver it came from
+ * is later deactivated. Management of this list is gated by its own
+ * dedicated permission key, "manageDrivers" (see canManageDrivers in
+ * lib/auth.ts) — deliberately separate from "manageBookingResources" even
+ * though the two are structurally similar, per the hospital's explicit
+ * request for a driver-specific grant. */
+export interface Driver {
+  driverId: string;
+  name: string;
+  /** เบอร์ติดต่อ — free text (not strictly validated as a phone number, same
+   * looseness as Booking.contactPhone elsewhere in this app). */
+  phone: string;
+  active: boolean;
+  createdAt: string;
+  createdByUsername: string;
+}
+
 /** Google Sheets caps a single cell at 50,000 characters — this keeps a
  * healthy safety margin under that ceiling (the row's other columns, plus
  * quoting/encoding overhead, all share the same request) while still

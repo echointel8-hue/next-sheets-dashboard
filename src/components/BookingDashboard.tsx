@@ -17,6 +17,7 @@ import {
   Phone,
   Settings,
   Truck,
+  UserCog,
   Users,
   X as XIcon,
 } from "lucide-react";
@@ -36,12 +37,14 @@ import {
   type Booking,
   type BookingResource,
   type BookingResourceType,
+  type Driver,
   type TripOrder,
 } from "@/lib/booking";
 import {
   canAccessEquipmentRegistryClient,
   canAccessItDashboardClient,
   canManageBookingResourcesClient,
+  canManageDriversClient,
   canManageUsersClient,
   roleLabelFor,
 } from "@/lib/roleLabel";
@@ -49,6 +52,8 @@ import type { PermissionKey } from "@/lib/permissions";
 import AppShell from "@/components/AppShell";
 import BookingResourceFormModal from "@/components/BookingResourceFormModal";
 import BookingResourceListModal from "@/components/BookingResourceListModal";
+import DriverFormModal from "@/components/DriverFormModal";
+import DriverListModal from "@/components/DriverListModal";
 import BookingFormModal from "@/components/BookingFormModal";
 import BookingCalendar from "@/components/BookingCalendar";
 import TripOrderModal from "@/components/TripOrderModal";
@@ -58,6 +63,11 @@ export interface BookingDashboardData {
   resources: BookingResource[];
   bookings: Booking[];
   tripOrders: TripOrder[];
+  /** คนขับรถทั้งหมด (active + ปิดใช้งาน) — มีความหมายเฉพาะหน้า /booking/car
+   * เท่านั้น (ดึงไปให้ TripOrderModal เลือกตอนออกใบสั่งงานเดินทาง) หน้า
+   * /booking/room ส่งเป็น [] เสมอ เหมือนกับที่ tripOrders ส่งเป็น [] บน
+   * หน้านั้น (ดูคอมเมนต์ใน app/booking/room/page.tsx) */
+  drivers: Driver[];
 }
 export type BookingLoadResult = BookingDashboardData | { error: string };
 
@@ -131,6 +141,19 @@ export default function BookingDashboard({
   // บนหน้าตลอดเวลาให้ทุกคนเห็น ย้ายมาซ่อนไว้หลังปุ่ม "จัดการข้อมูล..." ที่
   // เห็นได้เฉพาะ canManageResources เท่านั้นแทน ตามที่ขอ
   const [resourceListModalOpen, setResourceListModalOpen] = useState(false);
+  // สิทธิ์จัดการ "คนขับรถ" — key ของตัวเอง (manageDrivers) แยกจาก
+  // canManageResources ข้างบนโดยเจตนา ตามที่ขอ ("สร้างสิทธิ์ใหม่เฉพาะสำหรับ
+  // คนขับ") มีความหมายเฉพาะหน้า /booking/car เท่านั้น (ปุ่ม/popup ด้านล่าง
+  // เช็ค type === "car" ควบคู่กันเสมอ — ดูจุดที่ใช้)
+  const canManageDrivers = canManageDriversClient(
+    session.role,
+    session.isBootstrap,
+    session.extraPermissions,
+    session.revokedPermissions
+  );
+  const [driverModal, setDriverModal] = useState<{ mode: "add" | "edit"; driver?: Driver } | null>(null);
+  const [driverListModalOpen, setDriverListModalOpen] = useState(false);
+  const [togglingDriverId, setTogglingDriverId] = useState<string | null>(null);
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [togglingResourceId, setTogglingResourceId] = useState<string | null>(null);
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
@@ -174,6 +197,10 @@ export default function BookingDashboard({
   const resources = isError(data) ? [] : data.resources;
   const bookings = isError(data) ? [] : data.bookings;
   const tripOrders = isError(data) ? [] : data.tripOrders;
+  const drivers = isError(data) ? [] : data.drivers;
+  // ไม่ต้อง useMemo — คำนวณถูกๆ ทุกเรนเดอร์ก็พอ (เหมือน resources/bookings/
+  // tripOrders ด้านบนซึ่งเป็นแค่ plain const เช่นกัน ไม่ใช่ useMemo)
+  const activeDrivers = drivers.filter((d) => d.active);
 
   // `resources`/`bookings` above are freshly re-derived from `data` on
   // every render (not stable references), so depending on `data` itself —
@@ -280,26 +307,33 @@ export default function BookingDashboard({
    * ที่ useEffect ด้านล่างว่าใช้ทำอะไร */
   const refreshData = useCallback(async () => {
     try {
-      const [resourcesRes, bookingsRes, tripOrdersRes] = await Promise.all([
+      // คนขับรถมีความหมายเฉพาะรถเท่านั้น (ห้องประชุมไม่มีใบสั่งงานเดินทาง) —
+      // ดึงเฉพาะหน้า /booking/car เหมือนกับที่ tripOrders ถูกดึงจริงเฉพาะที่นั่น
+      // เช่นกัน (ดู handleTripOrderCreated/TRIP_ORDER_CHANGED_EVENT ด้านบนที่
+      // กันด้วย type !== "car" อยู่แล้ว)
+      const [resourcesRes, bookingsRes, tripOrdersRes, driversRes] = await Promise.all([
         fetch("/api/booking/resources", { cache: "no-store" }),
         fetch("/api/booking/bookings", { cache: "no-store" }),
         fetch("/api/booking/trip-orders", { cache: "no-store" }),
+        type === "car" ? fetch("/api/booking/drivers", { cache: "no-store" }) : Promise.resolve(null),
       ]);
       if (!resourcesRes.ok || !bookingsRes.ok) return;
       const resourcesJson = await resourcesRes.json().catch(() => ({}));
       const bookingsJson = await bookingsRes.json().catch(() => ({}));
       const tripOrdersJson = tripOrdersRes.ok ? await tripOrdersRes.json().catch(() => ({})) : {};
+      const driversJson = driversRes?.ok ? await driversRes.json().catch(() => ({})) : {};
       if (!Array.isArray(resourcesJson.resources) || !Array.isArray(bookingsJson.bookings)) return;
       setData({
         resources: resourcesJson.resources,
         bookings: bookingsJson.bookings,
         tripOrders: Array.isArray(tripOrdersJson.tripOrders) ? tripOrdersJson.tripOrders : [],
+        drivers: Array.isArray(driversJson.drivers) ? driversJson.drivers : [],
       });
     } catch {
       // best-effort — เน็ตสะดุดชั่วคราวแค่ไม่อัปเดตรอบนี้ ปรัชญาเดียวกับ
       // NotificationBell's poll()
     }
-  }, []);
+  }, [type]);
 
   // ฟัง TRIP_ORDER_CHANGED_EVENT (ดูคอมเมนต์ที่ประกาศไว้ใน lib/booking.ts) —
   // แก้บั๊ก "อนุมัติแล้วปฏิทินไม่อัปเดตทันที ต้องรีเฟรชเอง" กรณีที่การอนุมัติ
@@ -331,6 +365,40 @@ export default function BookingDashboard({
   function handleBookingSaved(booking: Booking) {
     setData((prev) => (isError(prev) ? prev : { ...prev, bookings: [...prev.bookings, booking] }));
     setBookingModalOpen(false);
+  }
+
+  function handleDriverSaved(driver: Driver) {
+    setData((prev) => {
+      if (isError(prev)) return prev;
+      const exists = prev.drivers.some((d) => d.driverId === driver.driverId);
+      const nextDrivers = exists
+        ? prev.drivers.map((d) => (d.driverId === driver.driverId ? driver : d))
+        : [...prev.drivers, driver];
+      return { ...prev, drivers: nextDrivers };
+    });
+    setDriverModal(null);
+  }
+
+  async function toggleDriverActive(driver: Driver) {
+    setTogglingDriverId(driver.driverId);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/booking/drivers/${driver.driverId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !driver.active }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(json.error || "บันทึกไม่สำเร็จ");
+        return;
+      }
+      handleDriverSaved(json.driver as Driver);
+    } catch {
+      setActionError("บันทึกไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setTogglingDriverId(null);
+    }
   }
 
   async function toggleResourceActive(resource: BookingResource) {
@@ -610,20 +678,37 @@ export default function BookingDashboard({
                 ไว้หลังปุ่มนี้แทน เห็นได้เฉพาะผู้มีสิทธิจัดการทรัพยากร
                 (canManageResources) เท่านั้น ตามที่ขอ — เนื้อหาเดิมทั้งหมด
                 ย้ายไปอยู่ใน BookingResourceListModal ซึ่งเปิดจากปุ่มนี้ */}
-            {canManageResources && (
+            {(canManageResources || (type === "car" && canManageDrivers)) && (
               <div className={`${CARD} flex flex-wrap items-center justify-between gap-2 p-4`}>
                 <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
                   <TypeIcon size={15} strokeWidth={2} aria-hidden="true" />
                   ข้อมูล{typeLabel}ในระบบ
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setResourceListModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                  <Settings size={14} strokeWidth={2} aria-hidden="true" />
-                  จัดการข้อมูล{typeLabel}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {canManageResources && (
+                    <button
+                      type="button"
+                      onClick={() => setResourceListModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      <Settings size={14} strokeWidth={2} aria-hidden="true" />
+                      จัดการข้อมูล{typeLabel}
+                    </button>
+                  )}
+                  {/* เฉพาะรถเท่านั้น — คนขับมีความหมายกับการออกใบสั่งงานเดินทาง
+                      (TripOrderModal) ของการจองรถเท่านั้น ห้องประชุมไม่มี
+                      ขั้นตอนนี้เลย (ดูคอมเมนต์ที่ canManageDrivers ด้านบน) */}
+                  {type === "car" && canManageDrivers && (
+                    <button
+                      type="button"
+                      onClick={() => setDriverListModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      <UserCog size={14} strokeWidth={2} aria-hidden="true" />
+                      จัดการข้อมูลคนขับรถ
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -937,6 +1022,24 @@ export default function BookingDashboard({
           onSaved={handleResourceSaved}
         />
       )}
+      {driverListModalOpen && (
+        <DriverListModal
+          drivers={drivers}
+          togglingDriverId={togglingDriverId}
+          onAdd={() => setDriverModal({ mode: "add" })}
+          onEdit={(driver) => setDriverModal({ mode: "edit", driver })}
+          onToggleActive={toggleDriverActive}
+          onClose={() => setDriverListModalOpen(false)}
+        />
+      )}
+      {driverModal && (
+        <DriverFormModal
+          mode={driverModal.mode}
+          driver={driverModal.driver}
+          onClose={() => setDriverModal(null)}
+          onSaved={handleDriverSaved}
+        />
+      )}
       {bookingModalOpen && (
         <BookingFormModal
           resourceType={type}
@@ -955,6 +1058,7 @@ export default function BookingDashboard({
             (b) => b.approvalStatus === "pending" && !isBookingCancelled(b) && !selectedBookingIds.has(b.bookingId)
           )}
           resources={activeTypeResources}
+          drivers={activeDrivers}
           existingTripOrders={activeTripOrders}
           onClose={() => setTripOrderModalOpen(false)}
           onCreated={handleTripOrderCreated}
@@ -972,6 +1076,7 @@ export default function BookingDashboard({
           // เพราะโหมดแก้ไขนี้ไม่ได้ใช้ selectedBookingIds เลย)
           candidateBookings={typeBookings.filter((b) => b.approvalStatus === "pending" && !isBookingCancelled(b))}
           resources={activeTypeResources}
+          drivers={activeDrivers}
           existingTripOrders={activeTripOrders}
           onClose={() => setEditTripOrderTarget(null)}
           onUpdated={handleTripOrderUpdated}

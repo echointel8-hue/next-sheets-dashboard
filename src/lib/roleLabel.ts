@@ -57,6 +57,23 @@ export function canManageBookingResourcesClient(
 }
 
 /**
+ * Client-safe mirror of lib/auth.ts's canManageDrivers() — same duplication
+ * reasoning and same hasPermission()-backed upgrade as
+ * canManageBookingResourcesClient above ("manageDrivers" key). Used only to
+ * decide whether BookingDashboard shows the "จัดการข้อมูลคนขับรถ" controls —
+ * the real authorization decision always stays server-side in the driver
+ * API routes.
+ */
+export function canManageDriversClient(
+  role: Role,
+  isBootstrap: boolean,
+  extraPermissions?: PermissionKey[],
+  revokedPermissions?: PermissionKey[]
+): boolean {
+  return hasPermission({ role, isBootstrap, extraPermissions, revokedPermissions }, "manageDrivers");
+}
+
+/**
  * Client-safe mirror of lib/auth.ts's canAccessEquipmentRegistry() — a
  * superadmin always passes unconditionally (role check, never disturbed by
  * anything below), admin/user go through hasPermission()'s

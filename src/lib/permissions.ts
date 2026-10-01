@@ -74,6 +74,7 @@ export type PermissionKey =
   | "approveCarBooking"
   | "editBookingData"
   | "manageBookingResources"
+  | "manageDrivers"
   | "cancelAnyBooking"
   | "manageEquipmentAllDept"
   | "addEquipment"
@@ -90,6 +91,7 @@ export const PERMISSION_KEYS: PermissionKey[] = [
   "approveCarBooking",
   "editBookingData",
   "manageBookingResources",
+  "manageDrivers",
   "cancelAnyBooking",
   "manageEquipmentAllDept",
   "addEquipment",
@@ -109,6 +111,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   approveCarBooking: "อนุมัติ/ไม่อนุมัติ/ออกใบสั่งงานการจองรถ",
   editBookingData: "แก้ไขข้อมูลรายละเอียดการจอง (วัตถุประสงค์/ปลายทาง/ผู้ร่วมเดินทาง ฯลฯ)",
   manageBookingResources: "จัดการรถ/ห้องประชุม (เพิ่ม/แก้ไข/ปิดใช้งาน)",
+  manageDrivers: "จัดการข้อมูลคนขับรถ (เพิ่ม/แก้ไข/ปิดใช้งาน)",
   cancelAnyBooking: "ยกเลิกการจองของผู้อื่นได้ (ทุกแผนก)",
   manageEquipmentAllDept: "แก้ไขรายการครุภัณฑ์ได้ทุกแผนก (ไม่จำกัดเฉพาะแผนกตัวเอง)",
   addEquipment: "เพิ่มรายการครุภัณฑ์ใหม่",
@@ -157,8 +160,8 @@ export const NON_GRANTABLE_KEYS: PermissionKey[] = [
  * in NON_GRANTABLE_KEYS: approveCarBooking, editBookingData,
  * cancelAnyBooking, manageEquipmentAllDept, addEquipment,
  * disposeRestoreEquipment, accessItDashboard, manageBookingResources,
- * lockReportActionOptions) was too much to let an "admin" account reach in
- * full — ticking every one of
+ * manageDrivers, lockReportActionOptions) was too much to let an "admin"
+ * account reach in full — ticking every one of
  * those still made an admin account functionally identical to a plain
  * superadmin, the exact problem this whole cap exists to prevent, just one
  * tier down. Only a role listed here has its grantable additions narrowed

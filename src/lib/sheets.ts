@@ -16,6 +16,7 @@ import {
   type BookingApprovalStatus,
   type BookingResource,
   type BookingResourceType,
+  type Driver,
   type TripOrder,
 } from "@/lib/booking";
 
@@ -36,6 +37,7 @@ export type {
   BookingApprovalStatus,
   BookingResource,
   BookingResourceType,
+  Driver,
   TripOrder,
 };
 
@@ -309,6 +311,13 @@ export type EditLogAction =
   // Bookings tab section near the end of this file.
   | "เพิ่มทรัพยากรจอง"
   | "แก้ไขทรัพยากรจอง"
+  // คนขับรถ (Drivers tab) — see the Drivers tab section near the end of
+  // this file and /api/booking/drivers*. Same "เพิ่ม/แก้ไข" split as
+  // เพิ่มทรัพยากรจอง/แก้ไขทรัพยากรจอง above, kept as its own distinct pair
+  // (not reusing those two) so the audit log can tell a driver change apart
+  // from a car/room change at a glance.
+  | "เพิ่มคนขับรถ"
+  | "แก้ไขคนขับรถ"
   | "จองทรัพยากร"
   | "ยกเลิกการจอง"
   // "อนุมัติการจองรถ" retired from the write path (approval now always goes
@@ -1832,6 +1841,162 @@ export async function updateBookingResource(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`บันทึกรถ/ห้องประชุมไม่สำเร็จ: ${message}`);
+  }
+
+  return merged;
+}
+
+// ---------------------------------------------------------------------------
+// Drivers tab — คนขับรถ (vehicle-booking feature, see the BookingResources
+// section above). Same manually-created-tab convention as every other tab
+// here; same soft-deactivate convention as BookingResources (never
+// hard-deleted, so a past TripOrder's driverName snapshot keeps its meaning
+// even once the driver it came from is deactivated). Reading/listing is open
+// to any logged-in account (TripOrderModal needs the active list to offer as
+// dropdown options to anyone dispatching a trip); only *managing* this list
+// (add/edit/toggle-active) is restricted — see canManageDrivers in
+// lib/auth.ts and the "manageDrivers" permission key in lib/permissions.ts,
+// deliberately its own dedicated key rather than reusing
+// "manageBookingResources", per the hospital's explicit request.
+// ---------------------------------------------------------------------------
+
+const DRIVERS_HEADER_ROW = ["DriverId", "Name", "Phone", "Active", "CreatedAt", "CreatedByUsername"];
+
+function getDriversTab(): string {
+  return process.env.GOOGLE_SHEET_DRIVERS_TAB?.trim() || "Drivers";
+}
+
+function rowToDriver(row: string[]): Driver {
+  const col = (i: number) => (row[i] ?? "").toString();
+  return {
+    driverId: col(0).trim(),
+    name: col(1),
+    phone: col(2),
+    active: parseActive(col(3)),
+    createdAt: col(4),
+    createdByUsername: col(5),
+  };
+}
+
+function driverToRow(d: Driver): string[] {
+  return [d.driverId, d.name, d.phone, d.active ? "Y" : "N", d.createdAt, d.createdByUsername];
+}
+
+/** Every driver (active + deactivated) — callers filter by `active`
+ * themselves, same rationale as getBookingResources. */
+export async function getDrivers(): Promise<Driver[]> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getDriversTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:F100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      // Tab doesn't exist yet — no drivers have ever been added.
+      return [];
+    }
+    throw new Error(`อ่านรายชื่อคนขับรถไม่สำเร็จ: ${message}`);
+  }
+
+  return (values ?? []).filter((row) => (row[0] ?? "").toString().trim() !== "").map(rowToDriver);
+}
+
+/** Adds one new driver. Throws a clear "create the tab first" Thai error if
+ * the Drivers tab doesn't exist yet — same pattern as createBookingResource. */
+export async function createDriver(input: {
+  name: string;
+  phone: string;
+  createdByUsername: string;
+}): Promise<Driver> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getDriversTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  const driver: Driver = {
+    driverId: randomUUID(),
+    name: input.name,
+    phone: input.phone,
+    active: true,
+    createdAt: new Date().toISOString(),
+    createdByUsername: input.createdByUsername,
+  };
+
+  try {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: `${tab}!A1`,
+      // RAW, not USER_ENTERED — see the identical note on
+      // createBookingResource above (CreatedAt is a plain ISO datetime
+      // string; USER_ENTERED lets Sheets "helpfully" reformat date-looking
+      // text, silently changing what a later values.get() reads back).
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: [driverToRow(driver)] },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("Unable to parse range")) {
+      throw new Error(
+        `ยังไม่พบแท็บชื่อ "${tab}" ในสเปรดชีต — สร้างแท็บนี้ก่อน (หัวตาราง: ${DRIVERS_HEADER_ROW.join(" | ")}) หรือตั้งค่า GOOGLE_SHEET_DRIVERS_TAB ให้ตรงกับชื่อแท็บจริง`
+      );
+    }
+    throw new Error(`เพิ่มคนขับรถไม่สำเร็จ: ${message}`);
+  }
+
+  return driver;
+}
+
+/** Merges `updates` into the driver identified by `driverId` and rewrites
+ * just that one sheet row — find-by-id scan, same reasoning as
+ * updateBookingResource. Toggling `active` to false just removes the driver
+ * from the choosable list for *new* trip orders (see getDrivers callers);
+ * it never touches a past TripOrder's already-snapshotted driverName
+ * string. */
+export async function updateDriver(
+  driverId: string,
+  updates: Partial<Pick<Driver, "name" | "phone" | "active">>
+): Promise<Driver> {
+  const spreadsheetId = getEnv("GOOGLE_SHEET_ID");
+  const tab = getDriversTab();
+  const sheets = google.sheets({ version: "v4", auth: sheetsAuth() });
+
+  let values: string[][] | undefined;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tab}!A2:F100000`,
+    });
+    values = res.data.values as string[][] | undefined;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`อ่านรายชื่อคนขับรถไม่สำเร็จ: ${message}`);
+  }
+
+  const rows = values ?? [];
+  const idx = rows.findIndex((row) => (row[0] ?? "").toString().trim() === driverId);
+  if (idx === -1) {
+    throw new Error("ไม่พบคนขับรายนี้ — อาจถูกลบไปแล้ว");
+  }
+  const merged: Driver = { ...rowToDriver(rows[idx]), ...updates };
+  const sheetRow = idx + 2;
+
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${tab}!A${sheetRow}:F${sheetRow}`,
+      valueInputOption: "RAW",
+      requestBody: { values: [driverToRow(merged)] },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`บันทึกข้อมูลคนขับรถไม่สำเร็จ: ${message}`);
   }
 
   return merged;

@@ -155,6 +155,27 @@ export function canManageBookingResources(
 }
 
 /**
+ * Managing the driver list (คนขับรถ — adding one, editing name/phone,
+ * toggling active/inactive) so it can be picked from a dropdown in
+ * TripOrderModal instead of retyped as free text every dispatch. Same
+ * bootstrap-plus-opt-in-superadmin reach as canManageBookingResources right
+ * above, but backed by its own dedicated "manageDrivers" key rather than
+ * reusing "manageBookingResources" — per the hospital's explicit request
+ * for driver-list management to be its own separately grantable capability,
+ * not bundled with car/room resource management. *Reading* the driver list
+ * (to populate the dropdown) stays open to every logged-in account that can
+ * reach the car-dispatch flow at all — see /api/booking/drivers' GET
+ * handler — this only gates the list itself.
+ *
+ * Backed by hasPermission()'s "manageDrivers" key.
+ */
+export function canManageDrivers(
+  session: Pick<SessionPayload, "role" | "isBootstrap" | "extraPermissions" | "revokedPermissions">
+): boolean {
+  return hasPermission(session, "manageDrivers");
+}
+
+/**
  * Reaching the general equipment registry (/manage — view/edit rows,
  * scoped to the account's own department unless also granted
  * "manageEquipmentAllDept") at all. A superadmin always gets this

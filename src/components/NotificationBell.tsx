@@ -10,6 +10,7 @@ import {
   TRIP_ORDER_CHANGED_EVENT,
   type Booking,
   type BookingResource,
+  type Driver,
   type TripOrder,
 } from "@/lib/booking";
 import TripOrderModal from "@/components/TripOrderModal";
@@ -136,6 +137,9 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
   // ป็อปอัปนี้ (ปกติแล้วหน้าจองรถเองมีรายการนี้อยู่แล้ว แต่ป็อปอัปนี้ลอยอยู่
   // เหนือทุกหน้า จึงต้องดึงเองแยกต่างหาก)
   const [carResources, setCarResources] = useState<BookingResource[]>([]);
+  // คนขับที่เปิดใช้งานอยู่ — ดึงแบบ best-effort เดียวกับ carResources ด้านบน
+  // เมื่อเปิด TripOrderModal จากป็อปอัปนี้ (ดู openDispatch ด้านล่าง)
+  const [carDrivers, setCarDrivers] = useState<Driver[]>([]);
   const [dispatchBooking, setDispatchBooking] = useState<Booking | null>(null);
   // null = no poll has completed yet, so the very first result is treated
   // as "what's already waiting" (one summary toast) rather than diffed
@@ -405,9 +409,10 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
   }
 
   /** Opens TripOrderModal for exactly this one booking — fetches the
-   * active car resource list on demand (best-effort; the modal itself
-   * still shows a clear "ไม่มีรถที่เปิดใช้งาน" state if this comes back
-   * empty, same as BookingFormModal). */
+   * active car resource list and active driver list on demand (best-effort;
+   * the modal itself still shows a clear "ไม่มีรถที่เปิดใช้งาน"/falls back to
+   * free-text driver entry if either comes back empty, same as
+   * BookingFormModal/BookingDashboard). */
   async function openDispatch(booking: Booking) {
     setActionError(null);
     if (carResources.length === 0) {
@@ -419,6 +424,17 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
         }
       } catch {
         // best-effort — TripOrderModal still opens and shows "ไม่มีรถที่เปิดใช้งาน"
+      }
+    }
+    if (carDrivers.length === 0) {
+      try {
+        const res = await fetch("/api/booking/drivers", { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(data.drivers)) {
+          setCarDrivers((data.drivers as Driver[]).filter((d) => d.active));
+        }
+      } catch {
+        // best-effort — TripOrderModal ยังเปิดได้ปกติ แค่ตกไปโหมดพิมพ์ชื่อคนขับเอง
       }
     }
     setDispatchBooking(booking);
@@ -710,6 +726,7 @@ export default function NotificationBell({ enabled, username }: { enabled: boole
           // จัดรถอยู่ตอนนี้ออกก่อน
           candidateBookings={pending.filter((b) => b.bookingId !== dispatchBooking.bookingId)}
           resources={carResources}
+          drivers={carDrivers}
           existingTripOrders={approvalPanel.tripOrders}
           onClose={() => setDispatchBooking(null)}
           onCreated={handleTripOrderCreated}
